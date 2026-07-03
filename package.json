@@ -1,0 +1,26 @@
+{
+  "name": "@edgecommons/edge-console-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Edge Console workspace: server (Node backend on @edgecommons/ggcommons), ui (IBM Carbon/React), protocol (shared WS API + envelope types).",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "protocol",
+    "server",
+    "ui",
+    "local/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w protocol && npm run build -w server && npm run build -w ui",
+    "test": "npm run test -w server",
+    "coverage": "npm run coverage -w server",
+    "lint": "eslint .",
+    "link:lib": "node scripts/link-sibling-lib.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "typescript": "^5",
+    "typescript-eslint": "^8.46.4"
+  }
+}

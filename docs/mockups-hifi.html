@@ -1,0 +1,700 @@
+<title>Edge Console — High-Fidelity Carbon Prototype</title>
+<style>
+  /* ============ IBM Carbon tokens (g10 light) ============ */
+  :root{
+    --bg:#f4f4f4; --layer:#ffffff; --layer-2:#f4f4f4; --layer-accent:#e0e0e0; --field:#f4f4f4; --field-hover:#e8e8e8;
+    --text:#161616; --text-2:#525252; --text-help:#6f6f6f; --text-place:#a8a8a8; --text-on:#ffffff; --text-inv:#ffffff;
+    --border-sub:#e0e0e0; --border-strong:#8d8d8d; --border-inv:#161616;
+    --link:#0f62fe; --link-hover:#0043ce; --focus:#0f62fe;
+    --btn:#0f62fe; --btn-hover:#0050e6; --btn-active:#002d9c;
+    --err:#da1e28; --err-bg:#fff1f1; --ok:#24a148; --ok-bg:#defbe6; --warn:#f1c21b; --warn-bg:#fcf4d6; --info:#4589ff; --info-bg:#edf5ff;
+    --gray:#8d8d8d; --gray-bg:#f2f4f8;
+    --hdr:#161616; --hdr-hover:#333333; --hdr-text:#f4f4f4; --hdr-border:#393939;
+    --overlay:rgba(22,22,22,.5);
+    --shadow:0 2px 6px rgba(0,0,0,.2);
+    --sans:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --cat1:#6929c4;--cat2:#1192e8;--cat3:#005d5d;--cat4:#9f1853;--cat5:#fa4d56;--cat6:#198038;
+  }
+  body.theme-g100{
+    --bg:#161616; --layer:#262626; --layer-2:#161616; --layer-accent:#393939; --field:#262626; --field-hover:#333333;
+    --text:#f4f4f4; --text-2:#c6c6c6; --text-help:#8d8d8d; --text-place:#6f6f6f;
+    --border-sub:#393939; --border-strong:#6f6f6f;
+    --link:#78a9ff; --link-hover:#a6c8ff;
+    --err:#fa4d56; --err-bg:#3a1214; --ok:#42be65; --ok-bg:#122a17; --warn:#f1c21b; --warn-bg:#33290a; --info:#4589ff; --info-bg:#12243d;
+    --gray:#8d8d8d; --gray-bg:#2a2f36; --overlay:rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
+  ::selection{background:#0f62fe33}
+  a{color:var(--link);text-decoration:none} a:hover{text-decoration:underline}
+  button{font-family:inherit}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+  .tnum{font-variant-numeric:tabular-nums}
+  .mono{font-family:var(--mono)}
+
+  /* ============ UI Shell header ============ */
+  .shell-hdr{position:sticky;top:0;z-index:40;height:48px;background:var(--hdr);color:var(--hdr-text);display:flex;align-items:center;border-bottom:1px solid var(--hdr-border)}
+  .shell-hdr .burger{width:48px;height:48px;display:flex;align-items:center;justify-content:center;color:var(--hdr-text);background:none;border:none;cursor:pointer}
+  .shell-hdr .burger:hover{background:var(--hdr-hover)}
+  .shell-hdr .name{padding:0 16px;font-size:14px;white-space:nowrap}
+  .shell-hdr .name b{font-weight:600} .shell-hdr .name span{color:#c6c6c6}
+  .shell-hdr .hnav{display:flex;height:100%;margin-left:8px}
+  .shell-hdr .hnav a{display:flex;align-items:center;padding:0 16px;color:#c6c6c6;font-size:14px;border-bottom:2px solid transparent}
+  .shell-hdr .hnav a.on{color:#fff;border-bottom-color:#fff}
+  .shell-hdr .hnav a:hover{background:var(--hdr-hover);color:#fff;text-decoration:none}
+  .shell-hdr .spacer{flex:1}
+  .shell-hdr .gbtn{width:48px;height:48px;display:flex;align-items:center;justify-content:center;color:var(--hdr-text);background:none;border:none;cursor:pointer;position:relative;font-size:16px}
+  .shell-hdr .gbtn:hover{background:var(--hdr-hover)}
+  .shell-hdr .gbtn .badge{position:absolute;top:8px;right:8px;min-width:16px;height:16px;background:var(--err);color:#fff;border-radius:8px;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0 4px;font-weight:600}
+  .shell-hdr .hsearch{flex:0 1 360px;display:flex;align-items:center;gap:8px;height:100%;padding:0 16px;color:#8d8d8d;border-left:1px solid var(--hdr-border);border-right:1px solid var(--hdr-border)}
+  .shell-hdr .hsearch input{background:none;border:none;color:#f4f4f4;font-family:inherit;font-size:14px;width:100%;outline:none}
+  .shell-hdr .hsearch input::placeholder{color:#8d8d8d}
+
+  /* ============ layout ============ */
+  .layout{display:flex;min-height:calc(100vh - 48px)}
+  .side{width:256px;flex:0 0 256px;background:var(--layer);border-right:1px solid var(--border-sub);padding:8px 0;position:sticky;top:48px;height:calc(100vh - 48px);overflow-y:auto}
+  .side .ctx{padding:12px 16px;border-bottom:1px solid var(--border-sub);margin-bottom:8px}
+  .side .ctx .lbl{font-size:11px;color:var(--text-help);text-transform:uppercase;letter-spacing:.02em}
+  .side .ctx .val{font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+  .side-nav-item{display:flex;align-items:center;gap:12px;height:40px;padding:0 16px;color:var(--text);cursor:pointer;font-size:14px;border-left:3px solid transparent;user-select:none}
+  .side-nav-item:hover{background:var(--field-hover)}
+  .side-nav-item.selected{background:var(--layer-accent);border-left-color:var(--link);font-weight:600}
+  body.theme-g100 .side-nav-item.selected{background:#333}
+  .side-nav-item .ic{width:16px;text-align:center;color:var(--text-2);font-size:14px}
+  .side-nav-item.selected .ic{color:var(--link)}
+  .side .grp{font-size:11px;color:var(--text-help);text-transform:uppercase;letter-spacing:.04em;padding:14px 16px 6px}
+  .side .sub{padding-left:28px;height:32px;font-size:13px;color:var(--text-2)}
+
+  .content{flex:1;min-width:0;padding:24px 32px 64px;max-width:1360px}
+  @media(max-width:900px){.side{display:none}.content{padding:16px}}
+
+  .screen{display:none}
+  .screen.active{display:block;animation:fade .18s ease}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @media(prefers-reduced-motion:reduce){.screen.active{animation:none}}
+
+  /* ============ typography / page header ============ */
+  h1.ph{font-size:28px;font-weight:400;letter-spacing:0;margin:0 0 2px}
+  .ph-sub{color:var(--text-2);font-size:14px;margin-bottom:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  h2.sec{font-size:20px;font-weight:400;margin:28px 0 12px}
+  .crumbs{font-size:12px;color:var(--text-2);margin-bottom:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .crumbs a{color:var(--link)} .crumbs .sep{color:var(--text-help)}
+
+  /* ============ grid ============ */
+  .row{display:grid;gap:16px;margin-bottom:16px}
+  .c4{grid-template-columns:repeat(4,1fr)} .c3{grid-template-columns:repeat(3,1fr)} .c2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:960px){.c4{grid-template-columns:repeat(2,1fr)}.c3{grid-template-columns:1fr}}
+
+  /* ============ tile ============ */
+  .tile{background:var(--layer);border:1px solid var(--border-sub);padding:16px;min-height:96px}
+  .tile.click{cursor:pointer} .tile.click:hover{border-color:var(--border-strong)}
+  .tile .lab{font-size:12px;color:var(--text-2);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:.02em}
+  .tile .num{font-size:30px;font-weight:300;letter-spacing:-.01em;line-height:1.1}
+  .tile .num small{font-size:14px;color:var(--text-help);font-weight:400}
+  .tile .foot{font-size:12px;color:var(--text-2);margin-top:8px}
+
+  /* ============ tag / chip ============ */
+  .tag{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:12px;font-size:12px;background:var(--layer-accent);color:var(--text);white-space:nowrap}
+  .tag .cd{width:8px;height:8px;border-radius:50%;background:currentColor}
+  .tag.sm{height:18px;font-size:11px;padding:0 8px}
+  .tag.ok{background:var(--ok-bg);color:var(--ok)} .tag.warn{background:var(--warn-bg);color:#8a6d1a} .tag.err{background:var(--err-bg);color:var(--err)}
+  .tag.gray{background:var(--gray-bg);color:var(--text-2)} .tag.info{background:var(--info-bg);color:var(--link)}
+  .tag.stale{background:#f4e7d6;color:#8a5a1a} .tag.unreach{background:var(--gray-bg);color:var(--text-2);border:1px dashed var(--border-strong)}
+  body.theme-g100 .tag.warn{color:#f1c21b} body.theme-g100 .tag.stale{background:#33290a;color:#e2b666}
+  .tag.outline{background:transparent;border:1px solid var(--border-strong);color:var(--text-2)}
+
+  /* ============ buttons (Carbon: square corners) ============ */
+  .btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px 0 16px;font-size:14px;border:1px solid transparent;cursor:pointer;background:var(--btn);color:#fff;letter-spacing:.01em;white-space:nowrap;transition:background .1s}
+  .btn:hover{background:var(--btn-hover)} .btn:active{background:var(--btn-active)}
+  .btn.sm{height:32px;font-size:13px;padding:0 12px}
+  .btn.secondary{background:#393939;color:#fff} body.theme-g100 .btn.secondary{background:#6f6f6f}
+  .btn.secondary:hover{background:#4c4c4c}
+  .btn.tertiary{background:transparent;border-color:var(--link);color:var(--link)} .btn.tertiary:hover{background:var(--link);color:#fff}
+  .btn.ghost{background:transparent;color:var(--link);padding:0 12px} .btn.ghost:hover{background:var(--field-hover);text-decoration:none}
+  .btn.danger{background:var(--err);color:#fff} .btn.danger:hover{background:#b81922}
+  .btn.danger-tert{background:transparent;border-color:var(--err);color:var(--err)} .btn.danger-tert:hover{background:var(--err);color:#fff}
+  .btnrow{display:flex;gap:1px;flex-wrap:wrap;align-items:center}
+  .btnrow.gap{gap:8px}
+
+  /* ============ inline notification ============ */
+  .note{display:flex;gap:12px;background:var(--layer);border-left:3px solid var(--gray);padding:12px 14px;margin-bottom:8px;align-items:flex-start;font-size:13px}
+  .note.err{border-left-color:var(--err);background:var(--err-bg)} .note.warn{border-left-color:var(--warn);background:var(--warn-bg)} .note.info{border-left-color:var(--info);background:var(--info-bg)} .note.unreach{border-left-color:var(--gray);background:var(--gray-bg)}
+  .note .ni{font-weight:600;margin-top:1px}
+  .note .nb{flex:1} .note .nb b{font-weight:600} .note .nb small{display:block;color:var(--text-2);margin-top:2px}
+  .note .nx{display:flex;gap:4px}
+
+  /* ============ data table ============ */
+  .tbl-tools{display:flex;align-items:center;gap:1px;background:var(--layer);border:1px solid var(--border-sub);border-bottom:none}
+  .tbl-tools .search{flex:1;display:flex;align-items:center;gap:8px;height:48px;padding:0 16px;color:var(--text-help);border-right:1px solid var(--border-sub)}
+  .tbl-tools .search input{border:none;background:none;font-family:inherit;font-size:14px;color:var(--text);width:100%;outline:none}
+  .tbl-tools .tbtn{height:48px;padding:0 16px;background:var(--layer);border:none;color:var(--text);cursor:pointer;font-size:14px;display:flex;align-items:center;gap:8px}
+  .tbl-tools .tbtn:hover{background:var(--field-hover)}
+  .tbl-tools .tbtn.primary{background:var(--btn);color:#fff} .tbl-tools .tbtn.primary:hover{background:var(--btn-hover)}
+  .tblwrap{overflow-x:auto;border:1px solid var(--border-sub)}
+  table.dt{border-collapse:collapse;width:100%;min-width:720px;font-size:14px;background:var(--layer)}
+  table.dt th{text-align:left;background:var(--layer);color:var(--text);font-weight:600;font-size:14px;padding:14px 16px;border-bottom:1px solid var(--border-strong);white-space:nowrap}
+  table.dt td{padding:12px 16px;border-bottom:1px solid var(--border-sub);color:var(--text-2);vertical-align:middle}
+  table.dt tr:hover td{background:var(--field-hover)}
+  table.dt td.pri{color:var(--text);font-weight:500}
+  table.dt tr.grp td{background:var(--layer-2);border-bottom:1px solid var(--border-strong);font-size:13px;color:var(--text);cursor:pointer}
+  table.dt tr.grp:hover td{background:var(--layer-accent)}
+  .ovf{cursor:pointer;color:var(--text-2);padding:4px 8px;border-radius:0}
+  .ovf:hover{background:var(--layer-accent)}
+
+  /* ============ tabs ============ */
+  .tabs{display:flex;border-bottom:1px solid var(--border-sub);margin-bottom:20px;overflow-x:auto}
+  .tabs .tab{padding:0 16px;height:40px;display:flex;align-items:center;gap:6px;color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-size:14px}
+  .tabs .tab:hover{color:var(--text);background:var(--field-hover)}
+  .tabs .tab.on{color:var(--text);border-bottom-color:var(--link);font-weight:600}
+  .tabpane{display:none} .tabpane.on{display:block}
+  .subtabs{display:inline-flex;border:1px solid var(--border-strong);margin-bottom:16px}
+  .subtabs span{padding:0 14px;height:32px;display:flex;align-items:center;font-size:13px;color:var(--text-2);cursor:pointer;border-right:1px solid var(--border-sub)}
+  .subtabs span:last-child{border-right:none}
+  .subtabs span.on{background:var(--link);color:#fff}
+
+  /* ============ structured list ============ */
+  .slist{background:var(--layer);border:1px solid var(--border-sub)}
+  .slist .r{display:flex;justify-content:space-between;gap:16px;padding:11px 16px;border-bottom:1px solid var(--border-sub);font-size:14px}
+  .slist .r:last-child{border-bottom:none}
+  .slist .r .k{color:var(--text-2)} .slist .r .v{color:var(--text);text-align:right;font-family:var(--mono);font-size:13px}
+  .slist .hd{font-weight:600;background:var(--layer-2);color:var(--text)}
+
+  /* ============ tree ============ */
+  .tree{background:var(--layer);border:1px solid var(--border-sub);font-size:14px;max-height:520px;overflow:auto}
+  .tree .n{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;color:var(--text-2);border-bottom:1px solid transparent;white-space:nowrap}
+  .tree .n:hover{background:var(--field-hover)}
+  .tree .n.sel{background:var(--info-bg);color:var(--text);box-shadow:inset 3px 0 0 var(--link)}
+  .tree .n .tw{color:var(--text-help);width:12px;display:inline-block}
+  .tree .n .dot{width:8px;height:8px;border-radius:50%}
+  .d-ok{background:var(--ok)} .d-warn{background:var(--warn)} .d-err{background:var(--err)} .d-un{background:var(--gray)}
+
+  /* ============ input ============ */
+  .fld{display:block;width:100%;height:40px;background:var(--field);border:none;border-bottom:1px solid var(--border-strong);padding:0 16px;color:var(--text);font-family:inherit;font-size:14px}
+  .fld:focus{outline:2px solid var(--focus);outline-offset:-2px} .fld::placeholder{color:var(--text-place)}
+  .fldlbl{font-size:12px;color:var(--text-2);margin-bottom:6px;display:block}
+  .fldmono{font-family:var(--mono)}
+
+  /* ============ modal ============ */
+  .overlay{position:fixed;inset:0;background:var(--overlay);z-index:60;display:none;align-items:center;justify-content:center}
+  .overlay.on{display:flex}
+  .modal{background:var(--layer);width:min(560px,92vw);box-shadow:var(--shadow);max-height:90vh;display:flex;flex-direction:column}
+  .modal .mh{padding:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .modal .mh h3{margin:0;font-size:20px;font-weight:400} .modal .mh .sub{font-size:12px;color:var(--text-2);margin-top:4px}
+  .modal .mx{background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;padding:4px}
+  .modal .mb{padding:0 16px 20px;overflow:auto}
+  .modal .mf{display:flex;margin-top:8px}
+  .modal .mf .btn{flex:1;height:64px;justify-content:flex-start;padding-left:16px}
+
+  /* ============ charts ============ */
+  .spark{vertical-align:middle}
+  .chartbox{background:var(--layer);border:1px solid var(--border-sub);padding:16px}
+  .chartbox .ct{font-size:12px;color:var(--text-2);margin-bottom:8px;display:flex;justify-content:space-between}
+
+  /* ============ topology ============ */
+  .topo{background:var(--layer);border:1px solid var(--border-sub)}
+  .topo-band{padding:10px 16px;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2);display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border-sub)}
+  .topo-band.nb{background:linear-gradient(0deg,var(--layer),var(--info-bg))}
+  .cnode{border:1px solid #8a3ffc55;background:var(--info-bg);color:var(--cat1);border-radius:2px;padding:4px 10px;font-size:12px;text-transform:none}
+  body.theme-g100 .cnode{color:#be95ff}
+  .inode{border:1px solid var(--border-strong);background:var(--layer);color:var(--text-2);border-radius:2px;padding:4px 10px;font-size:12px;text-transform:none}
+  .topo-cols{display:grid;grid-template-columns:1fr 1fr}
+  @media(max-width:760px){.topo-cols{grid-template-columns:1fr}}
+  .tcol{padding:16px;border-right:1px solid var(--border-sub)} .tcol:last-child{border-right:none}
+  .tlineh{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:14px;font-weight:600}
+  .conn{display:flex;flex-direction:column;align-items:center;color:var(--text-help);font-size:11px;font-family:var(--mono)}
+  .conn .line{width:2px;height:16px;background:var(--border-strong)}
+  .conn.ok .line{background:var(--ok)} .conn.err .line{background:var(--err)} .conn.err{color:var(--err)}
+  .conn .lbl{padding:3px 0}
+  .devnode{border:1px solid var(--border-strong);background:var(--layer-2);padding:12px}
+  .devnode .dh{font-size:12px;color:var(--text-2);margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-family:var(--mono)}
+  .cchips{display:flex;flex-wrap:wrap;gap:8px}
+  .cchip{border:1px solid var(--border-sub);border-left:3px solid var(--gray);background:var(--layer);padding:6px 10px;font-size:13px;display:flex;align-items:center;gap:8px}
+  .cchip.ok{border-left-color:var(--ok)} .cchip.warn{border-left-color:var(--warn)} .cchip.err{border-left-color:var(--err)}
+  .fnode{border:1px solid #4589ff55;background:var(--info-bg);color:var(--link);border-radius:2px;padding:8px 10px;font-size:12px}
+  .fnode.err{border-color:var(--err);background:var(--err-bg);color:var(--err)}
+  .fieldrow{display:flex;gap:10px;flex-wrap:wrap}
+  .topokey{display:flex;gap:18px;flex-wrap:wrap;padding:12px 16px;background:var(--layer-2);border-top:1px solid var(--border-sub);font-size:12px;color:var(--text-2)}
+  /* ---- topology graph (custom SVG, outside Carbon primitives) ---- */
+  .graphwrap{background:var(--layer);border:1px solid var(--border-sub);overflow-x:auto}
+  .graph{display:block;min-width:920px;width:100%;height:auto}
+  .graph text{font-family:var(--sans);fill:var(--text)}
+  .graph .nlab{font-size:13px;font-weight:500}
+  .graph .nsub{font-size:10px;fill:var(--text-2);font-family:var(--mono)}
+  .graph .layerlab{font-size:10px;fill:var(--text-help);letter-spacing:.06em;text-transform:uppercase}
+  .graph .grp{fill:none;stroke:var(--border-strong);stroke-dasharray:4 4}
+  .graph .grplab{font-size:11px;fill:var(--text-2);font-family:var(--mono)}
+  .graph .elab{font-size:10px;font-family:var(--mono);fill:var(--text-2);paint-order:stroke;stroke:var(--layer);stroke-width:3px;stroke-linejoin:round}
+  .graph .elab.warn{fill:var(--warn)} .graph .elab.err{fill:var(--err)}
+  .nodebox{fill:var(--layer);stroke:var(--border-strong);stroke-width:1}
+  .gnode{cursor:default} .gnode[data-goto]{cursor:pointer}
+  .gnode:hover .nodebox{stroke-width:2}
+  .n-comp .accent{fill:var(--gray)} .n-comp.ok .accent{fill:var(--ok)} .n-comp.warn .accent{fill:var(--warn)} .n-comp.err .accent{fill:var(--err)}
+  .n-field .nodebox{fill:var(--info-bg);stroke:var(--info)} .n-field.err .nodebox{fill:var(--err-bg);stroke:var(--err)}
+  .n-cloud .nodebox{fill:var(--info-bg);stroke:var(--cat1)}
+  .n-infra .nodebox{fill:var(--layer-2);stroke:var(--border-strong)}
+  .edge{fill:none;stroke:var(--gray);stroke-width:1.6}
+  .edge.ok{stroke:var(--ok);stroke-width:2.4} .edge.warn{stroke:var(--warn);stroke-width:2.4}
+  .edge.err{stroke:var(--err);stroke-width:2.4;stroke-dasharray:6 5} .edge.flow{stroke:var(--link);stroke-width:1.8} .edge.bus{stroke:var(--gray);stroke-width:1.3;stroke-dasharray:3 4}
+  .mk-ok{fill:var(--ok)} .mk-warn{fill:var(--warn)} .mk-err{fill:var(--err)} .mk-flow{fill:var(--link)} .mk-bus{fill:var(--gray)}
+  .gkey{display:flex;gap:18px;flex-wrap:wrap;padding:12px 16px;background:var(--layer-2);border-top:1px solid var(--border-sub);font-size:12px;color:var(--text-2);align-items:center}
+  .gkey .sw{display:inline-block;width:22px;height:0;border-top:3px solid;vertical-align:middle;margin-right:6px}
+
+  .hr{height:1px;background:var(--border-sub);border:0;margin:24px 0}
+  .helper{font-size:12px;color:var(--text-help)}
+  .callout{background:var(--info-bg);border-left:3px solid var(--link);padding:12px 14px;font-size:13px;color:var(--text);margin:16px 0}
+  .pill-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+</style>
+
+<!-- ============ HEADER ============ -->
+<header class="shell-hdr">
+  <button class="burger" aria-label="menu">☰</button>
+  <div class="name"><b>EdgeCommons</b> <span>/ Edge&nbsp;Console</span></div>
+  <div class="hsearch">🔍 <input placeholder="Search components, things, signals…" aria-label="search"></div>
+  <div class="spacer"></div>
+  <button class="gbtn" id="themeBtn" title="Toggle theme">◐</button>
+  <button class="gbtn" title="Notifications">🔔<span class="badge">2</span></button>
+  <button class="gbtn" title="Account">◍</button>
+</header>
+
+<div class="layout">
+  <!-- ============ SIDE NAV ============ -->
+  <nav class="side">
+    <div class="ctx"><div class="lbl">Site</div><div class="val">dallas <span class="tag warn sm"><span class="cd"></span>Degraded</span></div></div>
+    <div class="side-nav-item selected" data-screen="overview"><span class="ic">▦</span> Overview</div>
+    <div class="side-nav-item" data-screen="components"><span class="ic">☰</span> Components</div>
+    <div class="side-nav-item" data-screen="topology"><span class="ic">◎</span> Site Topology</div>
+    <div class="side-nav-item" data-screen="config"><span class="ic">≣</span> Configuration</div>
+    <div class="side-nav-item" data-screen="events"><span class="ic">◔</span> Events &amp; Alerts</div>
+    <div class="side-nav-item" data-screen="signals"><span class="ic">∿</span> Signals</div>
+    <div class="side-nav-item" data-screen="settings"><span class="ic">⚙</span> Settings</div>
+    <div class="grp">Lines</div>
+    <div class="side-nav-item sub" data-screen="components">stamping</div>
+    <div class="side-nav-item sub" data-screen="components">packaging</div>
+    <div class="side-nav-item sub" data-screen="components">assembly</div>
+  </nav>
+
+  <main class="content">
+
+    <!-- ============ OVERVIEW ============ -->
+    <section class="screen active" id="screen-overview">
+      <h1 class="ph">Edge health</h1>
+      <div class="ph-sub"><span>Site <b>dallas</b> · 8 components across 3 lines</span><span class="tag ok sm"><span class="cd"></span>WS Live</span><span class="tag gray sm"><span class="cd"></span>Bus MQTT connected</span><span class="helper">updated 2s ago</span></div>
+
+      <div class="row c4">
+        <div class="tile">
+          <div class="lab">Site health</div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <svg width="52" height="52" viewBox="0 0 36 36" aria-hidden="true">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border-sub)" stroke-width="4"></circle>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--ok)" stroke-width="4" stroke-dasharray="62 100" transform="rotate(-90 18 18)"></circle>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--warn)" stroke-width="4" stroke-dasharray="12 100" stroke-dashoffset="-62" transform="rotate(-90 18 18)"></circle>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray)" stroke-width="4" stroke-dasharray="26 100" stroke-dashoffset="-74" transform="rotate(-90 18 18)"></circle>
+            </svg>
+            <div><div class="num tnum">5<small>/8 healthy</small></div>
+              <div class="pill-legend" style="margin-top:6px"><span class="tag ok sm"><span class="cd"></span>5</span><span class="tag warn sm"><span class="cd"></span>1</span><span class="tag err sm"><span class="cd"></span>1</span><span class="tag unreach sm"><span class="cd"></span>2</span></div></div>
+          </div>
+        </div>
+        <div class="tile click" data-goto="events">
+          <div class="lab">Active alerts</div>
+          <div class="num tnum">2</div>
+          <div class="foot">1 critical · 1 warning · <b>+11 contained</b></div>
+        </div>
+        <div class="tile">
+          <div class="lab">Edge bus <span class="helper">msgs/s</span></div>
+          <div style="display:flex;align-items:flex-end;gap:8px">
+            <div class="num tnum" style="font-size:24px">412</div>
+            <svg class="spark" width="120" height="36" viewBox="0 0 120 36" preserveAspectRatio="none">
+              <polyline points="0,28 12,24 24,26 36,18 48,22 60,12 72,16 84,10 96,14 108,8 120,12" fill="none" stroke="var(--link)" stroke-width="1.5"/>
+              <polygon points="0,28 12,24 24,26 36,18 48,22 60,12 72,16 84,10 96,14 108,8 120,12 120,36 0,36" fill="var(--link)" opacity=".08"/>
+            </svg>
+          </div>
+          <div class="foot">MQTT · EMQX @ gateway</div>
+        </div>
+        <div class="tile">
+          <div class="lab">Edge node <span class="helper">console self</span></div>
+          <div class="num tnum" style="font-size:18px">gw-dallas-01</div>
+          <div class="foot">HOST · cpu 4% · mem 180 MB · up 6d</div>
+        </div>
+      </div>
+
+      <div class="note err"><span class="ni">✕</span><div class="nb"><b>opcua-adapter — heartbeat stale</b><small>packaging / pack-gw-01 · last seen 43s ago, expected ~5s</small></div><div class="nx"><button class="btn ghost sm">View</button><button class="btn tertiary sm">Ack</button></div></div>
+      <div class="note unreach"><span class="ni">⚠</span><div class="nb"><b>assembly / asm-gw-01 — uns-bridge offline (2m)</b><small>the road is down, not the houses — 2 components frozen at last-known; 11 would-be OFFLINE alarms suppressed under this one</small></div><div class="nx"><button class="btn ghost sm">Details</button></div></div>
+
+      <h2 class="sec">Fleet <span class="helper" style="font-size:13px">grouped by line</span></h2>
+      <div class="tbl-tools">
+        <div class="search">🔍 <input placeholder="Search fleet…"></div>
+        <button class="tbtn">Line ▾</button><button class="tbtn">Status ▾</button><button class="tbtn">⊞ Tiles</button>
+      </div>
+      <div class="tblwrap">
+        <table class="dt">
+          <thead><tr><th>Health</th><th>Component</th><th>Device</th><th>Heartbeat</th><th>CPU</th><th>Memory</th><th>Conn</th><th>Capabilities</th><th></th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="9">▾ &nbsp; LINE · stamping &nbsp;&nbsp; <span class="tag ok sm"><span class="cd"></span>Healthy</span> &nbsp; 3 components · press-gw-01 (Greengrass)</td></tr>
+            <tr data-goto="detail"><td><span class="tag ok"><span class="cd"></span>Healthy</span></td><td class="pri">opcua-adapter <span class="tag outline sm">java</span></td><td class="mono">press-gw-01</td><td class="tnum mono">2s</td><td><svg class="spark" width="52" height="16" viewBox="0 0 52 16"><polyline points="0,11 9,9 18,12 27,7 36,10 45,6 52,8" fill="none" stroke="var(--gray)" stroke-width="1.4"/></svg> <span class="tnum">12%</span></td><td class="tnum">210 MB</td><td><span class="tag ok sm"><span class="cd"></span></span></td><td class="mono" style="font-size:12px">♥ ▤ ⌘ ▦</td><td><span class="ovf">⋯</span></td></tr>
+            <tr data-goto="detail"><td><span class="tag ok"><span class="cd"></span>Healthy</span></td><td class="pri">modbus-adapter <span class="tag outline sm">python</span></td><td class="mono">press-gw-01</td><td class="tnum mono">3s</td><td><span class="tnum">18%</span></td><td class="tnum">72 MB</td><td><span class="tag ok sm"><span class="cd"></span></span></td><td class="mono" style="font-size:12px">♥ ▤ ⌘</td><td><span class="ovf">⋯</span></td></tr>
+            <tr data-goto="detail"><td><span class="tag ok"><span class="cd"></span>Healthy</span></td><td class="pri">telemetry-processor <span class="tag outline sm">rust</span></td><td class="mono">press-gw-01</td><td class="tnum mono">4s</td><td><span class="tnum">9%</span></td><td class="tnum">40 MB</td><td class="helper">—</td><td class="mono" style="font-size:12px">♥ ▤</td><td><span class="ovf">⋯</span></td></tr>
+            <tr class="grp"><td colspan="9">▾ &nbsp; LINE · packaging &nbsp;&nbsp; <span class="tag warn sm"><span class="cd"></span>Degraded</span> &nbsp; pack-gw-01 (HOST)</td></tr>
+            <tr data-goto="detail"><td><span class="tag stale"><span class="cd"></span>Stale</span></td><td class="pri">opcua-adapter</td><td class="mono">pack-gw-01</td><td class="tnum mono" style="color:var(--err)">43s</td><td class="helper">— last 22%</td><td class="helper">—</td><td><span class="tag gray sm"><span class="cd"></span></span></td><td class="mono" style="font-size:12px">♥ ▤ ⌘ ▦</td><td><span class="ovf">⋯</span></td></tr>
+            <tr data-goto="detail"><td><span class="tag err"><span class="cd"></span>Offline</span></td><td class="pri">modbus-adapter</td><td class="mono">pack-gw-01</td><td class="tnum mono" style="color:var(--err)">—</td><td class="helper">—</td><td class="helper">—</td><td><span class="tag err sm"><span class="cd"></span></span></td><td class="mono" style="font-size:12px">♥ ▤ ⌘</td><td><span class="ovf">⋯</span></td></tr>
+            <tr class="grp"><td colspan="9">▸ &nbsp; LINE · assembly &nbsp;&nbsp; <span class="tag unreach sm"><span class="cd"></span>Unreachable</span> &nbsp; asm-gw-01 — bridge offline 2m · <span class="helper">2 components frozen · alarms contained (+11)</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ COMPONENTS ============ -->
+    <section class="screen" id="screen-components">
+      <h1 class="ph">Components</h1>
+      <div class="ph-sub"><span>Browse the site inventory and drill into any component.</span></div>
+      <div class="row" style="grid-template-columns:320px 1fr;gap:16px">
+        <div>
+          <input class="fld" placeholder="🔍 Filter tree…" style="margin-bottom:8px">
+          <div class="btnrow gap" style="margin-bottom:10px"><span class="tag outline sm">status ▾</span><span class="tag outline sm">type ▾</span><span class="tag outline sm">platform ▾</span></div>
+          <div class="tree">
+            <div class="n"><span class="tw">▾</span> <b>Site: dallas</b></div>
+            <div class="n" style="padding-left:24px"><span class="tw">▾</span><span class="dot d-ok"></span> stamping <span class="tag gray sm">3</span></div>
+            <div class="n" style="padding-left:44px"><span class="tw">▾</span><span class="dot d-ok"></span> press-gw-01</div>
+            <div class="n" style="padding-left:70px"><span class="dot d-ok"></span> opcua-adapter</div>
+            <div class="n" style="padding-left:70px"><span class="dot d-ok"></span> modbus-adapter</div>
+            <div class="n" style="padding-left:70px"><span class="dot d-ok"></span> telemetry-processor</div>
+            <div class="n" style="padding-left:24px"><span class="tw">▾</span><span class="dot d-warn"></span> packaging <span class="tag gray sm">2</span></div>
+            <div class="n" style="padding-left:44px"><span class="tw">▾</span><span class="dot d-warn"></span> pack-gw-01</div>
+            <div class="n sel" style="padding-left:70px"><span class="dot d-warn"></span> opcua-adapter</div>
+            <div class="n" style="padding-left:70px"><span class="dot d-err"></span> modbus-adapter</div>
+            <div class="n" style="padding-left:24px"><span class="tw">▸</span><span class="dot d-un"></span> assembly <span class="tag unreach sm">unreachable</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="crumbs"><a>dallas</a><span class="sep">/</span><a>packaging</a><span class="sep">/</span><a>pack-gw-01</a><span class="sep">/</span><b style="color:var(--text)">opcua-adapter</b></div>
+          <div class="tile" style="min-height:0">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+              <div><div style="font-size:20px">opcua-adapter <span class="tag stale sm"><span class="cd"></span>Stale</span></div>
+                <div class="helper" style="margin-top:4px">line packaging · pack-gw-01 · HOST · java · v1.4.2 · 1 instance · keepalive 5s</div></div>
+              <div class="btnrow gap"><button class="btn ghost sm">Ping</button><button class="btn ghost sm">Query status</button><button class="btn sm" data-goto="detail">Open detail →</button></div>
+            </div>
+          </div>
+          <div class="row c4" style="margin-top:16px">
+            <div class="tile"><div class="lab">CPU <span class="tag info sm"><span class="cd"></span>live</span></div><div class="num tnum" style="font-size:22px">22%</div></div>
+            <div class="tile"><div class="lab">Memory</div><div class="num tnum" style="font-size:22px">210<small>MB</small></div></div>
+            <div class="tile"><div class="lab">Heartbeat</div><div class="num tnum" style="font-size:22px">43<small>s</small></div></div>
+            <div class="tile"><div class="lab">Open alerts</div><div class="num tnum" style="font-size:22px">1</div></div>
+          </div>
+          <div class="callout">Picking a <b>component</b> shows this summary → <b>Open detail</b>. Picking a <b>line</b> or <b>device</b> node shows a roster of everything beneath it, so the tree doubles as the site inventory. Four paths reach a component: this tree, an Overview row, a Topology chip, or the header search.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ COMPONENT DETAIL ============ -->
+    <section class="screen" id="screen-detail">
+      <div class="crumbs"><a data-goto="overview">Overview</a><span class="sep">/</span><a data-goto="components">Components</a><span class="sep">/</span><span>packaging / pack-gw-01</span><span class="sep">/</span><b style="color:var(--text)">opcua-adapter</b></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div><h1 class="ph">opcua-adapter <span class="tag stale"><span class="cd"></span>Stale</span></h1>
+          <div class="ph-sub"><span>line packaging · pack-gw-01 · HOST · java · app v1.4.2 · keepalive 5s · last state 43s ago</span></div></div>
+        <div class="btnrow gap"><button class="btn ghost sm">Ping</button><button class="btn ghost sm">Query status</button><button class="btn secondary sm" data-goto="config">View config</button></div>
+      </div>
+
+      <div class="tabs" data-tabgroup="detail">
+        <div class="tab on" data-tab="health">Health</div>
+        <div class="tab" data-tab="panel">Panel · 4 views</div>
+        <div class="tab" data-tab="instances">Instances</div>
+        <div class="tab" data-tab="cfg">Configuration</div>
+        <div class="tab" data-tab="ev">Events</div>
+        <div class="tab" data-tab="logs">Logs</div>
+      </div>
+
+      <div class="tabpane on" data-pane="health">
+        <div class="row c4">
+          <div class="chartbox"><div class="ct">CPU <span class="tag info sm"><span class="cd"></span>live</span></div><div class="num tnum" style="font-size:22px;margin-bottom:6px">22%</div><svg class="spark" width="100%" height="44" viewBox="0 0 240 44" preserveAspectRatio="none"><polygon points="0,30 30,26 60,32 90,20 120,24 150,14 180,20 210,12 240,18 240,44 0,44" fill="var(--link)" opacity=".08"/><polyline points="0,30 30,26 60,32 90,20 120,24 150,14 180,20 210,12 240,18" fill="none" stroke="var(--link)" stroke-width="1.5"/></svg></div>
+          <div class="chartbox"><div class="ct">Memory <span class="tag info sm"><span class="cd"></span>live</span></div><div class="num tnum" style="font-size:22px;margin-bottom:6px">210 MB</div><svg class="spark" width="100%" height="44" viewBox="0 0 240 44" preserveAspectRatio="none"><polyline points="0,24 30,22 60,23 90,20 120,21 150,18 180,19 210,17 240,18" fill="none" stroke="var(--cat3)" stroke-width="1.5"/></svg></div>
+          <div class="tile"><div class="lab">Threads / FDs</div><div class="num tnum" style="font-size:22px">24 / 96</div><div class="foot">fds n/a on Windows</div></div>
+          <div class="tile"><div class="lab">Uptime</div><div class="num tnum" style="font-size:22px">6d 04h</div><div class="foot">started 2026-06-26</div></div>
+        </div>
+        <div class="row" style="grid-template-columns:2fr 1fr">
+          <div class="chartbox"><div class="ct">Liveness timeline <span class="tag info sm"><span class="cd"></span>live</span></div>
+            <svg width="100%" height="60" viewBox="0 0 480 60" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="40" x2="480" y2="40" stroke="var(--border-sub)"/>
+              <g fill="var(--ok)">
+                <rect x="6" y="34" width="3" height="12"/><rect x="30" y="34" width="3" height="12"/><rect x="54" y="34" width="3" height="12"/><rect x="78" y="34" width="3" height="12"/><rect x="102" y="34" width="3" height="12"/><rect x="126" y="34" width="3" height="12"/><rect x="150" y="34" width="3" height="12"/><rect x="174" y="34" width="3" height="12"/><rect x="198" y="34" width="3" height="12"/><rect x="222" y="34" width="3" height="12"/><rect x="246" y="34" width="3" height="12"/><rect x="270" y="34" width="3" height="12"/><rect x="294" y="34" width="3" height="12"/><rect x="318" y="34" width="3" height="12"/><rect x="342" y="34" width="3" height="12"/>
+              </g>
+              <rect x="360" y="20" width="112" height="26" fill="var(--err)" opacity=".16"/>
+              <text x="416" y="16" fill="var(--err)" font-size="10" text-anchor="middle" font-family="var(--mono)">gap 43s</text>
+            </svg>
+            <div class="helper">heartbeat arrivals over the last hour · gap &gt; threshold shaded (flapping visible)</div>
+          </div>
+          <div class="slist">
+            <div class="r hd"><span class="k">Health checks</span><span class="v" style="color:var(--text-help);font-family:var(--sans)">computed by console</span></div>
+            <div class="r"><span class="k">heartbeat freshness</span><span class="v"><span class="tag stale sm"><span class="cd"></span>stale</span></span></div>
+            <div class="r"><span class="k">messaging / ready</span><span class="v"><span class="tag gray sm"><span class="cd"></span>?</span></span></div>
+            <div class="r"><span class="k">connectionState</span><span class="v">1 ⚠</span></div>
+            <div class="r"><span class="k">readErrors (1m)</span><span class="v">0</span></div>
+            <div class="r"><span class="k">open alerts</span><span class="v">1</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpane" data-pane="panel">
+        <div class="helper" style="margin-bottom:8px">◈ provided by opcua-adapter · descriptor · v2 · rendered by console-owned Carbon widgets</div>
+        <div class="subtabs"><span>Overview</span><span class="on">Address Space</span><span>Signals</span><span>Diagnostics</span></div>
+        <div class="row" style="grid-template-columns:1.3fr 1fr">
+          <div>
+            <div class="ct helper" style="margin-bottom:6px">treeBrowser <span class="tag info sm"><span class="cd"></span>live</span> · bound to <span class="mono">cmd/sb.browse</span></div>
+            <div class="tree">
+              <div class="n"><span class="tw">▾</span> ns=2 · Channel1</div>
+              <div class="n" style="padding-left:26px"><span class="tw">▾</span> Device1</div>
+              <div class="n" style="padding-left:52px">Temperature <span class="tag info sm">◉ live</span></div>
+              <div class="n sel" style="padding-left:52px">Setpoint <span class="tag ok sm">✎ writable</span></div>
+              <div class="n" style="padding-left:52px">RunState</div>
+              <div class="n" style="padding-left:26px"><span class="tw">▸</span> Device2</div>
+            </div>
+          </div>
+          <div>
+            <div class="ct helper" style="margin-bottom:6px">Selection · <span class="mono">cmd/sb.read</span></div>
+            <div class="slist" style="margin-bottom:12px">
+              <div class="r"><span class="k">node</span><span class="v">…Device1.Setpoint</span></div>
+              <div class="r"><span class="k">value</span><span class="v">40.0</span></div>
+              <div class="r"><span class="k">quality</span><span class="v"><span class="tag ok sm"><span class="cd"></span>GOOD</span></span></div>
+              <div class="r"><span class="k">dataType</span><span class="v">Double</span></div>
+            </div>
+            <div class="btnrow gap"><button class="btn tertiary sm">Read now</button><button class="btn danger sm" id="openWrite">Write…</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpane" data-pane="instances"><div class="slist"><div class="r hd"><span class="k">Instance</span><span class="v" style="font-family:var(--sans);color:var(--text)">status</span></div><div class="r"><span class="k">kep1 · KEPServerEX press</span><span class="v"><span class="tag stale sm"><span class="cd"></span>connected (stale)</span></span></div></div></div>
+      <div class="tabpane" data-pane="cfg"><div class="callout">Embedded read-only view of this component's effective config — see the full <a data-goto="config">Configuration Review</a> screen.</div></div>
+      <div class="tabpane" data-pane="ev"><div class="helper">Filtered event stream for opcua-adapter — see <a data-goto="events">Events &amp; Alerts</a>.</div></div>
+      <div class="tabpane" data-pane="logs"><div class="callout">Logs tab: <span class="mono">cmd/get-log-tail</span> on open, live-follow with a countdown, level dropdown with TTL badge.</div></div>
+    </section>
+
+    <!-- ============ SITE TOPOLOGY ============ -->
+    <section class="screen" id="screen-topology">
+      <h1 class="ph">Site topology</h1>
+      <div class="ph-sub"><span>A live connectivity graph — each ggcommons <b>component</b> and the external <b>field</b> and <b>cloud</b> systems it talks to. An arrow points to the endpoint it connects to: <b>southbound</b> = component → field device; <b>northbound</b> = processor → bus → cloud.</span></div>
+
+      <div class="btnrow gap" style="margin-bottom:12px">
+        <span class="tag info sm">Southbound</span><span class="tag info sm">Northbound</span><span class="tag gray sm">Bus</span><span class="tag outline sm">Alarms only</span>
+        <span style="flex:1"></span><span class="helper">hover a node or edge for detail · click a component to open it</span>
+      </div>
+
+      <div class="graphwrap">
+        <svg class="graph" viewBox="0 0 960 660" role="img" aria-label="Site connectivity graph">
+          <defs>
+            <marker id="ah-ok" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="mk-ok" d="M0,0 L7,3 L0,6 Z"/></marker>
+            <marker id="ah-warn" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="mk-warn" d="M0,0 L7,3 L0,6 Z"/></marker>
+            <marker id="ah-err" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="mk-err" d="M0,0 L7,3 L0,6 Z"/></marker>
+            <marker id="ah-flow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="mk-flow" d="M0,0 L7,3 L0,6 Z"/></marker>
+            <marker id="ah-bus" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path class="mk-bus" d="M0,0 L7,3 L0,6 Z"/></marker>
+          </defs>
+
+          <!-- line / device groupings -->
+          <rect class="grp" x="44" y="205" width="346" height="266" rx="4"/>
+          <text class="grplab" x="52" y="222">stamping · press-gw-01 · Greengrass</text>
+          <rect class="grp" x="566" y="205" width="350" height="266" rx="4"/>
+          <text class="grplab" x="574" y="222">packaging · pack-gw-01 · HOST</text>
+
+          <!-- layer captions -->
+          <text class="layerlab" x="952" y="46" text-anchor="end">cloud · northbound</text>
+          <text class="layerlab" x="952" y="140" text-anchor="end">site bus</text>
+          <text class="layerlab" x="952" y="592" text-anchor="end">field · southbound</text>
+
+          <!-- EDGES (under nodes). Southbound: component -> field device -->
+          <path class="edge ok"   d="M140,444 L136,556" marker-end="url(#ah-ok)"/>
+          <path class="edge ok"   d="M300,444 L305,556" marker-end="url(#ah-ok)"/>
+          <path class="edge warn" d="M660,444 L656,556" marker-end="url(#ah-warn)"/>
+          <path class="edge err"  d="M820,444 L830,556" marker-end="url(#ah-err)"/>
+          <!-- adapter -> processor (internal dataflow) -->
+          <path class="edge flow" d="M150,400 L188,276" marker-end="url(#ah-flow)"/>
+          <path class="edge flow" d="M295,400 L212,276" marker-end="url(#ah-flow)"/>
+          <path class="edge flow" d="M665,400 L752,276" marker-end="url(#ah-flow)"/>
+          <path class="edge bus"  d="M815,400 L778,276" marker-end="url(#ah-bus)"/>
+          <!-- processor -> site bus -->
+          <path class="edge bus"  d="M205,230 L430,170" marker-end="url(#ah-bus)"/>
+          <path class="edge bus"  d="M755,230 L550,170" marker-end="url(#ah-bus)"/>
+          <!-- site bus -> cloud (northbound) -->
+          <path class="edge ok"   d="M445,120 L412,72" marker-end="url(#ah-ok)"/>
+          <path class="edge ok"   d="M540,120 L558,72" marker-end="url(#ah-ok)"/>
+
+          <!-- X marker on the disconnected southbound edge -->
+          <g stroke="var(--err)" stroke-width="2"><line x1="820" y1="494" x2="832" y2="506"/><line x1="832" y1="494" x2="820" y2="506"/></g>
+
+          <!-- edge labels -->
+          <text class="elab" x="58"  y="502">OPC UA · 41 sig/s</text>
+          <text class="elab" x="312" y="502">Modbus · 12 sig/s</text>
+          <text class="elab warn" x="596" y="500">OPC UA · read errors</text>
+          <text class="elab err"  x="688" y="520">Modbus · DISCONNECTED 14m</text>
+          <text class="elab" x="470" y="102" text-anchor="middle">northbound</text>
+          <text class="elab" x="300" y="196">publish</text>
+          <text class="elab" x="628" y="196" text-anchor="end">publish</text>
+
+          <!-- NODES · cloud (external, northbound targets) -->
+          <g class="gnode n-cloud"><title>AWS IoT Core — northbound target</title><rect class="nodebox" x="340" y="30" width="130" height="40"/><text class="nlab" x="352" y="49">AWS IoT Core</text><text class="nsub" x="352" y="62">cloud</text></g>
+          <g class="gnode n-cloud"><title>Kinesis stream — northbound target</title><rect class="nodebox" x="490" y="30" width="140" height="40"/><text class="nlab" x="502" y="49">Kinesis</text><text class="nsub" x="502" y="62">stream · telemetry</text></g>
+          <!-- site bus / console -->
+          <g class="gnode n-infra"><title>Site UNS broker (EMQX) — the console subscribes every UNS class here</title><rect class="nodebox" x="350" y="120" width="280" height="46"/><text class="nlab" x="364" y="142">Site UNS broker · EMQX</text><text class="nsub" x="364" y="157">edge-console observes all classes</text></g>
+          <!-- processors -->
+          <g class="gnode n-comp ok" data-goto="detail"><title>telemetry-processor — Healthy</title><rect class="nodebox" x="120" y="230" width="150" height="44"/><rect class="accent" x="120" y="230" width="4" height="44"/><circle class="mk-ok" cx="136" cy="246" r="4"/><text class="nlab" x="148" y="250">telemetry-processor</text><text class="nsub" x="128" y="265">rust</text></g>
+          <g class="gnode n-comp ok" data-goto="detail"><title>telemetry-processor — Healthy</title><rect class="nodebox" x="690" y="230" width="150" height="44"/><rect class="accent" x="690" y="230" width="4" height="44"/><circle class="mk-ok" cx="706" cy="246" r="4"/><text class="nlab" x="718" y="250">telemetry-processor</text><text class="nsub" x="698" y="265">rust</text></g>
+          <!-- adapters (source of southbound connections) -->
+          <g class="gnode n-comp ok" data-goto="detail"><title>opcua-adapter — Healthy · connects to KEPServerEX</title><rect class="nodebox" x="70" y="400" width="140" height="44"/><rect class="accent" x="70" y="400" width="4" height="44"/><circle class="mk-ok" cx="86" cy="416" r="4"/><text class="nlab" x="98" y="420">opcua-adapter</text><text class="nsub" x="78" y="435">java · kep1</text></g>
+          <g class="gnode n-comp ok" data-goto="detail"><title>modbus-adapter — Healthy · connects to Press PLC</title><rect class="nodebox" x="230" y="400" width="140" height="44"/><rect class="accent" x="230" y="400" width="4" height="44"/><circle class="mk-ok" cx="246" cy="416" r="4"/><text class="nlab" x="258" y="420">modbus-adapter</text><text class="nsub" x="238" y="435">python</text></g>
+          <g class="gnode n-comp warn" data-goto="detail"><title>opcua-adapter — Degraded (read errors) · connects to Packager OPC UA</title><rect class="nodebox" x="590" y="400" width="140" height="44"/><rect class="accent" x="590" y="400" width="4" height="44"/><circle class="mk-warn" cx="606" cy="416" r="4"/><text class="nlab" x="618" y="420">opcua-adapter</text><text class="nsub" x="598" y="435">java</text></g>
+          <g class="gnode n-comp err" data-goto="detail"><title>modbus-adapter — Offline · Conveyor drive link down</title><rect class="nodebox" x="750" y="400" width="140" height="44"/><rect class="accent" x="750" y="400" width="4" height="44"/><circle class="mk-err" cx="766" cy="416" r="4"/><text class="nlab" x="778" y="420">modbus-adapter</text><text class="nsub" x="758" y="435">python · offline</text></g>
+          <!-- field systems (external, southbound targets) -->
+          <g class="gnode n-field"><title>KEPServerEX — OPC UA server (southbound target)</title><rect class="nodebox" x="60" y="560" width="150" height="52"/><text class="nlab" x="72" y="582">KEPServerEX</text><text class="nsub" x="72" y="598">OPC UA server · field</text></g>
+          <g class="gnode n-field"><title>Press PLC — Modbus slave (southbound target)</title><rect class="nodebox" x="230" y="560" width="150" height="52"/><text class="nlab" x="242" y="582">Press PLC</text><text class="nsub" x="242" y="598">Modbus unit 1 · field</text></g>
+          <g class="gnode n-field"><title>Packager OPC UA server (southbound target)</title><rect class="nodebox" x="580" y="560" width="150" height="52"/><text class="nlab" x="592" y="582">Packager OPC UA</text><text class="nsub" x="592" y="598">OPC UA server · field</text></g>
+          <g class="gnode n-field err"><title>Conveyor drive — Modbus (disconnected)</title><rect class="nodebox" x="750" y="560" width="160" height="52"/><text class="nlab" x="762" y="582">Conveyor drive</text><text class="nsub" x="762" y="598" style="fill:var(--err)">Modbus · DISCONNECTED</text></g>
+        </svg>
+        <div class="gkey">
+          <span><span class="sw" style="border-top-color:var(--ok)"></span>connected</span>
+          <span><span class="sw" style="border-top-color:var(--warn)"></span>degraded</span>
+          <span><span class="sw" style="border-top-color:var(--err);border-top-style:dashed"></span>disconnected</span>
+          <span><span class="sw" style="border-top-color:var(--link)"></span>internal dataflow</span>
+          <span><span class="sw" style="border-top-color:var(--gray);border-top-style:dashed"></span>bus / no data</span>
+          <span class="helper">arrow → the target endpoint</span>
+        </div>
+      </div>
+      <div class="callout"><b>Reading the graph.</b> Follow any arrow to its head to see the target: <span class="mono">opcua-adapter → KEPServerEX</span> is <i>component (source) → southbound device (target)</i>. The packaging line's <span class="mono">modbus-adapter → Conveyor drive</span> edge is red, dashed, and ✕'d — that adapter is <b>up</b> but its device link is <b>down</b>, so the fault is pinned to the exact edge, not smeared across the device. Field nodes are the external endpoints each adapter connects to (from <span class="mono">state.dependencies[]</span>); adapters feed the telemetry-processor, which publishes to the site bus, which relays northbound to the cloud.</div>
+    </section>
+
+    <!-- ============ CONFIGURATION ============ -->
+    <section class="screen" id="screen-config">
+      <h1 class="ph">Configuration review</h1>
+      <div class="ph-sub"><span>Effective, running configuration — schema-validated, diffable, secrets redacted.</span></div>
+      <div class="row" style="grid-template-columns:340px 1fr;gap:16px">
+        <div class="slist">
+          <div class="r hd"><span class="k">Component</span><span class="v" style="font-family:var(--sans);color:var(--text)">source</span></div>
+          <div class="r" style="background:var(--info-bg)"><span class="k"><span class="dot d-ok" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>modbus-adapter</span><span class="v"><span class="tag info sm">LIVE</span></span></div>
+          <div class="r"><span class="k"><span class="dot d-warn" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>opcua-adapter</span><span class="v"><span class="tag gray sm">SOURCE</span></span></div>
+          <div class="r"><span class="k"><span class="dot d-ok" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>telemetry-processor</span><span class="v"><span class="tag info sm">LIVE</span></span></div>
+          <div class="r"><span class="k"><span class="dot d-un" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>file-replicator</span><span class="v"><span class="tag unreach sm">UNAVAIL</span></span></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+            <div><b style="font-size:16px">modbus-adapter</b> &nbsp; <span class="tag gray sm">source: CONFIGMAP</span> <span class="tag outline sm">hot-reload: configmap-swap</span> <span class="helper">fetched 6s ago</span></div>
+            <div class="btnrow gap"><button class="btn ghost sm">Refetch</button><button class="btn ghost sm">Reload config</button><button class="btn secondary sm">Compare ⇄</button></div>
+          </div>
+          <div class="note info"><span class="ni">↻</span><div class="nb"><b>Newer configuration pushed 12s ago</b><small>config.changed on ecv1/dallas/packaging/pack-gw-01/modbus-adapter/cfg — Refetch to view current</small></div></div>
+          <div class="note warn"><span class="ni">🔒</span><div class="nb"><b>3 values redacted by console policy</b><small>2× library-side ($secret) · 1× console deny-list (**/credentials/password)</small></div></div>
+          <div class="tabs" data-tabgroup="cfg"><div class="tab on" data-tab="struct">Structured</div><div class="tab" data-tab="raw">Raw JSON</div></div>
+          <div class="tabpane on" data-pane="struct">
+            <div class="slist">
+              <div class="r"><span class="k">heartbeat.intervalSecs <span class="tag outline sm">schema ⓘ</span></span><span class="v">5 <span class="helper">(default)</span></span></div>
+              <div class="r"><span class="k">identity.site / .area</span><span class="v">dallas / packaging</span></div>
+              <div class="r"><span class="k">messaging.local.host</span><span class="v">emqx.local:1883</span></div>
+              <div class="r"><span class="k">messaging.local.credentials.password</span><span class="v" style="color:var(--err)">●●●●●● 🔒 redacted</span></div>
+              <div class="r"><span class="k">component.instances[ ]</span><span class="v">2 instances ▸</span></div>
+              <div class="r"><span class="k">streaming <span class="tag outline sm">static</span></span><span class="v" style="color:var(--text-help)">effective since process start</span></div>
+              <div class="r"><span class="k">configHash</span><span class="v">a3f1e9… <span class="tag ok sm">drift ✓</span></span></div>
+            </div>
+          </div>
+          <div class="tabpane" data-pane="raw"><div class="chartbox mono" style="font-size:12px;white-space:pre;overflow:auto">{
+  "identity": { "site": "dallas", "area": "packaging", "instance": "main" },
+  "heartbeat": { "intervalSecs": 5 },
+  "messaging": { "local": { "host": "emqx.local:1883",
+    "credentials": { "password": "●●●●●● (redacted)" } } }
+}</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EVENTS ============ -->
+    <section class="screen" id="screen-events">
+      <h1 class="ph">Events &amp; alerts</h1>
+      <div class="ph-sub"><span>Console alerts, component events, and the operator audit trail.</span><span class="tag info sm"><span class="cd"></span>live tail on</span></div>
+      <div class="row c3">
+        <div class="tile"><div class="lab">Active alarms</div><div class="num tnum" style="font-size:24px">2</div><div class="foot">1 crit · 1 warn · +11 contained</div></div>
+        <div class="tile"><div class="lab">Events / min</div><svg class="spark" width="100%" height="40" viewBox="0 0 200 40" preserveAspectRatio="none"><polyline points="0,30 25,28 50,32 75,20 100,26 125,14 150,22 175,10 200,16" fill="none" stroke="var(--link)" stroke-width="1.5"/></svg></div>
+        <div class="tile"><div class="lab">Noisiest</div><div class="num tnum" style="font-size:18px">pack-gw-01</div><div class="foot">9 events / 5 min</div></div>
+      </div>
+      <div class="tblwrap"><table class="dt">
+        <thead><tr><th>Severity</th><th>Time</th><th>Source</th><th>Event</th><th>State</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag err"><span class="cd"></span>Critical</span></td><td class="tnum mono">14:07:12</td><td class="pri">opcua-adapter</td><td>Heartbeat stale (43s &gt; 15s threshold)</td><td>Active</td><td><button class="btn ghost sm">Ack</button></td></tr>
+          <tr><td><span class="tag unreach"><span class="cd"></span>Unreach</span></td><td class="tnum mono">14:05:03</td><td class="pri">assembly / asm-gw-01</td><td>uns-bridge offline <span class="tag gray sm">+11 contained</span></td><td>Active</td><td><button class="btn ghost sm">Details</button></td></tr>
+          <tr><td><span class="tag gray"><span class="cd"></span>Info</span></td><td class="tnum mono">14:04:51</td><td class="pri">operator: marc</td><td>Wrote 42.5 to Channel1.Device1.Setpoint on pack-gw-01/opcua-adapter</td><td>Audit</td><td><button class="btn ghost sm">View</button></td></tr>
+          <tr><td><span class="tag ok"><span class="cd"></span>Resolved</span></td><td class="tnum mono">14:01:41</td><td class="pri">modbus-adapter</td><td>Reconnected (was disconnected 22s)</td><td>Auto</td><td><button class="btn ghost sm">View</button></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ SIGNALS / SETTINGS (light) ============ -->
+    <section class="screen" id="screen-signals">
+      <h1 class="ph">Signals</h1><div class="ph-sub"><span>Data-plane browser · UNS <span class="mono">data</span> class on <span class="mono">southbound</span>.</span></div>
+      <div class="tblwrap"><table class="dt"><thead><tr><th>Signal</th><th>Latest</th><th>Quality</th><th>Age</th><th></th></tr></thead><tbody>
+        <tr><td class="pri">press-gw-01 / Temp_01</td><td class="tnum">72.4</td><td><span class="tag ok sm"><span class="cd"></span>GOOD</span></td><td class="tnum mono">1s</td><td><button class="btn ghost sm">Read</button></td></tr>
+        <tr><td class="pri">press-gw-01 / Pressure</td><td class="tnum">4.1</td><td><span class="tag warn sm"><span class="cd"></span>UNCERTAIN</span></td><td class="tnum mono">2s</td><td><button class="btn ghost sm">Read</button></td></tr>
+        <tr><td class="pri">pack-gw-01 / Flow_A</td><td class="helper">—</td><td><span class="tag err sm"><span class="cd"></span>BAD</span></td><td class="tnum mono">14m</td><td><button class="btn ghost sm">Read</button></td></tr>
+      </tbody></table></div>
+    </section>
+    <section class="screen" id="screen-settings">
+      <h1 class="ph">Settings</h1><div class="ph-sub"><span>Console policy — hot-applied via the console's own config.</span></div>
+      <div class="slist" style="max-width:640px">
+        <div class="r hd"><span class="k">Policy</span><span class="v" style="font-family:var(--sans);color:var(--text)">value</span></div>
+        <div class="r"><span class="k">Site-map (thing → line)</span><span class="v">edit ▸</span></div>
+        <div class="r"><span class="k">Staleness thresholds</span><span class="v">2× warn / 2.5× stale / 5× offline</span></div>
+        <div class="r"><span class="k">Panel trust policy</span><span class="v">signedOnly</span></div>
+        <div class="r"><span class="k">Redaction rules</span><span class="v">built-ins + 2 custom</span></div>
+        <div class="r"><span class="k">Global read-only mode</span><span class="v">off ▸</span></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ WRITE MODAL ============ -->
+<div class="overlay" id="writeModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Write to physical device">
+    <div class="mh">
+      <div><h3>Write to physical device <span class="tag err sm"><span class="cd"></span>danger</span></h3>
+        <div class="sub">opcua-adapter · pack-gw-01 · this writes to physical equipment</div></div>
+      <button class="mx" id="closeWrite" aria-label="close">✕</button>
+    </div>
+    <div class="mb">
+      <div class="slist" style="margin-bottom:16px"><div class="r"><span class="k">Node</span><span class="v">ns=2;s=Channel1.Device1.Setpoint</span></div><div class="r"><span class="k">Current value</span><span class="v">40.0 · GOOD</span></div><div class="r"><span class="k">Data type</span><span class="v">Double</span></div></div>
+      <label class="fldlbl">New value</label><input class="fld fldmono" value="42.5" style="margin-bottom:16px">
+      <label class="fldlbl">Type <b class="mono">SETPOINT</b> to confirm</label><input class="fld fldmono" placeholder="type to confirm" style="margin-bottom:8px">
+      <div class="note info" style="margin:0"><span class="ni">ⓘ</span><div class="nb">Uses <span class="mono">sb.write</span> with <span class="mono">verify: true</span> — the console shows the read-back value, and audits the change before dispatch.</div></div>
+    </div>
+    <div class="mf"><button class="btn secondary" id="cancelWrite" style="background:var(--layer);color:var(--text);border:1px solid var(--border-sub)">Cancel</button><button class="btn danger">Write &amp; verify</button></div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    function goto(id){
+      document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
+      var el=document.getElementById('screen-'+id); if(el)el.classList.add('active');
+      document.querySelectorAll('.side-nav-item').forEach(function(n){n.classList.toggle('selected', n.dataset.screen===id);});
+      window.scrollTo(0,0);
+    }
+    document.querySelectorAll('.side-nav-item').forEach(function(n){ n.addEventListener('click',function(){goto(n.dataset.screen);}); });
+    document.querySelectorAll('[data-goto]').forEach(function(el){ el.addEventListener('click',function(e){ e.stopPropagation(); goto(el.dataset.goto); }); });
+
+    // tabs (scoped by data-tabgroup)
+    document.querySelectorAll('.tabs').forEach(function(group){
+      group.querySelectorAll('.tab').forEach(function(tab){
+        tab.addEventListener('click',function(){
+          group.querySelectorAll('.tab').forEach(function(t){t.classList.remove('on');}); tab.classList.add('on');
+          var scope=group.parentElement;
+          scope.querySelectorAll(':scope > .tabpane').forEach(function(p){p.classList.toggle('on', p.dataset.pane===tab.dataset.tab);});
+        });
+      });
+    });
+    // subtabs (visual only)
+    document.querySelectorAll('.subtabs').forEach(function(g){ g.querySelectorAll('span').forEach(function(s){ s.addEventListener('click',function(){ g.querySelectorAll('span').forEach(function(x){x.classList.remove('on');}); s.classList.add('on'); }); }); });
+
+    // modal
+    var ov=document.getElementById('writeModal');
+    function closeM(){ov.classList.remove('on');}
+    var ob=document.getElementById('openWrite'); if(ob)ob.addEventListener('click',function(){ov.classList.add('on');});
+    ['closeWrite','cancelWrite'].forEach(function(id){var b=document.getElementById(id); if(b)b.addEventListener('click',closeM);});
+    ov.addEventListener('click',function(e){if(e.target===ov)closeM();});
+    document.addEventListener('keydown',function(e){if(e.key==='Escape')closeM();});
+
+    // theme
+    document.getElementById('themeBtn').addEventListener('click',function(){document.body.classList.toggle('theme-g100');});
+  })();
+</script>

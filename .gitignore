@@ -1,0 +1,23 @@
+# Dependencies / build output
+node_modules/
+dist/
+coverage/
+logs/
+*.log
+
+# The local sibling-library link (the npm analog of the bridge's gitignored
+# .cargo/config.toml paths override): `npm run link:lib` generates local/ggcommons,
+# a zero-dependency workspace stub that satisfies @edgecommons/ggcommons from the
+# sibling checkout at ../ggcommons/libs/ts. CI has no local/ and resolves the
+# published package instead.
+local/
+
+# The lockfile is deliberately untracked while the sibling link is the dev path:
+# it would record the local/ggcommons stub, which does not exist in CI. Revisit
+# (commit it) when the console pins the published @edgecommons/ggcommons release.
+package-lock.json
+
+# Runtime artifacts (house rule: never commit .vault, caches, TLS certs)
+.vault/
+*.pem
+*.key

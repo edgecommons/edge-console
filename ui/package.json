@@ -1,0 +1,27 @@
+{
+  "name": "@edgecommons/edge-console-ui",
+  "version": "0.1.0",
+  "description": "Edge Console UI: the IBM Carbon/React front end. Scaffold only in slice C0/C1 - the edge-health views (C3) and config-review (C5) land in later slices.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@carbon/react": "^1.78.0",
+    "@edgecommons/edge-console-protocol": "^0.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "sass-embedded": "^1.83.0",
+    "typescript": "^5",
+    "vite": "^6.0.0"
+  }
+}

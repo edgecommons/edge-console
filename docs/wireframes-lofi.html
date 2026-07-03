@@ -1,0 +1,629 @@
+<title>Edge Console — Low-Fidelity Wireframes</title>
+<style>
+  :root{
+    --paper:#ffffff; --ground:#eef1f6; --ink:#1b2227; --ink-2:#4a5560; --ink-3:#6b7680;
+    --line:#c4ccd6; --line-2:#d7dde6; --fill:#e7ebf1; --fill-2:#f4f6fa;
+    --live:#3b6fb0; --live-bg:#e7eff8; --note:#7a5c1e; --note-bg:#f7f1e2; --note-line:#d8c79a;
+    --ok:#3f7a5a; --ok-bg:#e3efe8; --warn:#8a6a12; --warn-bg:#f4ecd8;
+    --stale:#9a6420; --stale-bg:#f4e7d6; --down:#94363b; --down-bg:#f4e0e1;
+    --unk:#5f6b76; --unk-bg:#e3e8ee; --unreach:#576270; --unreach-bg:#e6e9ee;
+    --field:#2f5aa8; --field-bg:#e8f0fb; --cloud:#6a4bb0; --cloud-bg:#efeafa;
+    --sans:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box} body{margin:0}
+  .page{background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.5;padding:32px 20px 96px}
+  .wrap{max-width:1160px;margin:0 auto}
+  a{color:var(--live)}
+
+  .mast{border:1px solid var(--line);background:var(--paper);border-radius:4px;padding:28px 30px;margin-bottom:14px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:0 0 10px}
+  .mast h1{font-size:30px;line-height:1.12;margin:0 0 10px;letter-spacing:-.01em;text-wrap:balance}
+  .mast p{margin:0;max-width:72ch;color:var(--ink-2);font-size:15px}
+  .mast .meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .kv{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line-2);background:var(--fill-2);border-radius:3px;padding:4px 9px;color:var(--ink-2)}
+  .kv b{color:var(--ink);font-weight:600}
+
+  .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px;margin:14px 0 26px}
+  .legend .li{border:1px solid var(--line-2);background:var(--paper);border-radius:4px;padding:11px 13px;font-size:12.5px;color:var(--ink-2)}
+  .legend .li b{display:block;color:var(--ink);font-size:12px;margin-bottom:3px}
+
+  .section{margin:40px 0 0}
+  .section > h2{font-size:13px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0 0 4px;display:flex;align-items:baseline;gap:10px}
+  .section > h2 .num{color:var(--live);font-weight:700}
+  .section > .lede{margin:0 0 16px;color:var(--ink-2);font-size:14px;max-width:80ch}
+
+  .screen{border:1px solid var(--line);background:var(--paper);border-radius:6px;overflow:hidden;box-shadow:0 1px 0 rgba(20,30,40,.03)}
+  .screen + .screen{margin-top:20px}
+  .scr-cap{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;background:var(--fill-2);border-bottom:1px solid var(--line-2);font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+  .scr-cap .route{color:var(--ink-2)} .scr-cap .pri{border:1px solid var(--line);border-radius:20px;padding:2px 9px;color:var(--ink-2);background:var(--paper)}
+
+  .app{display:flex;min-height:340px}
+  .hdr{display:flex;align-items:center;gap:12px;padding:0 14px;height:44px;background:var(--ink);color:#dfe5ec;font-size:13px}
+  .hdr .brand{font-weight:600;color:#fff} .hdr .brand span{color:#93a3b4;font-weight:400}
+  .hdr .site{font-family:var(--mono);font-size:11px;border:1px solid #3a454f;border-radius:3px;padding:2px 8px;color:#b7c2cd}
+  .hdr .spacer{flex:1}
+  .hdr .gitem{display:flex;align-items:center;gap:6px;font-size:12px;color:#c3ccd6}
+  .hdr .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dot.g{background:#5fae86}.dot.a{background:#d9b153}.dot.r{background:#cf7076}.dot.u{background:#8b97a2}
+  .hdr .bell{border:1px solid #3a454f;border-radius:3px;padding:2px 8px;font-size:11px} .hdr .bell b{color:#f0c987}
+  .hdr .hsearch{font-size:12px;color:#93a3b4;border:1px solid #3a454f;border-radius:3px;padding:3px 10px;background:#232c34;flex:0 1 300px}
+
+  .shell-body{display:flex;flex:1}
+  .nav{width:184px;flex:0 0 184px;background:var(--fill-2);border-right:1px solid var(--line-2);padding:8px 0}
+  .nav a{display:flex;gap:8px;align-items:center;padding:7px 14px;font-size:13px;color:var(--ink-2);text-decoration:none;border-left:3px solid transparent}
+  .nav a .ic{font-family:var(--mono);color:var(--ink-3);font-size:11px;width:14px}
+  .nav a.on{background:var(--paper);border-left-color:var(--live);color:var(--ink);font-weight:600} .nav a.on .ic{color:var(--live)}
+  .nav .navsub{font-family:var(--mono);font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;padding:10px 14px 4px}
+  .nav a.line{padding-left:26px;font-size:12px}
+  .main{flex:1;padding:16px 18px;min-width:0;background:var(--paper)}
+
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-bottom:5px}
+  .pageh{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+  .pageh h3{margin:0;font-size:19px;letter-spacing:-.01em}
+  .sub{color:var(--ink-3);font-size:12.5px;margin-top:3px}
+
+  .grid{display:grid;gap:12px}
+  .g4{grid-template-columns:repeat(4,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:820px){.g4{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}.nav{display:none}}
+
+  .tile{border:1px solid var(--line);border-radius:4px;padding:12px;background:var(--paper);min-height:78px}
+  .tile .tl{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);display:flex;justify-content:space-between;align-items:center}
+  .tile .big{font-size:26px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums}
+  .tile .big small{font-size:13px;color:var(--ink-3);font-weight:400}
+  .tile .rowchips{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px}
+
+  .box{border:1px dashed var(--line);border-radius:4px;background:repeating-linear-gradient(135deg,var(--fill-2),var(--fill-2) 7px,var(--paper) 7px,var(--paper) 14px);display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-family:var(--mono);font-size:11px;text-align:center;padding:10px}
+  .solidbox{border:1px solid var(--line);border-radius:4px;background:var(--paper);padding:12px}
+  .h56{min-height:56px}.h72{min-height:72px}.h120{min-height:120px}
+
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-family:var(--mono);border-radius:20px;padding:2px 9px;border:1px solid transparent;white-space:nowrap}
+  .chip .cd{width:7px;height:7px;border-radius:50%}
+  .c-ok{background:var(--ok-bg);color:var(--ok);border-color:#bcd8c8}.c-ok .cd{background:var(--ok)}
+  .c-warn{background:var(--warn-bg);color:var(--warn);border-color:#e3d3a6}.c-warn .cd{background:var(--warn)}
+  .c-stale{background:var(--stale-bg);color:var(--stale);border-color:#e3cba6}.c-stale .cd{background:var(--stale)}
+  .c-down{background:var(--down-bg);color:var(--down);border-color:#e3b8bb}.c-down .cd{background:var(--down)}
+  .c-unk{background:var(--unk-bg);color:var(--unk);border-color:#c4cdd6}.c-unk .cd{background:var(--unk)}
+  .c-unreach{background:var(--unreach-bg);color:var(--unreach);border:1px dashed #a9b3bd}.c-unreach .cd{background:var(--unreach)}
+  .tag{display:inline-block;font-size:10.5px;font-family:var(--mono);border:1px solid var(--line);border-radius:3px;padding:1px 6px;color:var(--ink-2);background:var(--fill-2)}
+
+  .live{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--live);background:var(--live-bg);border:1px solid #bcd2ec;border-radius:20px;padding:1px 7px;text-transform:uppercase;white-space:nowrap}
+  .live::before{content:"\21bb";font-size:11px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:4px;padding:5px 11px;white-space:nowrap}
+  .btn.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .btn.gho{background:transparent;border-color:transparent;color:var(--live);padding-left:4px;padding-right:4px}
+  .btn.dgr{border-color:#d3a1a4;color:var(--down);background:var(--down-bg)}
+  .btnrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+  .tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+  table.wf{border-collapse:collapse;width:100%;min-width:680px;font-size:12px}
+  table.wf th{background:var(--fill-2);text-align:left;padding:8px 10px;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line-2);white-space:nowrap}
+  table.wf td{padding:8px 10px;border-bottom:1px solid var(--line-2);vertical-align:middle;color:var(--ink-2)}
+  table.wf tr:last-child td{border-bottom:none}
+  table.wf td.name{color:var(--ink);font-weight:600}
+  table.wf tr.grouprow td{background:var(--fill-2);font-family:var(--mono);font-size:11px;color:var(--ink-2);border-bottom:1px solid var(--line)}
+  .spark{display:inline-block;vertical-align:middle}
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:11.5px}
+  .fresh{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .fresh.y{color:var(--warn)}.fresh.r{color:var(--down)}
+
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px;border:1px solid var(--line);border-bottom:none;border-radius:4px 4px 0 0;background:var(--fill-2)}
+  .toolbar .search{flex:1;min-width:120px;border:1px solid var(--line);background:var(--paper);border-radius:3px;padding:5px 9px;color:var(--ink-3);font-size:12px}
+  .switcher{display:flex;border:1px solid var(--line);border-radius:3px;overflow:hidden;font-size:11px}
+  .switcher span{padding:5px 10px;color:var(--ink-3);background:var(--paper)} .switcher span.on{background:var(--ink);color:#fff}
+
+  .inote{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-left-width:4px;border-radius:4px;padding:9px 11px;font-size:12.5px;background:var(--paper)}
+  .inote.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+  .inote.down{border-left-color:var(--down);background:var(--down-bg)}
+  .inote.info{border-left-color:var(--live);background:var(--live-bg)}
+  .inote.unreach{border-left-color:var(--unreach);background:var(--unreach-bg)}
+  .inote .msg{flex:1;color:var(--ink)} .inote .msg small{display:block;color:var(--ink-2);font-weight:400;margin-top:1px}
+  .inote .acts{display:flex;gap:6px}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-2);margin-bottom:12px;flex-wrap:wrap}
+  .tabs span{padding:8px 12px;font-size:12.5px;color:var(--ink-3);border-bottom:2px solid transparent}
+  .tabs span.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+  .tabs span .b{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+
+  .subtabs{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;margin-bottom:10px;flex-wrap:wrap}
+  .subtabs span{padding:5px 11px;font-size:11.5px;color:var(--ink-3);border-right:1px solid var(--line-2);background:var(--paper)}
+  .subtabs span:last-child{border-right:none}
+  .subtabs span.on{background:var(--live-bg);color:var(--live);font-weight:600}
+
+  .slist{border:1px solid var(--line);border-radius:4px;overflow:hidden;font-size:12px}
+  .slist .r{display:flex;justify-content:space-between;gap:10px;padding:7px 11px;border-bottom:1px solid var(--line-2)}
+  .slist .r:last-child{border-bottom:none} .slist .r .k{color:var(--ink-3)}
+  .slist .r .v{color:var(--ink);font-family:var(--mono);font-size:11.5px;text-align:right}
+
+  .note{border-left:3px solid var(--note-line);background:var(--note-bg);color:var(--note);border-radius:0 4px 4px 0;padding:9px 12px;font-size:12.5px;margin-top:12px}
+  .note b{color:#5f470f} .note code{font-family:var(--mono);font-size:11.5px;background:#efe6cf;padding:1px 4px;border-radius:3px;color:#5f470f}
+  .note.stack{margin-top:10px}
+
+  .slot{border:2px dashed var(--live);background:var(--live-bg);border-radius:6px;padding:14px}
+  .slot .slotcap{font-family:var(--mono);font-size:11px;color:var(--live);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+
+  /* tree browser + signal grid */
+  .tree{border:1px solid var(--line);border-radius:4px;background:var(--paper);font-family:var(--mono);font-size:11.5px}
+  .tree .tr{padding:5px 10px;border-bottom:1px solid var(--fill-2);color:var(--ink-2)}
+  .tree .tr:last-child{border-bottom:none}
+  .tree .tr.sel{background:var(--live-bg);color:var(--ink)}
+  .tree .tr .wr{color:var(--ok)} .tree .tr .lv{color:var(--live)}
+  .indent1{padding-left:24px}.indent2{padding-left:40px}
+
+  /* flow diagram */
+  .flow{display:grid;gap:10px}
+  .flowrow{display:grid;grid-template-columns:26px 1fr;gap:12px;align-items:start}
+  .flowrow .n{width:26px;height:26px;border-radius:50%;background:var(--ink);color:#fff;font-family:var(--mono);font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:600}
+  .flowrow .c{border:1px solid var(--line);border-radius:4px;background:var(--paper);padding:9px 12px;font-size:12.5px}
+  .flowrow .c .t{font-family:var(--mono);font-size:11px;color:var(--live);background:var(--live-bg);border:1px solid #bcd2ec;border-radius:3px;padding:1px 6px;margin-left:2px}
+  .mono{font-family:var(--mono)}
+
+  /* system-context / aggregation strip */
+  .agg{display:grid;grid-template-columns:1fr auto 1fr auto 1.2fr;gap:10px;align-items:stretch}
+  @media(max-width:820px){.agg{grid-template-columns:1fr}}
+  .agg .node{border:1px solid var(--line);border-radius:5px;padding:12px;background:var(--paper);text-align:center}
+  .agg .node.hl{border-color:var(--live);background:var(--live-bg)}
+  .agg .node b{display:block;font-size:13px} .agg .node small{color:var(--ink-3);font-size:11px;font-family:var(--mono)}
+  .agg .arrow{display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-family:var(--mono);font-size:11px;text-align:center}
+  .agg .stack{display:flex;flex-direction:column;gap:8px}
+  .agg .dev{border:1px solid var(--line);border-radius:5px;padding:8px 10px;background:var(--fill-2);font-size:12px;text-align:left}
+  .agg .dev small{font-family:var(--mono);color:var(--ink-3);font-size:10.5px}
+
+  /* topology map */
+  .topo{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .topo-band{padding:9px 12px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .topo-band.nb{background:var(--cloud-bg);border-bottom:1px solid #d6ccec}
+  .topo-band.infra{background:var(--fill-2);border-bottom:1px solid var(--line-2)}
+  .cloudnode{background:var(--paper);border:1px solid #bfa9e6;color:var(--cloud);border-radius:4px;padding:3px 9px;font-size:11px;text-transform:none}
+  .infranode{background:var(--paper);border:1px solid var(--line);color:var(--ink-2);border-radius:4px;padding:3px 9px;font-size:11px;text-transform:none}
+  .topo-cols{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  @media(max-width:760px){.topo-cols{grid-template-columns:1fr}}
+  .topo-col{padding:12px;border-right:1px solid var(--line-2)}
+  .topo-col:last-child{border-right:none}
+  .linehdr{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--ink);margin-bottom:8px;flex-wrap:wrap}
+  .edge{font-family:var(--mono);font-size:10.5px;text-align:center;padding:3px;color:var(--ink-3)}
+  .edge.up.ok,.edge.down.ok{color:var(--ok)} .edge.down.bad{color:var(--down)} .edge.down.warn{color:var(--warn)}
+  .devcard{border:1px solid var(--line);border-radius:5px;background:var(--fill-2);padding:9px}
+  .devcard.unreach{border-style:dashed;background:var(--unreach-bg);opacity:.75}
+  .devhdr{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-bottom:8px;flex-wrap:wrap}
+  .compchips{display:flex;flex-wrap:wrap;gap:6px}
+  .compchip{border:1px solid var(--line);border-radius:4px;padding:4px 8px;font-size:11px;background:var(--paper);display:flex;align-items:center;gap:6px}
+  .compchip.ok{border-color:#bcd8c8;background:var(--ok-bg)} .compchip.warn{border-color:#e3d3a6;background:var(--warn-bg)} .compchip.down{border-color:#e3b8bb;background:var(--down-bg)}
+  .fieldrow{display:flex;flex-wrap:wrap;gap:6px}
+  .fieldnode{border:1px solid #b6cdee;background:var(--field-bg);color:var(--field);border-radius:4px;padding:4px 8px;font-size:11px}
+  .fieldnode.down{border:1px dashed #d3a1a4;background:var(--down-bg);color:var(--down)}
+  .topokey{display:flex;flex-wrap:wrap;gap:14px;padding:9px 12px;border-top:1px solid var(--line-2);background:var(--fill-2);font-size:11px;color:var(--ink-3)}
+
+  .modal{border:1px solid var(--line);border-radius:6px;background:var(--paper);box-shadow:0 6px 18px rgba(20,30,40,.12);max-width:420px;overflow:hidden}
+  .modal .mh{padding:10px 14px;border-bottom:1px solid var(--line-2);font-weight:600;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+  .modal .mb{padding:12px 14px;font-size:12.5px;color:var(--ink-2)}
+  .modal .mf{padding:10px 14px;border-top:1px solid var(--line-2);display:flex;justify-content:flex-end;gap:8px;background:var(--fill-2)}
+  .inp{border:1px solid var(--line);border-radius:3px;padding:5px 8px;font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--paper);width:100%}
+
+  .foot{margin-top:44px;border-top:1px solid var(--line);padding-top:16px;color:var(--ink-3);font-size:12px;font-family:var(--mono)}
+  h4.blk{font-size:13px;margin:18px 0 8px;color:var(--ink-2);font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+  :focus-visible{outline:2px solid var(--live);outline-offset:2px}
+</style>
+
+<div class="page"><div class="wrap">
+
+  <!-- MASTHEAD -->
+  <header class="mast">
+    <p class="eyebrow">EdgeCommons · Low-Fidelity Wireframes · v0.2</p>
+    <h1>Edge Console — a live, site-scoped operations UI for ggcommons components</h1>
+    <p>One browser-facing console per <b>site</b>, aggregating every <b>line → device → component</b> over a Unified
+       Namespace. It deploys as a standard ggcommons component and is the sole bridge between the browser
+       (HTTPS + WebSocket) and the message bus (MQTT / IPC). These grayscale wireframes fix <b>layout, hierarchy, and
+       real-time behavior</b> — not visual design. High-fidelity IBM Carbon mockups come next.</p>
+    <div class="meta">
+      <span class="kv">v0.2 adds &nbsp;<b>site hierarchy · UNS · topology view · rich control</b></span>
+      <span class="kv">Priority&nbsp;1 &nbsp;<b>Edge health</b></span>
+      <span class="kv">Priority&nbsp;2 &nbsp;<b>Config review</b></span>
+      <span class="kv">Design system &nbsp;<b>IBM Carbon</b></span>
+    </div>
+  </header>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="li"><b>Solid box</b>A real UI region / Carbon component in high-fi.</div>
+    <div class="li"><b>Hatched box</b>Data placeholder — chart/sparkline whose visual form is deferred to high-fi.</div>
+    <div class="li"><b><span class="live">live</span> badge</b>Updates in real time over the WebSocket; the note names the UNS class that feeds it.</div>
+    <div class="li"><b>Health chips</b><span class="chip c-ok"><span class="cd"></span>Healthy</span> <span class="chip c-warn"><span class="cd"></span>Degraded</span> <span class="chip c-stale"><span class="cd"></span>Stale</span> <span class="chip c-down"><span class="cd"></span>Offline</span> <span class="chip c-unk"><span class="cd"></span>Unknown</span></div>
+    <div class="li"><b>Reachability (v0.2)</b><span class="chip c-unreach"><span class="cd"></span>Unreachable</span> — the <i>path</i> is down (bridge/bus), not the component. Never shown as Offline.</div>
+    <div class="li"><b>Amber margin note</b>Reviewer / architecture annotation — not part of the UI.</div>
+  </div>
+
+  <!-- 00 SYSTEM CONTEXT (UNS aggregation) -->
+  <section class="section">
+    <h2><span class="num">00</span> System context — one console, many device buses, one namespace</h2>
+    <p class="lede">A site has multiple device buses (a local broker per HOST device; a device-local IPC bus per Greengrass core).
+      A per-device <span class="mono">uns-bridge</span> relays each onto one <b>site UNS broker</b>; the console connects to that single bus and fans state out to every tab.</p>
+    <div class="agg">
+      <div class="node"><b>Browser tabs</b><small>React + Carbon SPA</small></div>
+      <div class="arrow">◄─ HTTPS + WS ─►<br>snapshot + deltas</div>
+      <div class="node hl"><b>edge-console</b><small>hierarchical FleetModel<br>WsFanout · CommandGateway</small></div>
+      <div class="arrow">◄─ 6 UNS subs ─►<br>+ commands</div>
+      <div class="stack">
+        <div class="node" style="padding:8px"><b>Site UNS broker</b><small>EMQX @ gateway</small></div>
+        <div class="dev">uns-bridge ◄ <b>gw-pack3-01</b> <small>Greengrass · IPC bus</small></div>
+        <div class="dev">uns-bridge ◄ <b>gw-pack4-01</b> <small>HOST · local MQTT</small></div>
+      </div>
+    </div>
+    <div class="note"><b>Why this shape (grounded).</b> Greengrass IPC is <b>device-local</b> — two cores can't see each other's bus — and there's
+      <b>no MQTT retain</b> and <b>no consumer-side miss-detection</b> in the platform. So aggregation happens below the console (the bridge), the
+      console keeps its own last-known-value cache + staleness engine, and every tab gets a <b>snapshot then deltas</b>. On <b>Kubernetes</b> the
+      in-cluster broker already <i>is</i> the site broker — no bridge needed inside a cluster (see DESIGN.md §3.6).</div>
+  </section>
+
+  <!-- 01 EDGE HEALTH OVERVIEW (grouped by line) -->
+  <section class="section">
+    <h2><span class="num">01</span> Edge Health Overview <span class="tag">Priority&nbsp;#1 · grouped by line</span></h2>
+    <p class="lede">Fleet-at-a-glance for one site, now grouped by line with line rollups and reachability. The wall-monitor page.</p>
+    <div class="screen">
+      <div class="scr-cap"><span class="route">GET&nbsp;/</span><span class="pri">Priority&nbsp;#1</span></div>
+      <div class="app"><div style="flex:1">
+        <div class="hdr">
+          <span class="brand">EdgeCommons <span>/ Edge Console</span></span>
+          <span class="site">site: dallas</span><span class="spacer"></span>
+          <span class="gitem"><span class="dot g"></span>WS Live</span>
+          <span class="gitem"><span class="dot g"></span>Bus MQTT</span>
+          <span class="bell">Alerts <b>2</b></span><span class="gitem">◐ theme</span>
+        </div>
+        <div class="shell-body">
+          <nav class="nav">
+            <a class="on" href="#"><span class="ic">▣</span>Overview</a>
+            <a href="#"><span class="ic">◎</span>Site Topology</a>
+            <a href="#"><span class="ic">▤</span>Components</a>
+            <a href="#"><span class="ic">≣</span>Configuration</a>
+            <a href="#"><span class="ic">◔</span>Events &amp; Alerts</a>
+            <a href="#"><span class="ic">∿</span>Signals</a>
+            <a href="#"><span class="ic">⚙</span>Settings</a>
+            <div class="navsub">Lines</div>
+            <a class="line" href="#">▸ stamping</a>
+            <a class="line" href="#">▸ packaging</a>
+            <a class="line" href="#">▸ Unassigned</a>
+          </nav>
+          <div class="main">
+            <div class="grid g4">
+              <div class="tile"><div class="tl">Site health <span class="live">live</span></div><div class="big" style="font-size:18px">Degraded</div><div class="rowchips"><span class="chip c-ok"><span class="cd"></span>5</span><span class="chip c-warn"><span class="cd"></span>1</span><span class="chip c-down"><span class="cd"></span>1</span><span class="chip c-unreach"><span class="cd"></span>2</span></div></div>
+              <div class="tile"><div class="tl">Active alerts <span class="live">live</span></div><div class="big">2</div><div class="sub">1 critical · 1 warning<br>+11 contained</div></div>
+              <div class="tile"><div class="tl">Lines</div><div class="big">3</div><div class="sub">stamping · packaging · Unassigned</div></div>
+              <div class="tile"><div class="tl">Site bus + console</div><div class="big" style="font-size:15px">MQTT <span class="chip c-ok"><span class="cd"></span>ok</span></div><div class="sub">console self-vitals · cpu 4%</div></div>
+            </div>
+
+            <h4 class="blk">Fleet — grouped by line</h4>
+            <div class="toolbar">
+              <span class="search">🔍 search components…</span>
+              <span class="tag">status ▾</span><span class="tag">line ▾</span><span class="tag">platform ▾</span>
+              <span class="switcher"><span class="on">Table</span><span>Tiles</span></span>
+            </div>
+            <div class="tblwrap">
+              <table class="wf">
+                <thead><tr><th>Health</th><th>Component</th><th>Device</th><th>Heartbeat</th><th>CPU</th><th>Conn</th><th>Caps</th><th></th></tr></thead>
+                <tbody>
+                  <tr class="grouprow"><td colspan="8">▾ LINE · stamping &nbsp; <span class="chip c-ok"><span class="cd"></span>Healthy</span> &nbsp; 3 components · gw-pack3-01 (Greengrass)</td></tr>
+                  <tr><td><span class="chip c-ok"><span class="cd"></span></span></td><td class="name">opcua-adapter <span class="tag">java</span></td><td class="num">gw-pack3-01</td><td class="fresh">2s</td><td><svg class="spark" width="42" height="15" viewBox="0 0 42 15"><polyline points="0,10 7,8 14,11 21,7 28,9 35,6 42,8" fill="none" stroke="#8a97a4" stroke-width="1.3"/></svg> <span class="num">12%</span></td><td><span class="chip c-ok"><span class="cd"></span></span></td><td class="mono" style="font-size:10px">♥▤⌘▦</td><td><span class="btn gho">⋯</span></td></tr>
+                  <tr><td><span class="chip c-ok"><span class="cd"></span></span></td><td class="name">modbus-adapter</td><td class="num">gw-pack3-01</td><td class="fresh">3s</td><td><span class="num">18%</span></td><td><span class="chip c-ok"><span class="cd"></span></span></td><td class="mono" style="font-size:10px">♥▤⌘</td><td><span class="btn gho">⋯</span></td></tr>
+                  <tr><td><span class="chip c-ok"><span class="cd"></span></span></td><td class="name">telemetry-processor <span class="tag">rust</span></td><td class="num">gw-pack3-01</td><td class="fresh">4s</td><td><span class="num">9%</span></td><td class="mono" style="color:var(--ink-3)">—</td><td class="mono" style="font-size:10px">♥▤</td><td><span class="btn gho">⋯</span></td></tr>
+
+                  <tr class="grouprow"><td colspan="8">▾ LINE · packaging &nbsp; <span class="chip c-warn"><span class="cd"></span>Degraded</span> &nbsp; gw-pack4-01 (HOST)</td></tr>
+                  <tr><td><span class="chip c-warn"><span class="cd"></span></span></td><td class="name">opcua-adapter</td><td class="num">gw-pack4-01</td><td class="fresh">3s</td><td><span class="num">22%</span></td><td><span class="chip c-warn"><span class="cd"></span></span></td><td class="mono" style="font-size:10px">♥▤⌘▦</td><td><span class="btn gho">⋯</span></td></tr>
+                  <tr><td><span class="chip c-down"><span class="cd"></span></span></td><td class="name">modbus-adapter</td><td class="num">gw-pack4-01</td><td class="fresh r">—</td><td class="mono" style="opacity:.5">—</td><td><span class="chip c-down"><span class="cd"></span></span></td><td class="mono" style="font-size:10px">♥▤⌘</td><td><span class="btn gho">⋯</span></td></tr>
+
+                  <tr class="grouprow"><td colspan="8">▸ LINE · assembly &nbsp; <span class="chip c-unreach"><span class="cd"></span>Unreachable</span> &nbsp; asm-gw-01 — bridge offline 2m · <span style="color:var(--ink-3)">2 components frozen, alarms contained (+11)</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="inote unreach" style="margin-top:10px"><span class="chip c-unreach"><span class="cd"></span>Unreachable</span><div class="msg">assembly · asm-gw-01 — uns-bridge offline (last seen 2m ago)<br><small>the road is down, not the houses — 2 components frozen at last-known; 11 would-be OFFLINE alarms suppressed under this one</small></div><div class="acts"><span class="btn gho">Details</span></div></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+    <div class="note"><b>What changed from v0.1.</b> Rows are grouped under collapsible <b>line</b> headers with a line rollup; a whole line can be
+      <span class="chip c-unreach"><span class="cd"></span>Unreachable</span> (its bridge/bus down) — distinct from Offline, with <b>alarm containment</b>
+      so one dead line is one alert (+N contained), not a wall of red. Identity/line comes from the UNS <code>origin</code> block, not topic parsing.</div>
+  </section>
+
+  <!-- 02 SITE TOPOLOGY (NEW) -->
+  <section class="section">
+    <h2><span class="num">02</span> Site Topology <span class="tag">NEW · your feedback #4</span></h2>
+    <p class="lede">A graphical map of the site: lines → devices → components, with <b>southbound</b> edges to field equipment (down) and
+      <b>northbound</b> edges to the cloud (up). Field at the bottom, cloud at the top; health on nodes, dependency state + flow on edges.</p>
+    <div class="screen">
+      <div class="scr-cap"><span class="route">GET&nbsp;/topology</span><span class="pri">graphical</span></div>
+      <div class="topo">
+        <div class="topo-band nb">▲ Northbound · cloud
+          <span class="cloudnode">AWS IoT Core</span><span class="cloudnode">Kinesis: telemetry</span>
+        </div>
+        <div class="topo-band infra">Site: dallas · aggregation
+          <span class="infranode">Site UNS broker (EMQX)</span><span class="infranode">edge-console</span>
+        </div>
+        <div class="topo-cols">
+          <!-- Line 1 -->
+          <div class="topo-col">
+            <div class="linehdr">Line: stamping <span class="chip c-ok"><span class="cd"></span>Healthy</span></div>
+            <div class="edge up ok">↑ northbound · telemetry → Kinesis · CONNECTED</div>
+            <div class="devcard">
+              <div class="devhdr">▲ press-gw-01 <span class="tag">Greengrass</span> <span class="dot g" style="display:inline-block"></span> bridge ok</div>
+              <div class="compchips">
+                <span class="compchip ok"><span class="chip c-ok" style="padding:0"><span class="cd"></span></span> opcua-adapter</span>
+                <span class="compchip ok"><span class="chip c-ok" style="padding:0"><span class="cd"></span></span> modbus-adapter</span>
+                <span class="compchip ok"><span class="chip c-ok" style="padding:0"><span class="cd"></span></span> telemetry-processor</span>
+              </div>
+            </div>
+            <div class="edge down ok">↓ southbound · CONNECTED</div>
+            <div class="fieldrow">
+              <span class="fieldnode">KEP press (OPC UA) · 41 sig/s</span>
+              <span class="fieldnode">Press PLC (Modbus) · 12 sig/s</span>
+            </div>
+          </div>
+          <!-- Line 2 -->
+          <div class="topo-col">
+            <div class="linehdr">Line: packaging <span class="chip c-warn"><span class="cd"></span>Degraded</span> <span class="tag" style="color:var(--down)">1 alarm</span></div>
+            <div class="edge up ok">↑ northbound · CONNECTED</div>
+            <div class="devcard">
+              <div class="devhdr">▲ pack-gw-01 <span class="tag">HOST</span> <span class="dot g" style="display:inline-block"></span> bridge ok</div>
+              <div class="compchips">
+                <span class="compchip warn"><span class="chip c-warn" style="padding:0"><span class="cd"></span></span> opcua-adapter</span>
+                <span class="compchip down"><span class="chip c-down" style="padding:0"><span class="cd"></span></span> modbus-adapter</span>
+                <span class="compchip ok"><span class="chip c-ok" style="padding:0"><span class="cd"></span></span> telemetry-processor</span>
+              </div>
+            </div>
+            <div class="edge down bad">↓ southbound · Modbus DISCONNECTED 14m ✕</div>
+            <div class="fieldrow">
+              <span class="fieldnode">Packager OPC UA · 8 sig/s</span>
+              <span class="fieldnode down">Conveyor drive (Modbus) ✕</span>
+            </div>
+          </div>
+        </div>
+        <div class="topokey">
+          <span><b>Node fill</b> = health</span>
+          <span><b>Edge colour/style</b> = dependency state (solid green connected · dashed red disconnected · dotted “declared, not observed”)</span>
+          <span><b>Edge weight/animation</b> = throughput</span>
+          <span><b>Badge</b> = active alarms</span>
+        </div>
+      </div>
+    </div>
+    <div class="note"><b>Reads at a glance:</b> Line 2's Modbus southbound link is the red edge and its adapter chip is red, so the line goes amber with one
+      alarm — the <b>drive being down is an edge problem, not a device problem</b>, a distinction the flat list can't draw. Field nodes come from each
+      component's <code>state.dependencies[]</code> (or dotted from adapter config before <code>status</code> flows). Deterministic layered layout
+      (operators build spatial memory); drill site → line → device → component; click an edge for the dependency inspector.</div>
+    <div class="note stack"><b>Low-fi caveat.</b> Shown here as a schematic (bands + line columns). In high-fi this is a proper SVG graph with routed
+      connectors, semantic-zoom drill-down, live edge animation (respecting <code>prefers-reduced-motion</code>), and an “only what's red/amber” filter.</div>
+  </section>
+
+  <!-- 03 COMPONENTS: FIND -> DRILL -> INSPECT -->
+  <section class="section">
+    <h2><span class="num">03</span> Components — find, drill in, inspect <span class="tag">answers: how do I reach a specific component?</span></h2>
+    <p class="lede">Selecting <b>Components</b> opens a hierarchical <b>browser</b>: a searchable Site → Line → Device → Component → Instance
+      tree on the left; picking a leaf opens that component's detail on the right. Four paths reach the same destination — this tree, an
+      Overview row, a Topology chip, or the header search.</p>
+
+    <div class="screen">
+      <div class="scr-cap"><span class="route">GET&nbsp;/components</span><span class="pri">finder / browser</span></div>
+      <div class="app"><div style="flex:1">
+        <div class="hdr">
+          <span class="brand">EdgeCommons <span>/ Edge Console</span></span>
+          <span class="hsearch">⌕ search components · things · signals…</span>
+          <span class="spacer"></span>
+          <span class="gitem"><span class="dot g"></span>WS Live</span><span class="bell">Alerts <b>2</b></span>
+        </div>
+        <div class="shell-body">
+          <nav class="nav">
+            <a href="#"><span class="ic">▣</span>Overview</a><a href="#"><span class="ic">◎</span>Site Topology</a>
+            <a class="on" href="#"><span class="ic">▤</span>Components</a><a href="#"><span class="ic">≣</span>Configuration</a>
+            <a href="#"><span class="ic">◔</span>Events</a><a href="#"><span class="ic">∿</span>Signals</a><a href="#"><span class="ic">⚙</span>Settings</a>
+          </nav>
+          <div class="main">
+            <div class="grid" style="grid-template-columns:300px 1fr;gap:14px">
+              <!-- hierarchical tree navigator -->
+              <div>
+                <input class="inp" placeholder="🔍 filter tree…" style="margin-bottom:8px">
+                <div class="btnrow" style="margin-bottom:8px"><span class="tag">status ▾</span><span class="tag">type ▾</span><span class="tag">platform ▾</span></div>
+                <div class="tree">
+                  <div class="tr">▾ Site: dallas</div>
+                  <div class="tr indent1"><span class="dot g" style="display:inline-block;margin-right:6px"></span>▾ stamping <span class="tag">3</span></div>
+                  <div class="tr indent2"><span class="dot g" style="display:inline-block;margin-right:6px"></span>▾ press-gw-01</div>
+                  <div class="tr" style="padding-left:58px"><span class="dot g" style="display:inline-block;margin-right:6px"></span>opcua-adapter</div>
+                  <div class="tr" style="padding-left:58px"><span class="dot g" style="display:inline-block;margin-right:6px"></span>modbus-adapter</div>
+                  <div class="tr" style="padding-left:58px"><span class="dot g" style="display:inline-block;margin-right:6px"></span>telemetry-processor</div>
+                  <div class="tr indent1"><span class="dot a" style="display:inline-block;margin-right:6px"></span>▾ packaging <span class="tag">2</span></div>
+                  <div class="tr indent2"><span class="dot a" style="display:inline-block;margin-right:6px"></span>▾ pack-gw-01</div>
+                  <div class="tr sel" style="padding-left:58px"><span class="dot a" style="display:inline-block;margin-right:6px"></span>opcua-adapter</div>
+                  <div class="tr" style="padding-left:58px"><span class="dot r" style="display:inline-block;margin-right:6px"></span>modbus-adapter</div>
+                  <div class="tr indent1"><span class="dot u" style="display:inline-block;margin-right:6px"></span>▸ assembly <span class="tag">unreachable</span></div>
+                </div>
+              </div>
+              <!-- selected node -->
+              <div>
+                <div class="crumb">dallas / packaging / pack-gw-01 / opcua-adapter</div>
+                <div class="solidbox">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+                    <div><b style="font-size:15px">opcua-adapter</b> <span class="chip c-warn" style="vertical-align:middle"><span class="cd"></span>Degraded</span>
+                      <div class="sub">line packaging · pack-gw-01 · HOST · java · v1.4.2 · 1 instance</div></div>
+                    <div class="btnrow"><span class="btn gho">Ping</span><span class="btn gho">Query status</span><span class="btn pri">Open detail →</span></div>
+                  </div>
+                  <div class="grid g4" style="margin-top:12px">
+                    <div class="tile"><div class="tl">CPU <span class="live">live</span></div><div class="big" style="font-size:18px">22%</div></div>
+                    <div class="tile"><div class="tl">Mem</div><div class="big" style="font-size:18px">210MB</div></div>
+                    <div class="tile"><div class="tl">Heartbeat</div><div class="big" style="font-size:18px">3s</div></div>
+                    <div class="tile"><div class="tl">Open alerts</div><div class="big" style="font-size:18px">1</div></div>
+                  </div>
+                </div>
+                <div class="note" style="margin-top:10px">Picking a <b>component</b> shows this summary + <b>Open detail →</b>. Picking a <b>line</b> or <b>device</b> node instead
+                  shows a roster table of everything beneath it — so the tree doubles as the site inventory.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <div class="note"><b>Four ways in, one destination.</b> (1) this <b>Components</b> tree; (2) a row in the <b>Overview</b> fleet table;
+      (3) a chip in the <b>Site Topology</b>; (4) the <b>header search</b> (type-ahead over component / thing / signal names, present on
+      every screen). All route to the Component Detail page below. Routes are UNS-shaped: <code>/site/{area}/{device}/{component}</code>.</div>
+
+    <h4 class="blk">…which opens the Component Detail page</h4>
+    <div class="screen">
+      <div class="scr-cap"><span class="route">GET&nbsp;/site/packaging/pack-gw-01/opcua-adapter</span><span class="pri">drill-down</span></div>
+      <div class="app"><div style="flex:1">
+        <div class="hdr"><span class="brand">EdgeCommons <span>/ Edge Console</span></span><span class="spacer"></span><span class="gitem"><span class="dot a"></span>WS Live</span><span class="bell">Alerts <b>2</b></span></div>
+        <div class="shell-body">
+          <nav class="nav">
+            <a href="#"><span class="ic">▣</span>Overview</a><a href="#"><span class="ic">◎</span>Site Topology</a>
+            <a class="on" href="#"><span class="ic">▤</span>Components</a><a href="#"><span class="ic">≣</span>Configuration</a>
+            <a href="#"><span class="ic">◔</span>Events</a><a href="#"><span class="ic">∿</span>Signals</a><a href="#"><span class="ic">⚙</span>Settings</a>
+          </nav>
+          <div class="main">
+            <div class="crumb">dallas / packaging / pack-gw-01 / opcua-adapter</div>
+            <div class="pageh">
+              <div><h3>opcua-adapter <span class="chip c-warn" style="vertical-align:middle"><span class="cd"></span>Degraded</span></h3>
+                <div class="sub">line packaging · device pack-gw-01 · HOST · java · app v1.4.2 · keepalive 5s · last state 3s ago</div></div>
+              <div class="btnrow"><span class="btn gho">Ping</span><span class="btn gho">Query status</span><span class="btn gho">View config</span></div>
+            </div>
+            <div class="tabs"><span class="on">Health</span><span>Instances <span class="b">1</span></span><span>Panel <span class="b">4 views</span></span><span>Configuration</span><span>Events</span><span>Logs</span></div>
+
+            <h4 class="blk">Panel ▸ component-provided views</h4>
+            <div class="slot">
+              <div class="slotcap"><span>◈ provided by opcua-adapter · descriptor · v2</span><span><span class="btn gho">Reload panel</span></span></div>
+              <div class="subtabs"><span>Overview</span><span class="on">Address Space</span><span>Signals</span><span>Diagnostics</span></div>
+              <div class="grid" style="grid-template-columns:1.3fr 1fr;gap:12px">
+                <div>
+                  <div class="tl" style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;margin-bottom:6px">treeBrowser <span class="live">live</span> · bound to <span class="mono">cmd/sb.browse</span></div>
+                  <div class="tree">
+                    <div class="tr">▾ ns=2 · Channel1</div>
+                    <div class="tr indent1">▾ Device1</div>
+                    <div class="tr indent2">Temperature &nbsp;<span class="lv">◉ live</span></div>
+                    <div class="tr indent2 sel">Setpoint &nbsp;<span class="wr">✎ writable</span></div>
+                    <div class="tr indent2">RunState</div>
+                    <div class="tr indent1">▸ Device2</div>
+                  </div>
+                </div>
+                <div>
+                  <div class="tl" style="font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;margin-bottom:6px">Selection · <span class="mono">cmd/sb.read</span></div>
+                  <div class="slist" style="margin-bottom:8px">
+                    <div class="r"><span class="k">node</span><span class="v">…Device1.Setpoint</span></div>
+                    <div class="r"><span class="k">value</span><span class="v">40.0</span></div>
+                    <div class="r"><span class="k">quality</span><span class="v"><span class="chip c-ok"><span class="cd"></span>GOOD</span></span></div>
+                    <div class="r"><span class="k">dataType</span><span class="v">Double</span></div>
+                  </div>
+                  <div class="btnrow"><span class="btn gho">Read now</span><span class="btn dgr">Write…</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid g2" style="margin-top:14px;align-items:start">
+              <div>
+                <h4 class="blk" style="margin-top:0">Confirmed write (host-owned modal)</h4>
+                <div class="modal">
+                  <div class="mh">Write to physical device <span class="chip c-down"><span class="cd"></span>danger</span></div>
+                  <div class="mb">
+                    <div style="margin-bottom:8px">Node <span class="mono">ns=2;s=Channel1.Device1.Setpoint</span></div>
+                    <div class="grid g2" style="gap:8px;margin-bottom:8px"><div><div class="sub">current</div><div class="mono">40.0</div></div><div><div class="sub">new value</div><input class="inp" value="42.5"></div></div>
+                    <div class="sub">☐ I understand this writes to the physical device · type <span class="mono">SETPOINT</span> to confirm</div>
+                    <input class="inp" placeholder="type to confirm" style="margin-top:6px">
+                  </div>
+                  <div class="mf"><span class="btn">Cancel</span><span class="btn dgr">Write &amp; verify</span></div>
+                </div>
+              </div>
+              <div>
+                <h4 class="blk" style="margin-top:0">Result — confirmed, not fire-and-forget</h4>
+                <div class="slist">
+                  <div class="r"><span class="k">sb.write</span><span class="v"><span class="chip c-ok"><span class="cd"></span>ok</span></span></div>
+                  <div class="r"><span class="k">verifiedValue (read-back)</span><span class="v">42.5</span></div>
+                  <div class="r"><span class="k">audit</span><span class="v">logged before dispatch</span></div>
+                  <div class="r"><span class="k">events</span><span class="v">mirrored</span></div>
+                </div>
+                <div class="note" style="margin-top:8px">v0.1 could only say <i>“published — no acknowledgment.”</i> The mandated <code>sb.write v2</code> returns a
+                  verified read-back, closing the honesty gap.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+    <div class="note"><b>Tiering.</b> The Address-Space browser, Signals grid, and confirmed write are all <b>descriptor</b> (console-owned
+      <code>treeBrowser</code>/<code>signalGrid</code> widgets bound to <code>cmd/sb.*</code> verbs) — no component JS. The signed, sandboxed
+      <b>Web Component</b> escape hatch stays for genuinely bespoke views (e.g. a namespace-diff visualizer), with a descriptor fallback.</div>
+  </section>
+
+  <!-- 04 CONFIG + EVENTS (compact, hierarchy-aware) -->
+  <section class="section">
+    <h2><span class="num">04</span> Configuration Review &amp; Events <span class="tag">Priority #2 + alarms</span></h2>
+    <p class="lede">Config review is unchanged in shape (effective config, redaction, diff, drift) — now backed by the UNS <code>cfg</code> class +
+      <code>cfg.get</code> verb. Events gains alarm containment.</p>
+    <div class="grid g2">
+      <div class="screen"><div class="scr-cap"><span class="route">/config</span><span class="pri">#2</span></div>
+        <div class="main" style="background:var(--paper)">
+          <b style="font-size:14px">Configuration Review</b>
+          <div class="btnrow" style="justify-content:space-between;margin:8px 0"><span class="tag">source: CONFIGMAP</span><span class="btnrow"><span class="btn gho">Refetch</span><span class="btn gho">Reload</span></span></div>
+          <div class="inote warn" style="margin-bottom:8px"><div class="msg">3 values redacted<br><small>2× $secret · 1× console deny-list</small></div></div>
+          <div class="slist">
+            <div class="r"><span class="k">heartbeat.intervalSecs <span class="tag">schema ⓘ</span></span><span class="v">5 <span style="color:var(--ink-3)">(default)</span></span></div>
+            <div class="r"><span class="k">messaging…password</span><span class="v" style="color:var(--down)">●●●●●● 🔒</span></div>
+            <div class="r"><span class="k">identity.site / .area</span><span class="v">dallas / packaging</span></div>
+            <div class="r"><span class="k">configHash</span><span class="v">a3f1… <span class="tag">drift ✓</span></span></div>
+          </div>
+          <div class="note" style="font-size:11px"><code>configHash</code> drives a fleet drift matrix; Compare mode diffs component-vs-component.</div>
+        </div>
+      </div>
+      <div class="screen"><div class="scr-cap"><span class="route">/events</span><span class="pri">feed</span></div>
+        <div class="main" style="background:var(--paper)">
+          <b style="font-size:14px">Events &amp; Alerts</b>
+          <div class="btnrow" style="margin:8px 0"><span class="tag">state ▾</span><span class="tag">severity ▾</span><span class="live">live tail</span></div>
+          <div class="tblwrap"><table class="wf" style="min-width:0">
+            <tbody>
+              <tr><td><span class="chip c-down"><span class="cd"></span>Crit</span></td><td class="num">14:07</td><td>opcua stale (43s)</td><td>Active</td></tr>
+              <tr><td><span class="chip c-unreach"><span class="cd"></span>Unreach</span></td><td class="num">14:05</td><td>assembly bridge offline <span class="tag">+11 contained</span></td><td>Active</td></tr>
+              <tr><td><span class="chip c-unk"><span class="cd"></span>Info</span></td><td class="num">14:05</td><td>operator marc wrote Setpoint 42.5</td><td>Audit</td></tr>
+              <tr><td><span class="chip c-ok"><span class="cd"></span>Resolved</span></td><td class="num">14:01</td><td>modbus reconnected</td><td>Auto</td></tr>
+            </tbody></table></div>
+          <div class="note" style="font-size:11px">Alarm <b>containment</b>: the bridge-offline alarm shows “+11 contained” instead of 11 separate OFFLINE rows.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 SECONDARY -->
+  <section class="section">
+    <h2><span class="num">05</span> Secondary screens</h2>
+    <div class="grid g3">
+      <div class="screen"><div class="scr-cap"><span class="route">/signals</span></div><div class="main" style="background:var(--paper)">
+        <b style="font-size:14px">Signals — data plane</b><div class="sub" style="margin:4px 0 8px">UNS <span class="mono">data</span> class</div>
+        <div class="slist"><div class="r"><span class="k">press · Temp_01</span><span class="v">72.4 <span class="chip c-ok"><span class="cd"></span></span></span></div><div class="r"><span class="k">press · Pressure</span><span class="v">4.1 <span class="chip c-warn"><span class="cd"></span></span></span></div></div>
+        <div class="btnrow" style="margin-top:8px"><span class="btn gho">Read now</span><span class="btn dgr">Write…</span></div>
+      </div></div>
+      <div class="screen"><div class="scr-cap"><span class="route">/settings</span><span class="pri">admin</span></div><div class="main" style="background:var(--paper)">
+        <b style="font-size:14px">Settings — console policy</b><div class="sub" style="margin:4px 0 8px">incl. the site-map editor (v0.2)</div>
+        <div class="slist"><div class="r"><span class="k">Site-map: thing → line</span><span class="v">edit ▸</span></div><div class="r"><span class="k">Staleness</span><span class="v">2× / 2.5× / 5×</span></div><div class="r"><span class="k">Panel trust</span><span class="v">signedOnly</span></div><div class="r"><span class="k">Global read-only</span><span class="v">off ▸</span></div></div>
+        <div class="note" style="font-size:11px">Site-map assigns un-bridged/legacy things to a line; unmapped → the “Unassigned” line, visible not hidden.</div>
+      </div></div>
+      <div class="screen"><div class="scr-cap"><span class="route">/settings/console</span></div><div class="main" style="background:var(--paper)">
+        <b style="font-size:14px">Console Health</b><div class="sub" style="margin:4px 0 8px">who watches the watcher</div>
+        <div class="slist"><div class="r"><span class="k">Site broker sub</span><span class="v"><span class="chip c-ok"><span class="cd"></span>hearing</span></span></div><div class="r"><span class="k">Bridges up</span><span class="v">2 / 3</span></div><div class="r"><span class="k">WS clients</span><span class="v">3 tabs</span></div><div class="r"><span class="k">Panel cache</span><span class="v">2.1 MB</span></div></div>
+        <div class="btnrow" style="margin-top:8px"><span class="btn">Rescan fleet</span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- 06 PANEL DISCOVERY + RICH CONTROL FLOW -->
+  <section class="section">
+    <h2><span class="num">06</span> How a panel appears — and how rich control works — with no console rebuild</h2>
+    <p class="lede">Everything travels over the bus (components aren't HTTP-reachable). Discovery is now standard verbs; control is confirmed request/reply.</p>
+    <div class="flow">
+      <div class="flowrow"><div class="n">1</div><div class="c"><b>State + Describe.</b> Console sees the component's <span class="t mono">state</span> keepalive, then requests <span class="t mono">cmd/describe</span> → capability manifest incl. a <b>panel manifest with multiple views</b> (Overview / Address Space / Signals / Diagnostics) + the command catalog with JSON-Schema params.</div></div>
+      <div class="flowrow"><div class="n">2</div><div class="c"><b>Fetch over the bus.</b> <span class="t mono">cmd/panel.get</span> streams each descriptor (or signed WC bundle) in chunks; console verifies the hash (and ed25519 signature for WC) <b>before</b> use, caches content-addressed. 40 identical adapters transfer once.</div></div>
+      <div class="flowrow"><div class="n">3</div><div class="c"><b>Render multi-view.</b> Sub-tabs per view. Descriptor views use console-owned Carbon widgets incl. <span class="mono">treeBrowser</span> + <span class="mono">signalGrid</span>; bespoke views use a signed, sandboxed Web Component with a descriptor fallback.</div></div>
+      <div class="flowrow"><div class="n">4</div><div class="c"><b>Rich control = mandated verbs.</b> <span class="t mono">cmd/sb.browse</span> (paged tree) · <span class="t mono">cmd/sb.read</span> · <span class="t mono">cmd/sb.write</span> (confirmed, with optional read-back). OPC-UA browse+read+write needs <b>no Web Component</b>.</div></div>
+      <div class="flowrow"><div class="n">5</div><div class="c"><b>Every write is safe + audited.</b> RBAC → host-owned confirm modal (type-to-confirm) → audit <i>before</i> dispatch → adapter <span class="mono">writes.allow[]</span> → confirmed reply + read-back → Events mirror → site-broker ACLs scope <span class="mono">cmd/#</span> per device.</div></div>
+    </div>
+    <div class="note"><b>Fallback ladder — never a blank tab.</b> WC fails/unsigned → its fallback descriptor → generic panel (heartbeat charts + observed metrics + topic tail). Every component has a useful page on day zero.</div>
+  </section>
+
+  <footer class="foot">
+    EdgeCommons Edge Console · low-fidelity wireframes v0.2 · grayscale, structure &amp; real-time behavior only · next → high-fidelity IBM Carbon mockups.<br>
+    Companion doc: docs/DESIGN.md v0.2. Changes since v0.1: site→line→device hierarchy · UNS aggregation via uns-bridge · Site Topology screen · multi-view panels + confirmed writes · reachability &amp; alarm containment.
+  </footer>
+
+</div></div>
