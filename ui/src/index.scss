@@ -1,2 +1,254 @@
-// Carbon Design System styles (full bundle for the scaffold; trimmed per-view later).
+// Carbon Design System styles (full bundle; trimmed per-view later) + the edge-health
+// view's own classes. Custom colors come ONLY from Carbon theme tokens (the --cds-*
+// custom properties the <Theme theme="g100"> wrapper provides), so the view stays
+// faithful to the g100 dark theme of the signed-off hi-fi mockup.
 @use "@carbon/react";
+
+/* ============ shell ============ */
+.ec-content {
+  margin-left: 16rem; // clears the fixed side rail
+  padding: 1.5rem 2rem 4rem;
+  max-width: 85rem;
+  min-height: 100vh;
+}
+@media (max-width: 66rem) {
+  .cds--side-nav {
+    display: none; // the mockup collapses the rail on narrow screens
+  }
+  .ec-content {
+    margin-left: 0;
+    padding: 1rem;
+  }
+}
+
+/* ============ typography / page header (mockup .ph/.ph-sub) ============ */
+.ec-ph {
+  font-size: 1.75rem;
+  font-weight: 400;
+  margin: 0 0 0.125rem;
+}
+.ec-ph-sub {
+  color: var(--cds-text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  gap: 0.625rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ec-sec {
+  font-size: 1.25rem;
+  font-weight: 400;
+  margin: 1.75rem 0 0.75rem;
+}
+.ec-sec__hint {
+  font-size: 0.8125rem;
+}
+
+/* ============ utilities (mockup .mono/.tnum/helper) ============ */
+.ec-mono {
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+.ec-tnum {
+  font-variant-numeric: tabular-nums;
+}
+.ec-dim {
+  color: var(--cds-text-helper);
+}
+.ec-pri {
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+.ec-overdue {
+  color: var(--cds-support-error);
+}
+
+/* ============ summary tiles (mockup .row.c4 + .tile) ============ */
+.ec-tiles {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 1rem;
+}
+@media (max-width: 60rem) {
+  .ec-tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 34rem) {
+  .ec-tiles {
+    grid-template-columns: 1fr;
+  }
+}
+.ec-tile {
+  min-height: 6rem;
+  border: 1px solid var(--cds-border-subtle);
+}
+.ec-tile__label {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+.ec-tile__num {
+  font-size: 1.875rem;
+  font-weight: 300;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+
+  small {
+    font-size: 0.875rem;
+    color: var(--cds-text-helper);
+    font-weight: 400;
+  }
+}
+.ec-tile__num--md {
+  font-size: 1.125rem;
+  font-weight: 400;
+}
+.ec-tile__foot {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin-top: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ec-tile__health {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.ec-legend {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-top: 0.375rem;
+}
+
+/* ============ status tags (mockup .tag.ok/.warn/.stale/.unreach) ============ */
+// Carbon ships no yellow tag type — build WARN/STALE from the support-warning token,
+// and UNREACHABLE as the mockup's dashed-outline gray, over the stock gray tag.
+.ec-tag--warn {
+  background-color: color-mix(in srgb, var(--cds-support-warning) 18%, transparent);
+  color: var(--cds-support-warning);
+
+  svg {
+    fill: var(--cds-support-warning);
+  }
+}
+.ec-tag--stale {
+  background-color: color-mix(in srgb, var(--cds-support-warning) 14%, transparent);
+  color: color-mix(in srgb, var(--cds-support-warning) 65%, var(--cds-text-primary));
+
+  svg {
+    fill: color-mix(in srgb, var(--cds-support-warning) 65%, var(--cds-text-primary));
+  }
+}
+.ec-tag--unreach {
+  background-color: transparent;
+  border: 1px dashed var(--cds-border-strong);
+  color: var(--cds-text-secondary);
+
+  svg {
+    fill: var(--cds-text-secondary);
+  }
+}
+
+/* ============ issue notes ============ */
+.ec-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+
+  .cds--inline-notification {
+    max-width: none;
+  }
+}
+.ec-issues__more {
+  font-size: 0.75rem;
+  margin: 0 0 0.25rem 0.25rem;
+}
+
+/* ============ fleet table (mockup .tblwrap + .dt group rows) ============ */
+.ec-fleet {
+  margin-bottom: 2rem;
+}
+.ec-tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--cds-border-subtle);
+
+  table {
+    min-width: 46rem;
+  }
+}
+.ec-group td {
+  background: var(--cds-layer-accent);
+  border-bottom: 1px solid var(--cds-border-strong);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.ec-group__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 0;
+  background: none;
+  border: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-align: left;
+
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: -2px;
+  }
+
+  svg {
+    fill: var(--cds-icon-secondary);
+    flex: none;
+  }
+}
+.ec-group__label {
+  letter-spacing: 0.02em;
+}
+.ec-instance {
+  margin-left: 0.375rem;
+}
+.ec-cadence {
+  font-size: 0.75rem;
+}
+
+/* ============ empty / loading states ============ */
+.ec-empty {
+  margin-top: 0.5rem;
+  border: 1px solid var(--cds-border-subtle);
+
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.375rem;
+  }
+  p {
+    font-size: 0.875rem;
+    max-width: 40rem;
+  }
+}
+
+/* ============ motion ============ */
+// The only animated affordances are Carbon's own (InlineLoading spinner etc.), which
+// respect prefers-reduced-motion. Belt-and-braces: disable any residual transitions.
+@media (prefers-reduced-motion: reduce) {
+  .ec-app *,
+  .ec-app *::before,
+  .ec-app *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

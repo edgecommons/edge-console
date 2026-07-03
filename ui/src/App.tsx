@@ -1,36 +1,49 @@
 /**
- * The Edge Console UI shell — IBM Carbon (g100), scaffold only.
+ * The Edge Console UI shell — IBM Carbon (g100 dark, the signed-off hi-fi theme).
  *
- * Slice C0/C1 ships the backend (BusIngress + FleetModel); this shell proves the
- * Carbon/React/Vite toolchain compiles end-to-end. The real views arrive per the
- * Phase-1 plan: Overview/Components/Component-detail (C3, over the C2 WS gateway),
- * config-review (C5), events & metrics (C6).
+ * Slice C3: the shell hosts the edge-health view (priority #1) fed live by the C2
+ * WS gateway. The side rail carries exactly the views that exist (Overview) — the
+ * mockup's further screens (Components/Topology/Configuration/Events/Signals) land
+ * with their slices (C5/C6+); no dead navigation ships before its view does.
+ *
+ * The {@link FleetClient} is created once per app instance from the page-derived WS
+ * URL (see `config.ts`) and injectable for tests (jsdom has no WebSocket).
  */
+import { useMemo } from "react";
 import {
   Content,
   Header,
   HeaderName,
+  SideNav,
+  SideNavItems,
+  SideNavLink,
+  SkipToContent,
   Theme,
-  Tile,
 } from "@carbon/react";
-import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
+import { Dashboard } from "@carbon/react/icons";
+import { defaultWsUrl } from "./config";
+import { FleetClient } from "./fleet/client";
+import { ConnectedEdgeHealthView } from "./health/EdgeHealthView";
 
-export default function App(): React.JSX.Element {
+export default function App({ client }: { client?: FleetClient }): React.JSX.Element {
+  const fleetClient = useMemo(() => client ?? new FleetClient({ url: defaultWsUrl() }), [client]);
   return (
-    <Theme theme="g100">
-      <Header aria-label="Edge Console">
+    <Theme theme="g100" className="ec-app">
+      <Header aria-label="EdgeCommons Edge Console">
+        <SkipToContent />
         <HeaderName href="#" prefix="EdgeCommons">
           Edge Console
         </HeaderName>
       </Header>
-      <Content>
-        <Tile>
-          <h3>Edge Console</h3>
-          <p>
-            Backend slice C1 (BusIngress + FleetModel) is live; the edge-health views land in
-            slice C3 over the C2 WebSocket gateway (protocol v{PROTOCOL_VERSION}).
-          </p>
-        </Tile>
+      <SideNav aria-label="Console navigation" isFixedNav expanded isChildOfHeader={false}>
+        <SideNavItems>
+          <SideNavLink renderIcon={Dashboard} href="#" isActive>
+            Overview
+          </SideNavLink>
+        </SideNavItems>
+      </SideNav>
+      <Content id="main-content" className="ec-content">
+        <ConnectedEdgeHealthView client={fleetClient} />
       </Content>
     </Theme>
   );

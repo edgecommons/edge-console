@@ -12,8 +12,8 @@
   ],
   "scripts": {
     "build": "npm run build -w protocol && npm run build -w server && npm run build -w ui",
-    "test": "npm run test -w server",
-    "coverage": "npm run coverage -w server",
+    "test": "npm run test -w server && npm run test -w ui",
+    "coverage": "npm run coverage -w server && npm run coverage -w ui",
     "lint": "eslint .",
     "link:lib": "node scripts/link-sibling-lib.mjs"
   },

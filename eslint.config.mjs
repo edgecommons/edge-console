@@ -27,9 +27,17 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.mjs", "ui/vite.config.ts", "server/vitest.config.ts"],
+    files: ["scripts/**/*.mjs", "ui/vite.config.ts", "ui/vitest.config.ts", "server/vitest.config.ts"],
     languageOptions: {
-      globals: { process: "readonly", console: "readonly", URL: "readonly" },
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+      },
     },
   },
 );
