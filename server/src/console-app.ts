@@ -21,7 +21,11 @@
  *  - the C6 activity path: the same tee feeds the {@link EventStore} (rolling
  *    recent `evt` history) and the {@link MetricStore} (latest + bounded series per
  *    metric measure); the gateway serves `subscribe-events`/`subscribe-metrics`
- *    from them and streams arrivals to subscribed clients.
+ *    from them and streams arrivals to subscribed clients;
+ *  - the C4 command path: the {@link CommandGateway} turns an `invoke-command` into a
+ *    `messaging().request()` on the site bus (the bridge rewrites `reply_to`), gated by
+ *    the config-driven {@link ConfigRbacPolicy}; the WS auth seam (`resolveRole`) maps
+ *    each connection to a role (today the RBAC `defaultRole` — no real auth yet).
  */
 import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
 import { consoleConfigFromGlobal } from "./console-config";
@@ -32,6 +36,8 @@ import type { Clock } from "./fleet/fleet-model";
 import { ConfigStore } from "./fleet/config-store";
 import { EventStore } from "./fleet/event-store";
 import { MetricStore } from "./fleet/metric-store";
+import { CommandGateway } from "./command/command-gateway";
+import { ConfigRbacPolicy } from "./command/rbac";
 import { FleetWsGateway } from "./ws/gateway";
 import { WsServer } from "./ws/ws-server";
 
@@ -60,6 +66,8 @@ export interface ConsoleApp {
   /** The metric surface (latest + bounded series) behind the C6 `subscribe-metrics` stream. */
   readonly metrics: MetricStore;
   readonly ingress: BusIngress;
+  /** The C4 pure command core behind the `invoke-command`/`command-result` frames. */
+  readonly commandGateway: CommandGateway;
   /** The C2 pure fanout core (mostly for diagnostics/tests — `wsServer` owns the real socket). */
   readonly gateway: FleetWsGateway;
   /** The C2 IO edge (HTTP + WS listener); `.address()` is only meaningful after `startConsole` resolves. */
@@ -124,6 +132,21 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
 
   const sweeper = setInterval(() => model.sweep(), config.staleness.sweepIntervalMs);
 
+  // The C4 command core: RBAC-gated `invoke-command` → `uns().topicFor` + the site-bus
+  // `request()` (the ONLY IO edge — the bridge rewrites reply_to transparently), per-verb
+  // timeouts clamped to the bridge reply-map TTL.
+  const rbac = new ConfigRbacPolicy(config.rbac);
+  const commandGateway = new CommandGateway({
+    uns: deps.uns,
+    newMessage: deps.newMessage,
+    request: (topic, msg, timeoutMs) => deps.messaging.request(topic, msg, timeoutMs),
+    rbac,
+    clock,
+    defaultTimeoutMs: config.commands.defaultTimeoutMs,
+    maxTimeoutMs: config.commands.maxTimeoutMs,
+    timeoutForVerb: (verb) => config.commands.verbTimeouts[verb],
+  });
+
   // The C2 WS gateway: snapshot-then-deltas fanout over the same FleetModel (it
   // satisfies FleetSource structurally — snapshot() + onDelta()), plus the C5 config
   // seam: get-config answered from the retained-cfg cache, refresh-config wired to
@@ -138,10 +161,14 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     },
     // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
     { events, metrics },
+    // The C4 command seam: invoke-command → request/reply, RBAC-gated.
+    { gateway: commandGateway, rbac },
   );
   const wsServer = new WsServer(gateway, {
     port: config.ws.port,
     bindAddress: config.ws.bindAddress,
+    // The auth seam (stubbed): every connection gets the configured RBAC default role.
+    resolveRole: () => config.rbac.defaultRole,
   });
   await wsServer.start();
   const wsTicker = setInterval(() => gateway.tick(), config.ws.heartbeatIntervalMs);
@@ -154,6 +181,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     events,
     metrics,
     ingress,
+    commandGateway,
     gateway,
     wsServer,
     stop: async () => {

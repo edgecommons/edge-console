@@ -189,6 +189,70 @@ describe("parseClientMessage - the C6 activity family", () => {
   });
 });
 
+describe("parseClientMessage - the C4 command family", () => {
+  const KEY = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+
+  it("accepts invoke-command without args (key extras stripped)", () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "r1",
+        key: { ...KEY, extra: 1 },
+        verb: "ping",
+        junk: true,
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      message: {
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "r1",
+        key: KEY,
+        verb: "ping",
+      },
+    });
+  });
+
+  it("accepts invoke-command with an args object", () => {
+    const result = parseClientMessage(
+      JSON.stringify({
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "r2",
+        key: KEY,
+        verb: "set-log-level",
+        args: { level: "DEBUG" },
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      message: {
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "r2",
+        key: KEY,
+        verb: "set-log-level",
+        args: { level: "DEBUG" },
+      },
+    });
+  });
+
+  it.each([
+    ["missing requestId", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, key: KEY, verb: "ping" }],
+    ["empty requestId", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "", key: KEY, verb: "ping" }],
+    ["missing key", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", verb: "ping" }],
+    ["partial key", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: { device: "gw-01" }, verb: "ping" }],
+    ["missing verb", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: KEY }],
+    ["empty verb", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: KEY, verb: "" }],
+    ["array args", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: KEY, verb: "ping", args: [1] }],
+    ["primitive args", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: KEY, verb: "ping", args: 3 }],
+  ])("rejects: %s", (_label, frame) => {
+    expect(parseClientMessage(JSON.stringify(frame)).ok).toBe(false);
+  });
+});
+
 describe("splitEventChannel / classifyEventSeverity - the evt/{severity}/{type} split", () => {
   it.each([
     ["critical/overtemp", { severity: "critical", type: "overtemp" }],

@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { EdgeHealthView } from "../src/health/EdgeHealthView";
 import { StatusTag, RollupTag } from "../src/health/StatusTag";
-import { T0, clientState, compView, deviceView, fleetView, key } from "./_fixtures";
+import { T0, clientState, commandEntry, commandView, compView, deviceView, fleetView, key } from "./_fixtures";
 
 afterEach(cleanup);
 
@@ -171,6 +171,44 @@ describe("EdgeHealthView - empty, connecting and degraded-connection states", ()
     render(<EdgeHealthView state={state} now={NOW} />);
     expect(screen.getByText("Protocol version mismatch")).toBeTruthy();
     expect(screen.getByText(/reload the page/)).toBeTruthy();
+  });
+});
+
+describe("EdgeHealthView - C4 command controls", () => {
+  const CID = "gw-01/opcua-adapter/main";
+  const view = fleetView([deviceView("gw-01", [compView({ key: key("gw-01", "opcua-adapter") })])]);
+
+  it("reveals the per-component controls on expand and fires a command", () => {
+    const onInvoke = vi.fn();
+    render(<EdgeHealthView state={clientState(view)} now={NOW} onInvoke={onInvoke} />);
+
+    // Controls are hidden until the row is expanded (the table stays compact).
+    expect(screen.queryByTestId(`cmd-controls-${CID}`)).toBeNull();
+    fireEvent.click(screen.getByTestId(`controls-toggle-${CID}`));
+    expect(screen.getByTestId(`cmd-controls-${CID}`)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(`cmd-btn-ping-${CID}`));
+    expect(onInvoke).toHaveBeenCalledWith(
+      expect.objectContaining({ device: "gw-01", component: "opcua-adapter" }),
+      "ping",
+    );
+  });
+
+  it("surfaces a settled command outcome as a toast", () => {
+    const state = clientState(view, {
+      commands: commandView([]),
+    });
+    const { rerender } = render(<EdgeHealthView state={state} now={NOW} />);
+    // A ping settles ⇒ a success toast appears (mirrors the inline row result).
+    rerender(
+      <EdgeHealthView
+        state={clientState(view, {
+          commands: commandView([commandEntry({ requestId: "r1", verb: "ping", phase: "ok" })]),
+        })}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByTestId("cmd-toast-r1")).toBeTruthy();
   });
 });
 

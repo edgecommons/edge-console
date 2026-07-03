@@ -10,6 +10,7 @@
  */
 import { InlineLoading, InlineNotification, Tag, Tile } from "@carbon/react";
 import { CircleFilled } from "@carbon/react/icons";
+import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import type { ClientState, ConnectionStatus, FleetClient } from "../fleet/client";
 import { fleetIssues, summarize } from "../fleet/selectors";
 import { formatDurationMs } from "../fleet/selectors";
@@ -17,6 +18,13 @@ import { useFleetState, useNowTick } from "../fleet/useFleet";
 import { FleetTable } from "./FleetTable";
 import { IssueNotifications } from "./IssueNotifications";
 import { SummaryTiles } from "./SummaryTiles";
+import { CommandToasts } from "./CommandToasts";
+
+/** Invoke a command on a component (C4). Threaded to the fleet table's per-row controls. */
+export type InvokeCommand = (key: ComponentKey, verb: string, args?: Record<string, unknown>) => void;
+
+/** A no-op used when the view is rendered without a live command seam (presentational tests). */
+const NO_INVOKE: InvokeCommand = () => undefined;
 
 /** The header's connection chip (mockup: "WS Live"). */
 function ConnectionTag({ status }: { status: ConnectionStatus }): React.JSX.Element {
@@ -38,9 +46,11 @@ export interface EdgeHealthViewProps {
   state: ClientState;
   /** Client-clock ms (the 1 Hz tick) — drives every age/uptime cell. */
   now: number;
+  /** Fire a C4 command from a component's row controls; defaults to a no-op. */
+  onInvoke?: InvokeCommand;
 }
 
-export function EdgeHealthView({ state, now }: EdgeHealthViewProps): React.JSX.Element {
+export function EdgeHealthView({ state, now, onInvoke = NO_INVOKE }: EdgeHealthViewProps): React.JSX.Element {
   const { fleet, status, hasSnapshot, fatalError } = state;
   const counts = summarize(fleet);
   // All fleet timestamps are server-clock; render ages on the server timeline.
@@ -120,11 +130,16 @@ export function EdgeHealthView({ state, now }: EdgeHealthViewProps): React.JSX.E
               <h2 className="ec-sec">
                 Fleet <span className="ec-dim ec-sec__hint">grouped by device</span>
               </h2>
-              <FleetTable fleet={fleet} nowServerMs={nowServerMs} />
+              <FleetTable
+                fleet={fleet}
+                nowServerMs={nowServerMs}
+                command={{ commands: state.commands, onInvoke }}
+              />
             </>
           )}
         </>
       )}
+      <CommandToasts commands={state.commands} />
     </div>
   );
 }
@@ -137,5 +152,11 @@ export function EdgeHealthView({ state, now }: EdgeHealthViewProps): React.JSX.E
 export function ConnectedEdgeHealthView({ client }: { client: FleetClient }): React.JSX.Element {
   const state = useFleetState(client);
   const now = useNowTick(1000);
-  return <EdgeHealthView state={state} now={now} />;
+  return (
+    <EdgeHealthView
+      state={state}
+      now={now}
+      onInvoke={(key, verb, args) => client.invokeCommand(key, verb, args)}
+    />
+  );
 }

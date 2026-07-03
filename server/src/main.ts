@@ -45,14 +45,15 @@ async function main(): Promise<void> {
   // Graceful shutdown is library-owned (FR-HB-2): SIGTERM/SIGINT flips readiness,
   // closes the runtime (unsubscribes, best-effort STOPPED state) and exits 0.
   //
-  // TODO(prod auth): this WS gateway is the sole browser<->bus bridge and currently
-  // has NO authentication/authorization - anyone who can reach the bound port gets the
-  // full fleet snapshot + live delta stream (read-only in this slice; C4's
-  // CommandGateway adds a write surface). Before this is exposed beyond a trusted dev
-  // network, add a seam here: e.g. reject the WS upgrade unless a bearer
-  // token/mTLS/OIDC session is presented (the `req` passed to WsServer's `connection`
-  // handler already carries the upgrade request's headers for this). Track under the
-  // console's RBAC design (DESIGN §6.5 / C4).
+  // AUTH (C4 status): the command WRITE surface is now RBAC-GATED — a `console.rbac`
+  // policy (config-driven allow/deny per verb) is ENFORCED in the CommandGateway, and
+  // the role-resolution AUTH SEAM is wired at `WsServer.onConnection` (`resolveRole`).
+  // What is still STUBBED is the identity source: `resolveRole` maps every connection to
+  // the configured `defaultRole` (permissive by default) — there is no bearer/mTLS/OIDC
+  // VERIFICATION yet, and the read surface (snapshot + delta/activity streams) is
+  // unauthenticated. TODO(prod auth): before exposing beyond a trusted dev network,
+  // implement `resolveRole` to verify the upgrade request's principal (headers/mTLS cert)
+  // and reject unauthenticated upgrades. Track under the console's RBAC design (DESIGN §6.5).
 }
 
 main().catch((err) => {

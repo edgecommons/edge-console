@@ -24,8 +24,15 @@
  * `unsubscribe-events`/`subscribe-metrics`/`unsubscribe-metrics`, server
  * `events`/`event`/`metrics`/`metric`. Breaking for the same reason as v2: a
  * v2 gateway rejects-and-closes on the new client frames.
+ * v4 (slice C4): the command message family — client `invoke-command`, server
+ * `command-result`. The console's first WRITE surface: the browser asks the gateway
+ * to invoke a UNS command verb on a target component; the gateway issues a
+ * `messaging().request()` to the component's `cmd` inbox on the site bus (the bridge
+ * rewrites `reply_to` transparently) and returns the reply as a `command-result`.
+ * Breaking for the same reason as v2/v3: a v3 gateway rejects-and-closes on the new
+ * client frame.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -347,6 +354,54 @@ export interface MetricSeriesUpdate {
 }
 
 /* -----------------------------------------------------------------------------
+ * C4 — commanding: the console's first WRITE surface (invoke a UNS command verb on a
+ * target component). The browser sends `invoke-command`; the gateway RBAC-checks it,
+ * issues a `messaging().request()` to the component's own `cmd` inbox
+ * (`ecv1/{device}/{component}/{instance}/cmd/{verb}`, `header.name` = verb, body =
+ * args), awaits the reply (the uns-bridge rewrites `reply_to` so a site→device
+ * request/reply is transparent), and answers with exactly one `command-result`.
+ *
+ * The built-in verbs every ggcommons component answers (uns-test-vectors/commands.json,
+ * DESIGN-uns §9.5): `ping`, `reload-config`, `get-configuration`. Custom-verb DISCOVERY
+ * is a Phase-2 concern (the `describe` capability manifest / panels), so the console
+ * cannot enumerate a component's custom verbs yet — it offers the built-ins plus a
+ * generic verb+args form.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * A command failure, machine-readable. The `code` is either a CONSOLE-side code
+ * ({@link ConsoleCommandErrorCode}) or the COMPONENT's own error code passed through
+ * verbatim (e.g. `UNKNOWN_VERB`/`HANDLER_ERROR`/`RELOAD_FAILED`/`NO_CONFIG` from the
+ * library `CommandInbox`) — the UI must treat `code` as an opaque string, not a closed
+ * enum (only {@link ConsoleCommandErrorCode.FORBIDDEN} drives a distinct UI affordance).
+ */
+export interface CommandError {
+  code: string;
+  message: string;
+}
+
+/**
+ * The error codes the CONSOLE gateway itself synthesizes (never the component's reply):
+ *  - `FORBIDDEN` — the connection's RBAC role may not invoke the verb (never hit the bus);
+ *  - `TIMEOUT` — no reply within the per-verb deadline (≤ the bridge reply-map TTL);
+ *  - `REQUEST_FAILED` — the request could not be issued/awaited (transport/publish error);
+ *  - `INVALID_TARGET` — the `(key, verb)` did not form a valid UNS topic (bad token/depth);
+ *  - `MALFORMED_REPLY` — a reply arrived whose body was not the `{ok, result|error}` shape;
+ *  - `UNAVAILABLE` — the gateway has no command seam wired (no site-bus request path).
+ */
+export type ConsoleCommandErrorCode =
+  | "FORBIDDEN"
+  | "TIMEOUT"
+  | "REQUEST_FAILED"
+  | "INVALID_TARGET"
+  | "MALFORMED_REPLY"
+  | "UNAVAILABLE";
+
+/** The three universal built-in verbs every ggcommons component answers. */
+export const BUILTIN_COMMAND_VERBS = ["ping", "reload-config", "get-configuration"] as const;
+export type BuiltinCommandVerb = (typeof BUILTIN_COMMAND_VERBS)[number];
+
+/* -----------------------------------------------------------------------------
  * C2 — the WS gateway wire envelope: snapshot-then-deltas.
  *
  * Every frame in both directions carries `protocolVersion` (= {@link PROTOCOL_VERSION}
@@ -390,6 +445,12 @@ export type WsErrorCode = "malformed" | "unsupported-protocol-version";
  *    answers with ONE `metrics` snapshot frame (every known series: latest value +
  *    bounded recent points) and then pushes fresh samples as `metric` frames.
  *  - `unsubscribe-metrics` (C6) — stop the `metric` pushes. No reply; idempotent.
+ *  - `invoke-command` (C4) — invoke `verb` (with optional `args`) on the component named
+ *    by `key`. `requestId` is a CLIENT-chosen correlation token echoed back on the
+ *    matching `command-result`, so a client can have several commands in flight at once
+ *    and route each answer. The gateway answers with exactly one `command-result` for
+ *    this `requestId` (success, component error, or a console-synthesized
+ *    {@link ConsoleCommandErrorCode}). Rides the same one WS connection as everything else.
  */
 export type ClientMessage =
   | { type: "hello"; protocolVersion: number; resumeSeq?: number }
@@ -398,7 +459,15 @@ export type ClientMessage =
   | { type: "subscribe-events"; protocolVersion: number; limit?: number }
   | { type: "unsubscribe-events"; protocolVersion: number }
   | { type: "subscribe-metrics"; protocolVersion: number }
-  | { type: "unsubscribe-metrics"; protocolVersion: number };
+  | { type: "unsubscribe-metrics"; protocolVersion: number }
+  | {
+      type: "invoke-command";
+      protocolVersion: number;
+      requestId: string;
+      key: ComponentKey;
+      verb: string;
+      args?: Record<string, unknown>;
+    };
 
 /**
  * Server -> client frames.
@@ -428,6 +497,13 @@ export type ClientMessage =
  *  - `metric` (C6) — fresh samples pushed to subscribed clients; one bus arrival can
  *    carry several measures, hence a batch. The client appends bounded (see
  *    {@link DEFAULT_METRIC_SERIES_POINTS}), starting unseen series from scratch.
+ *  - `command-result` (C4) — the single answer to an `invoke-command`, correlated by the
+ *    client's `requestId`. `ok` distinguishes success (`result` = the verb's result
+ *    object, e.g. ping's `{status, uptimeSecs}`) from failure (`error` = a
+ *    {@link CommandError}, the component's own coded error OR a console-synthesized
+ *    {@link ConsoleCommandErrorCode}). `elapsedMs` is the gateway-measured round-trip
+ *    (0 for a locally-short-circuited FORBIDDEN/UNAVAILABLE). Unlike `error`, this never
+ *    closes the connection — a failed command is a normal result.
  *  - `error` — a rejected frame (see {@link WsErrorCode}); the gateway closes the
  *    connection immediately after sending it.
  */
@@ -451,12 +527,31 @@ export type ServerMessage =
   | { type: "event"; protocolVersion: number; event: ConsoleEvent }
   | { type: "metrics"; protocolVersion: number; series: MetricSeriesSnapshot[] }
   | { type: "metric"; protocolVersion: number; updates: MetricSeriesUpdate[] }
+  | {
+      type: "command-result";
+      protocolVersion: number;
+      requestId: string;
+      key: ComponentKey;
+      verb: string;
+      ok: boolean;
+      /** The verb's result object (present iff `ok`). */
+      result?: unknown;
+      /** The coded failure (present iff `!ok`). */
+      error?: CommandError;
+      /** Gateway-measured round-trip (ms); 0 for a locally short-circuited failure. */
+      elapsedMs: number;
+    }
   | { type: "error"; protocolVersion: number; code: WsErrorCode; message: string };
 
 /** The outcome of validating one raw inbound WS text frame. */
 export type ParsedClientMessage =
   | { ok: true; message: ClientMessage }
   | { ok: false; reason: string };
+
+/** Whether `value` is a non-null, non-array plain object (a JSON `{}`). */
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 /**
  * Validate a wire {@link ComponentKey}: an object with non-empty string
@@ -557,6 +652,38 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
       return { ok: true, message: { type: "subscribe-metrics", protocolVersion } };
     case "unsubscribe-metrics":
       return { ok: true, message: { type: "unsubscribe-metrics", protocolVersion } };
+    case "invoke-command": {
+      if (typeof obj.requestId !== "string" || obj.requestId === "") {
+        return { ok: false, reason: "invoke-command requestId must be a non-empty string" };
+      }
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return {
+          ok: false,
+          reason: "invoke-command key must be {device, component, instance} non-empty strings",
+        };
+      }
+      if (typeof obj.verb !== "string" || obj.verb === "") {
+        return { ok: false, reason: "invoke-command verb must be a non-empty string" };
+      }
+      // args, when present, must be a plain object (the verb's argument bag); the topic
+      // and header.name carry the verb — args is the request body. An array/primitive is
+      // rejected here rather than silently coerced.
+      if (obj.args !== undefined && !isPlainObject(obj.args)) {
+        return { ok: false, reason: "invoke-command args, when present, must be a JSON object" };
+      }
+      return {
+        ok: true,
+        message: {
+          type: "invoke-command",
+          protocolVersion,
+          requestId: obj.requestId,
+          key,
+          verb: obj.verb,
+          ...(obj.args !== undefined ? { args: obj.args as Record<string, unknown> } : {}),
+        },
+      };
+    }
     default:
       return { ok: false, reason: `unknown message type '${String(obj.type)}'` };
   }

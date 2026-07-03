@@ -20,7 +20,9 @@ import {
   TableRow,
   Tag,
 } from "@carbon/react";
-import { ChevronDown, ChevronRight } from "@carbon/react/icons";
+import { ChevronDown, ChevronRight, Settings } from "@carbon/react/icons";
+import type { ComponentKey } from "@edgecommons/edge-console-protocol";
+import type { CommandView } from "../fleet/command-store";
 import type { ComponentView, DeviceView, FleetView } from "../fleet/store";
 import {
   deviceRollup,
@@ -30,6 +32,13 @@ import {
   hierPrefix,
 } from "../fleet/selectors";
 import { RollupTag, StatusTag } from "./StatusTag";
+import { CommandControls } from "./CommandControls";
+
+/** The command surface threaded down to each row (the C4 controls). */
+export interface FleetTableCommandProps {
+  commands: CommandView;
+  onInvoke: (key: ComponentKey, verb: string, args?: Record<string, unknown>) => void;
+}
 
 const COLUMNS = [
   "Health",
@@ -39,6 +48,7 @@ const COLUMNS = [
   "Uptime",
   "Keepalive",
   "Restarts",
+  "Controls",
 ] as const;
 
 /** The live last-state cell: age since the last keepalive, red once overdue. */
@@ -71,59 +81,90 @@ function LastStateCell({
 function ComponentRow({
   comp,
   nowServerMs,
+  command,
 }: {
   comp: ComponentView;
   nowServerMs: number;
+  command: FleetTableCommandProps;
 }): React.JSX.Element {
   const uptime = displayUptimeSecs(comp, nowServerMs);
+  const [expanded, setExpanded] = useState(false);
   return (
-    <TableRow data-testid={`component-row-${comp.id}`}>
-      <TableCell>
-        <StatusTag liveness={comp.liveness} />
-      </TableCell>
-      <TableCell>
-        <span className="ec-pri">{comp.key.component}</span>
-        {comp.key.instance !== "main" && (
-          <Tag size="sm" type="outline" className="ec-instance">
-            {comp.key.instance}
-          </Tag>
-        )}
-      </TableCell>
-      <TableCell>
-        <span className="ec-mono">{comp.key.device}</span>
-      </TableCell>
-      <TableCell>
-        <LastStateCell comp={comp} nowServerMs={nowServerMs} />
-      </TableCell>
-      <TableCell>
-        {uptime !== undefined ? (
-          <span className="ec-tnum">
-            {formatDurationSecs(Math.floor(uptime))}
-            {comp.status === "STOPPED" && <span className="ec-dim"> (at stop)</span>}
+    <>
+      <TableRow data-testid={`component-row-${comp.id}`}>
+        <TableCell>
+          <StatusTag liveness={comp.liveness} />
+        </TableCell>
+        <TableCell>
+          <span className="ec-pri">{comp.key.component}</span>
+          {comp.key.instance !== "main" && (
+            <Tag size="sm" type="outline" className="ec-instance">
+              {comp.key.instance}
+            </Tag>
+          )}
+        </TableCell>
+        <TableCell>
+          <span className="ec-mono">{comp.key.device}</span>
+        </TableCell>
+        <TableCell>
+          <LastStateCell comp={comp} nowServerMs={nowServerMs} />
+        </TableCell>
+        <TableCell>
+          {uptime !== undefined ? (
+            <span className="ec-tnum">
+              {formatDurationSecs(Math.floor(uptime))}
+              {comp.status === "STOPPED" && <span className="ec-dim"> (at stop)</span>}
+            </span>
+          ) : (
+            <span className="ec-dim">—</span>
+          )}
+        </TableCell>
+        <TableCell>
+          <span className="ec-tnum">{comp.expectedIntervalSecs}s</span>
+          <span className="ec-dim ec-cadence">
+            {comp.cadenceSource === "cfg" ? " · cfg" : " · default"}
           </span>
-        ) : (
-          <span className="ec-dim">—</span>
-        )}
-      </TableCell>
-      <TableCell>
-        <span className="ec-tnum">{comp.expectedIntervalSecs}s</span>
-        <span className="ec-dim ec-cadence">
-          {comp.cadenceSource === "cfg" ? " · cfg" : " · default"}
-        </span>
-      </TableCell>
-      <TableCell>
-        <span className={comp.restarts > 0 ? "ec-tnum" : "ec-dim ec-tnum"}>{comp.restarts}</span>
-      </TableCell>
-    </TableRow>
+        </TableCell>
+        <TableCell>
+          <span className={comp.restarts > 0 ? "ec-tnum" : "ec-dim ec-tnum"}>{comp.restarts}</span>
+        </TableCell>
+        <TableCell className="ec-ctrl-cell">
+          <button
+            type="button"
+            className="ec-ctrl-toggle"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "Hide" : "Show"} controls for ${comp.key.component}`}
+            data-testid={`controls-toggle-${comp.id}`}
+            onClick={() => setExpanded((e) => !e)}
+          >
+            <Settings size={16} />
+            <span className="ec-ctrl-toggle__label">Controls</span>
+          </button>
+        </TableCell>
+      </TableRow>
+      {expanded && (
+        <TableRow className="ec-ctrl-detail" data-testid={`controls-detail-${comp.id}`}>
+          <TableCell colSpan={COLUMNS.length}>
+            <CommandControls
+              comp={comp}
+              commands={command.commands}
+              onInvoke={command.onInvoke}
+            />
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 
 function DeviceGroup({
   device,
   nowServerMs,
+  command,
 }: {
   device: DeviceView;
   nowServerMs: number;
+  command: FleetTableCommandProps;
 }): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
   const level = deviceRollup(device);
@@ -157,7 +198,7 @@ function DeviceGroup({
       </TableRow>
       {!collapsed &&
         device.components.map((comp) => (
-          <ComponentRow key={comp.id} comp={comp} nowServerMs={nowServerMs} />
+          <ComponentRow key={comp.id} comp={comp} nowServerMs={nowServerMs} command={command} />
         ))}
       {!collapsed && n === 0 && (
         <TableRow>
@@ -175,9 +216,11 @@ function DeviceGroup({
 export function FleetTable({
   fleet,
   nowServerMs,
+  command,
 }: {
   fleet: FleetView;
   nowServerMs: number;
+  command: FleetTableCommandProps;
 }): React.JSX.Element {
   return (
     <TableContainer className="ec-fleet">
@@ -192,7 +235,12 @@ export function FleetTable({
           </TableHead>
           <TableBody>
             {fleet.devices.map((device) => (
-              <DeviceGroup key={device.device} device={device} nowServerMs={nowServerMs} />
+              <DeviceGroup
+                key={device.device}
+                device={device}
+                nowServerMs={nowServerMs}
+                command={command}
+              />
             ))}
           </TableBody>
         </Table>

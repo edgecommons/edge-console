@@ -26,6 +26,16 @@ export interface WsServerOptions {
   /** TCP port to bind. Pass 0 for an OS-assigned ephemeral port (tests). */
   port: number;
   bindAddress: string;
+  /**
+   * The C4 AUTH SEAM: resolve a connection's RBAC role from its upgrade request. This is
+   * where a real bearer/mTLS/OIDC check plugs in (inspect `req.headers`/the client cert,
+   * reject the upgrade if unauthenticated, else map the principal to a console role). The
+   * composition root passes `() => config.rbac.defaultRole` for now, so every connection
+   * gets the configured permissive default — the RBAC ENFORCEMENT (in the CommandGateway)
+   * is real; only the identity source is stubbed. Absent ⇒ no role (commanding falls back
+   * to the gateway's own default/UNAVAILABLE handling).
+   */
+  resolveRole?: (req: IncomingMessage) => string;
 }
 
 /** The C2 gateway's real socket edge: HTTP server + WS upgrade on `/ws`, plus `/healthz`. */
@@ -80,19 +90,21 @@ export class WsServer {
   }
 
   private onConnection(ws: WebSocket, req: IncomingMessage): void {
-    // SECURITY SEAM (no auth in this slice — see main.ts TODO): this is where an
-    // upgrade-time credential check belongs (bearer token / mTLS client cert / OIDC
-    // session cookie from `req.headers`), rejecting before `gateway.connect()` ever
-    // runs. `req` is available here; nothing downstream (the pure gateway) needs to
-    // know auth exists at all.
+    // SECURITY / AUTH SEAM (C4): an upgrade-time credential check belongs here (bearer
+    // token / mTLS client cert / OIDC session cookie from `req.headers`) — reject before
+    // `gateway.connect()` ever runs for an unauthenticated client. Today `resolveRole`
+    // maps every connection to the configured RBAC `defaultRole` (no real auth yet); a
+    // production impl verifies the principal and maps it to a console role. Nothing
+    // downstream (the pure gateway) knows auth exists — it only sees the resolved role.
     const id = `${req.socket.remoteAddress ?? "unknown"}:${req.socket.remotePort ?? 0}#${nextClientId++}`;
+    const role = this.opts.resolveRole?.(req);
     const transport: ClientTransport = {
       id,
       send: (data) => ws.send(data),
       bufferedAmount: () => ws.bufferedAmount,
       close: (code, reason) => ws.close(code, reason),
     };
-    const session = this.gateway.connect(transport);
+    const session = this.gateway.connect(transport, role);
     ws.on("message", (data) => session.onMessage(data.toString()));
     ws.on("close", () => session.onClose());
     ws.on("error", (err) => {

@@ -9,6 +9,8 @@
  * back to its default rather than failing the component.
  */
 import { logger } from "@edgecommons/ggcommons";
+import { DEFAULT_RBAC_CONFIG } from "./command/rbac";
+import type { RbacConfig, RolePolicy } from "./command/rbac";
 
 /** Staleness/miss-detection thresholds (DESIGN §6.2 / D5: warn 2x, stale 2.5x, offline 5x). */
 export interface StalenessConfig {
@@ -56,6 +58,16 @@ export interface MetricsConfig {
   maxSeries: number;
 }
 
+/** The C4 command-gateway timeout policy (all ms; every value ≤ the bridge reply-map TTL). */
+export interface CommandsConfig {
+  /** Default per-command deadline when a verb has no specific override. Default 30000. */
+  defaultTimeoutMs: number;
+  /** The hard ceiling — the uns-bridge reply-map TTL (paired-knob rule). Default & cap 60000. */
+  maxTimeoutMs: number;
+  /** Per-verb deadline overrides (ms). Default `{ ping: 10000 }`. */
+  verbTimeouts: Record<string, number>;
+}
+
 /** The parsed `component.global.console` section. */
 export interface ConsoleConfig {
   ws: WsConfig;
@@ -63,7 +75,21 @@ export interface ConsoleConfig {
   cache: CacheConfig;
   events: EventsConfig;
   metrics: MetricsConfig;
+  /** The C4 command authorization policy (`console.rbac`). */
+  rbac: RbacConfig;
+  /** The C4 command timeout policy (`console.commands`). */
+  commands: CommandsConfig;
 }
+
+/** The absolute command-timeout ceiling — the uns-bridge reply-map TTL (D-B9). */
+export const BRIDGE_REPLY_TTL_MS = 60_000;
+
+/** The command-gateway timeout defaults (30 s default / 60 s cap / 10 s ping). */
+export const DEFAULT_COMMANDS_CONFIG: CommandsConfig = {
+  defaultTimeoutMs: 30_000,
+  maxTimeoutMs: BRIDGE_REPLY_TTL_MS,
+  verbTimeouts: { ping: 10_000 },
+};
 
 /** The default staleness trio + cadence default (DESIGN §6.2 / reconciliation G4). */
 export const DEFAULT_STALENESS: StalenessConfig = {
@@ -81,6 +107,8 @@ export const DEFAULT_CONSOLE_CONFIG: ConsoleConfig = {
   cache: { maxChannelsPerComponent: 1024 },
   events: { maxEvents: 1000, maxPerComponent: 100 },
   metrics: { maxSeriesPoints: 60, maxSeries: 2000 },
+  rbac: DEFAULT_RBAC_CONFIG,
+  commands: DEFAULT_COMMANDS_CONFIG,
 };
 
 function obj(value: unknown): Record<string, unknown> {
@@ -106,6 +134,71 @@ function port(value: unknown, dflt: number): number {
   return n >= 1 && n <= 65535 ? n : dflt;
 }
 
+/** A non-empty string, or the default. */
+function nonEmptyString(value: unknown, dflt: string): string {
+  return typeof value === "string" && value !== "" ? value : dflt;
+}
+
+/** The string entries of an array (non-strings dropped), or `[]` for a non-array. */
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Parse the `console.rbac` section into a normalized {@link RbacConfig}. Lenient: an
+ * absent/malformed section is the permissive default; each role's `allow`/`deny` are
+ * cleaned to string arrays. A `defaultRole` naming a role that does not exist would deny
+ * everything (a footgun), so that misconfiguration falls back wholesale to the defaults
+ * (the staleness-ladder precedent).
+ */
+function parseRbac(value: unknown): RbacConfig {
+  const rbac = obj(value);
+  const rolesRaw = obj(rbac.roles);
+  const roleNames = Object.keys(rolesRaw);
+  if (roleNames.length === 0) {
+    // No roles declared: keep the whole default policy (its defaultRole is guaranteed valid).
+    return DEFAULT_RBAC_CONFIG;
+  }
+  const roles: Record<string, RolePolicy> = {};
+  for (const name of roleNames) {
+    const policy = obj(rolesRaw[name]);
+    roles[name] = { allow: stringArray(policy.allow), deny: stringArray(policy.deny) };
+  }
+  const defaultRole = nonEmptyString(rbac.defaultRole, DEFAULT_RBAC_CONFIG.defaultRole);
+  if (roles[defaultRole] === undefined) {
+    logger.warn(
+      `console.rbac.defaultRole '${defaultRole}' is not one of the declared roles ` +
+        `(${roleNames.join(", ")}) - using the default RBAC policy`,
+    );
+    return DEFAULT_RBAC_CONFIG;
+  }
+  return { defaultRole, roles };
+}
+
+/**
+ * Parse the `console.commands` section. Lenient with per-field defaults; every timeout is
+ * capped at {@link BRIDGE_REPLY_TTL_MS} (the paired-knob rule — a per-command deadline
+ * above the bridge's reply-map TTL could outlive the reply path).
+ */
+function parseCommands(value: unknown): CommandsConfig {
+  const commands = obj(value);
+  const cap = (ms: number): number => Math.min(BRIDGE_REPLY_TTL_MS, ms);
+  const maxTimeoutMs = cap(positiveInt(commands.maxTimeoutMs, DEFAULT_COMMANDS_CONFIG.maxTimeoutMs));
+  const defaultTimeoutMs = Math.min(
+    maxTimeoutMs,
+    positiveInt(commands.defaultTimeoutMs, DEFAULT_COMMANDS_CONFIG.defaultTimeoutMs),
+  );
+  const verbTimeouts: Record<string, number> = {};
+  const rawVerbs = obj(commands.verbTimeouts);
+  const source = Object.keys(rawVerbs).length > 0 ? rawVerbs : DEFAULT_COMMANDS_CONFIG.verbTimeouts;
+  for (const [verb, ms] of Object.entries(source)) {
+    if (typeof ms === "number" && Number.isFinite(ms) && ms > 0) {
+      verbTimeouts[verb] = cap(Math.trunc(ms));
+    }
+  }
+  return { defaultTimeoutMs, maxTimeoutMs, verbTimeouts };
+}
+
 /**
  * Parses the console section out of the component's `component.global` subtree
  * (i.e. pass `gg.config().global()`). Lenient with per-field defaults; a staleness
@@ -119,6 +212,8 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
   const cache = obj(console_.cache);
   const events = obj(console_.events);
   const metrics = obj(console_.metrics);
+  const rbac = parseRbac(console_.rbac);
+  const commands = parseCommands(console_.commands);
 
   let warnMultiplier = positiveNumber(staleness.warnMultiplier, DEFAULT_STALENESS.warnMultiplier);
   let staleMultiplier = positiveNumber(staleness.staleMultiplier, DEFAULT_STALENESS.staleMultiplier);
@@ -178,5 +273,7 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
       ),
       maxSeries: positiveInt(metrics.maxSeries, DEFAULT_CONSOLE_CONFIG.metrics.maxSeries),
     },
+    rbac,
+    commands,
   };
 }

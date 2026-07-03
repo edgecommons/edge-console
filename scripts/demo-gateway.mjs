@@ -21,13 +21,22 @@
  * For C6: a varied `evt` stream (components x severities, live-appending) and
  * moving `metric` series (EMF-shaped `sys` cpu/memory per component + a bridge
  * `relay_dropped_data` counter) so the sparklines visibly move.
+ *
+ * For C4: a fake CommandInbox-like responder stands in for the site-bus request/reply
+ * (the injected CommandGateway `request` fn): ping → {status, uptimeSecs}, get-configuration
+ * → the component's demo config, reload-config → {reloaded:true}, an unknown verb →
+ * UNKNOWN_VERB, and one deliberately-SLOW component (telemetry-processor) → TIMEOUT. The
+ * demo RBAC policy denies the verb `reboot`, so invoking it shows FORBIDDEN.
  */
 import { FleetModel } from "../server/dist/fleet/fleet-model.js";
 import { ConfigStore } from "../server/dist/fleet/config-store.js";
 import { EventStore } from "../server/dist/fleet/event-store.js";
 import { MetricStore } from "../server/dist/fleet/metric-store.js";
+import { CommandGateway } from "../server/dist/command/command-gateway.js";
+import { ConfigRbacPolicy } from "../server/dist/command/rbac.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
 import { WsServer } from "../server/dist/ws/ws-server.js";
+import { MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/ggcommons";
 
 const PORT = Number(process.env.DEMO_PORT ?? 8443);
 const clock = () => Date.now();
@@ -164,6 +173,57 @@ const cfgAnnouncements = {
   ],
 };
 
+// ---- C4: the command seam (a fake CommandInbox responder for the request edge) ------
+const consoleIdentity = new MessageIdentity([{ level: "device", value: "gw-console" }], "edge-console");
+const uns = new Uns(consoleIdentity, false);
+const rbac = new ConfigRbacPolicy({
+  defaultRole: "operator",
+  // operator may do everything EXCEPT reboot — so a Send-command "reboot" shows FORBIDDEN.
+  roles: { operator: { allow: ["*"], deny: ["reboot"] } },
+});
+
+/** The fake site-bus request edge: reply as a real ggcommons CommandInbox would. */
+function fakeComponentRequest(topic) {
+  const parts = topic.split("/"); // ecv1/{device}/{component}/{instance}/cmd/{verb...}
+  const component = parts[2];
+  const verb = parts.slice(5).join("/");
+  const reply = (body) => MessageBuilder.create(verb, "1.0").withPayload(body).build();
+
+  // One component is deliberately slow → the console maps the rejection to TIMEOUT.
+  if (component === "telemetry-processor") {
+    return new Promise((_resolve, reject) =>
+      setTimeout(() => reject(new RequestTimeoutError(`request on '${topic}' timed out`)), 1500),
+    );
+  }
+  // Realistic per-verb replies (uns-test-vectors/commands.json shapes).
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      if (verb === "ping") {
+        resolve(reply({ ok: true, result: { status: "RUNNING", uptimeSecs: uptime() } }));
+      } else if (verb === "get-configuration") {
+        resolve(reply({ ok: true, result: { config: demoConfig(component) } }));
+      } else if (verb === "reload-config") {
+        resolve(reply({ ok: true, result: { reloaded: true } }));
+      } else {
+        resolve(
+          reply({
+            ok: false,
+            error: { code: "UNKNOWN_VERB", message: `verb '${verb}' is not registered on this component` },
+          }),
+        );
+      }
+    }, 250); // a visible round-trip
+  });
+}
+
+const commandGateway = new CommandGateway({
+  uns,
+  newMessage: (name) => MessageBuilder.create(name, "1.0"),
+  request: fakeComponentRequest,
+  rbac,
+  clock,
+});
+
 const gateway = new FleetWsGateway(
   model,
   { clock },
@@ -182,6 +242,8 @@ const gateway = new FleetWsGateway(
   },
   // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
   { events, metrics },
+  // The C4 command seam: invoke-command → the fake CommandInbox responder, RBAC-gated.
+  { gateway: commandGateway, rbac },
 );
 const server = new WsServer(gateway, { port: PORT, bindAddress: "127.0.0.1" });
 

@@ -23,6 +23,11 @@ const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "gw-01" 
  */
 const SAFE_WS = { bindAddress: "127.0.0.1", port: 18743 };
 
+/** Drain the microtask+macrotask queue (the C4 command result settles asynchronously). */
+function flush(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function start(bus: FakeBus, globalConfig: unknown = {}): Promise<ConsoleApp> {
   const g = globalConfig as { console?: Record<string, unknown> };
   const consoleSection = { ...g.console, ws: { ...SAFE_WS, ...(g.console?.ws as object | undefined) } };
@@ -299,6 +304,94 @@ describe("startConsole - the C1 composition", () => {
     expect(sent.filter((m) => m.type === "event" || m.type === "metric")).toHaveLength(
       activityCount,
     );
+
+    await app.stop();
+  });
+});
+
+describe("startConsole - the C4 command round-trip", () => {
+  // Real timers here: the command result settles across microtasks/`setImmediate`.
+  it("invoke-command → messaging.request on the site bus → command-result", async () => {
+    const bus = new FakeBus();
+    bus.requestHandler = () =>
+      MessageBuilder.create("ping", "1.0")
+        .withPayload({ ok: true, result: { status: "RUNNING", uptimeSecs: 99 } })
+        .build();
+    const app = await start(bus);
+    const KEY = { device: "gw-02", component: "opcua-adapter", instance: "main" };
+
+    const sent: ServerMessage[] = [];
+    const transport: ClientTransport = {
+      id: "browser-1",
+      send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+      bufferedAmount: () => 0,
+      close: () => undefined,
+    };
+    const session = app.gateway.connect(transport, "operator");
+    session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    session.onMessage(
+      JSON.stringify({
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "c1",
+        key: KEY,
+        verb: "ping",
+      }),
+    );
+
+    await flush();
+    const result = sent.find((m) => m.type === "command-result");
+    expect(result).toMatchObject({
+      type: "command-result",
+      requestId: "c1",
+      key: KEY,
+      verb: "ping",
+      ok: true,
+      result: { status: "RUNNING", uptimeSecs: 99 },
+    });
+    // The request was addressed to the target's own cmd inbox on the site bus.
+    expect(bus.requests[0]!.topic).toBe("ecv1/gw-02/opcua-adapter/main/cmd/ping");
+
+    await app.stop();
+  });
+
+  it("a viewer-default deployment forbids reload-config before the bus", async () => {
+    const bus = new FakeBus();
+    const app = await start(bus, {
+      console: {
+        rbac: {
+          defaultRole: "viewer",
+          roles: { viewer: { allow: ["ping", "get-configuration"] }, operator: { allow: ["*"] } },
+        },
+      },
+    });
+
+    const sent: ServerMessage[] = [];
+    const transport: ClientTransport = {
+      id: "browser-1",
+      send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+      bufferedAmount: () => 0,
+      close: () => undefined,
+    };
+    // No explicit role ⇒ the gateway falls back to the RBAC defaultRole ("viewer").
+    const session = app.gateway.connect(transport);
+    session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    session.onMessage(
+      JSON.stringify({
+        type: "invoke-command",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: "c2",
+        key: { device: "gw-02", component: "opcua-adapter", instance: "main" },
+        verb: "reload-config",
+      }),
+    );
+    await flush();
+
+    expect(sent.find((m) => m.type === "command-result")).toMatchObject({
+      ok: false,
+      error: { code: "FORBIDDEN" },
+    });
+    expect(bus.requests).toHaveLength(0); // denied before any request
 
     await app.stop();
   });

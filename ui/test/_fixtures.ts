@@ -12,6 +12,7 @@ import type {
   FleetSnapshot,
 } from "@edgecommons/edge-console-protocol";
 import type { ClientState } from "../src/fleet/client";
+import type { CommandEntry, CommandView } from "../src/fleet/command-store";
 import type { MetricSeriesView } from "../src/fleet/metric-series-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 
@@ -122,9 +123,39 @@ export function clientState(
     configs: { entriesById: {} },
     events: { entries: [] },
     metrics: { series: [] },
+    commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,
   };
+}
+
+/** A {@link CommandEntry} with defaults (for command-UI tests). */
+export function commandEntry(overrides: Partial<CommandEntry> = {}): CommandEntry {
+  const k = overrides.key ?? key();
+  return {
+    requestId: "cmd-1",
+    seq: 1,
+    key: k,
+    componentId: `${k.device}/${k.component}/${k.instance}`,
+    verb: "ping",
+    phase: "ok",
+    result: { status: "RUNNING", uptimeSecs: 42 },
+    elapsedMs: 12,
+    ...overrides,
+  };
+}
+
+/** Build a {@link CommandView} from a list of entries (latest-by-slot derived by seq). */
+export function commandView(entries: CommandEntry[]): CommandView {
+  const byId: Record<string, CommandEntry> = {};
+  const latestByComponentVerb: Record<string, CommandEntry> = {};
+  for (const e of entries) {
+    byId[e.requestId] = e;
+    const slot = `${e.componentId}::${e.verb}`;
+    const prev = latestByComponentVerb[slot];
+    if (prev === undefined || e.seq > prev.seq) latestByComponentVerb[slot] = e;
+  }
+  return { byId, latestByComponentVerb, recent: [...entries].sort((a, b) => b.seq - a.seq) };
 }
 
 /** A {@link ConsoleEvent} with sensible defaults (id/type/severity overridable). */

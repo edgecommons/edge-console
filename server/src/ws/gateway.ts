@@ -43,6 +43,8 @@ import type { Clock, DeltaListener } from "../fleet/fleet-model";
 import type { ConfigUpdateListener, StoredConfig } from "../fleet/config-store";
 import type { EventListener } from "../fleet/event-store";
 import type { MetricUpdateListener } from "../fleet/metric-store";
+import type { CommandGateway, CommandResultData } from "../command/command-gateway";
+import type { RbacPolicy } from "../command/rbac";
 import { DeltaBuffer } from "./delta-buffer";
 
 /** What the gateway needs from the FleetModel - a narrow interface, no `ws` dependency. `FleetModel` satisfies this structurally. */
@@ -96,6 +98,19 @@ export interface ActivityGatewayDeps {
   metrics: MetricFeedSource;
 }
 
+/**
+ * The C4 command seam (optional fifth constructor argument): the pure
+ * {@link CommandGateway} that turns an `invoke-command` into a site-bus request/reply,
+ * plus the {@link RbacPolicy} whose `defaultRole` is the fallback for a connection with
+ * no {@link FleetWsGateway.connect}-supplied role (the auth seam's stub). Without this
+ * seam the gateway still speaks the protocol honestly: every `invoke-command` is answered
+ * `command-result{ok:false, error:{code:"UNAVAILABLE"}}` (there is no bus request path).
+ */
+export interface CommandSeamDeps {
+  gateway: CommandGateway;
+  rbac: RbacPolicy;
+}
+
 /** The gateway's view of one client connection. The real `ws` IO edge implements this; tests use an in-memory fake. */
 export interface ClientTransport {
   /** Opaque, unique per connection - logging/bookkeeping only. */
@@ -137,6 +152,8 @@ export const DEFAULT_GATEWAY_OPTIONS: Omit<FleetWsGatewayOptions, "clock"> = {
 interface Session {
   transport: ClientTransport;
   connectedAt: number;
+  /** The connection's RBAC role (resolved by the auth seam at connect; C4). */
+  role: string;
   /** Set once a valid `hello` has been processed; pre-hello clients receive nothing (not even heartbeats). */
   ready: boolean;
   /** Consecutive delta pushes skipped due to backpressure since the last successful send/resync. */
@@ -147,6 +164,8 @@ interface Session {
   eventsSubscribed: boolean;
   /** Live `metric` pushes are streamed while set (C6 `subscribe-metrics`). */
   metricsSubscribed: boolean;
+  /** In-flight command `requestId`s (C4) — for correlation + drop-on-disconnect. */
+  pendingCommands: Set<string>;
 }
 
 /** The C2 pure fanout core over the FleetModel's snapshot + delta stream. */
@@ -164,6 +183,7 @@ export class FleetWsGateway {
     opts: Partial<Omit<FleetWsGatewayOptions, "clock">> & { clock: Clock },
     private readonly config?: ConfigGatewayDeps,
     private readonly activity?: ActivityGatewayDeps,
+    private readonly command?: CommandSeamDeps,
   ) {
     this.opts = { ...DEFAULT_GATEWAY_OPTIONS, ...opts };
     this.buffer = new DeltaBuffer(this.opts.deltaBufferSize, source.snapshot().seq);
@@ -173,16 +193,24 @@ export class FleetWsGateway {
     this.detachMetrics = activity?.metrics.onUpdate((updates) => this.pushMetricUpdates(updates));
   }
 
-  /** Register a newly-opened transport. Sends nothing until the client's `hello` arrives. */
-  connect(transport: ClientTransport): ClientSession {
+  /**
+   * Register a newly-opened transport. Sends nothing until the client's `hello` arrives.
+   * `role` is the connection's RBAC role (C4), resolved by the auth seam at the WS edge
+   * (`ws-server.ts` `onConnection`); it defaults to the command seam's configured
+   * `defaultRole` (or, with no command seam, an inert placeholder — commanding is
+   * UNAVAILABLE there anyway).
+   */
+  connect(transport: ClientTransport, role?: string): ClientSession {
     const session: Session = {
       transport,
       connectedAt: this.opts.clock(),
+      role: role ?? this.command?.rbac.defaultRole ?? "",
       ready: false,
       missedPushes: 0,
       configKeys: new Set(),
       eventsSubscribed: false,
       metricsSubscribed: false,
+      pendingCommands: new Set(),
     };
     this.sessions.set(transport.id, session);
     return {
@@ -308,7 +336,75 @@ export class FleetWsGateway {
       case "unsubscribe-metrics":
         session.metricsSubscribed = false;
         return;
+      case "invoke-command":
+        this.onInvokeCommand(session, msg);
+        return;
     }
+  }
+
+  /**
+   * A C4 `invoke-command`: RBAC + site-bus request/reply through the injected
+   * {@link CommandGateway}, answered with exactly one `command-result` correlated by
+   * `requestId`. Concurrency isolation: each invoke is an independent promise; the result
+   * is delivered only if the SAME session is still connected when it settles (a command
+   * whose client disconnected mid-flight is dropped, never sent to a stale/reused
+   * transport). Without the command seam the frame is answered UNAVAILABLE honestly.
+   */
+  private onInvokeCommand(
+    session: Session,
+    msg: Extract<ClientMessage, { type: "invoke-command" }>,
+  ): void {
+    const { requestId, key, verb } = msg;
+    if (this.command === undefined) {
+      this.send(session, {
+        type: "command-result",
+        protocolVersion: PROTOCOL_VERSION,
+        requestId,
+        key,
+        verb,
+        ok: false,
+        error: { code: "UNAVAILABLE", message: "the console command gateway is not configured" },
+        elapsedMs: 0,
+      });
+      return;
+    }
+    session.pendingCommands.add(requestId);
+    void this.command.gateway
+      .invoke({ requestId, key, verb, ...(msg.args !== undefined ? { args: msg.args } : {}) }, session.role)
+      .then((result) => this.deliverCommandResult(session, result))
+      .catch((e) => {
+        // CommandGateway.invoke never throws by contract; this guards a broken injected
+        // request fn — surface it as a REQUEST_FAILED result rather than an unhandled
+        // rejection, so the client's pending command still settles.
+        logger.warn(`edge-console ws: command invoke for ${requestId} threw: ${String(e)}`);
+        this.deliverCommandResult(session, {
+          requestId,
+          key,
+          verb,
+          ok: false,
+          error: { code: "REQUEST_FAILED", message: String(e) },
+          elapsedMs: 0,
+        });
+      });
+  }
+
+  /** Deliver a settled command result iff its originating session is still connected. */
+  private deliverCommandResult(session: Session, result: CommandResultData): void {
+    session.pendingCommands.delete(result.requestId);
+    // The session may have closed (onClose deletes it) or the transport been reused — only
+    // deliver to the live, same session.
+    if (this.sessions.get(session.transport.id) !== session) return;
+    this.send(session, {
+      type: "command-result",
+      protocolVersion: PROTOCOL_VERSION,
+      requestId: result.requestId,
+      key: result.key,
+      verb: result.verb,
+      ok: result.ok,
+      ...(result.ok ? { result: result.result } : {}),
+      ...(!result.ok && result.error !== undefined ? { error: result.error } : {}),
+      elapsedMs: result.elapsedMs,
+    });
   }
 
   /** A fresh `evt` arrival: stream to every ready, event-subscribed client. */

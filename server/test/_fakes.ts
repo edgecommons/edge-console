@@ -12,6 +12,13 @@ export interface PublishedRecord {
   message: Message;
 }
 
+/** A recorded request/reply (C4). */
+export interface RequestRecord {
+  topic: string;
+  message: Message;
+  timeoutMs?: number;
+}
+
 /**
  * An in-memory `IMessagingService`: records publishes; `emitWire` delivers a wire
  * payload to every subscription whose filter matches the topic (real MQTT wildcard
@@ -19,9 +26,16 @@ export interface PublishedRecord {
  */
 export class FakeBus implements IMessagingService {
   readonly published: PublishedRecord[] = [];
+  readonly requests: RequestRecord[] = [];
   readonly subscriptions = new Map<string, MessageHandler>();
   readonly unsubscribed: string[] = [];
   connectedState = true;
+  /**
+   * Optional C4 request scripting: given the outgoing request, return the reply
+   * {@link Message} (or a promise, or throw/reject to simulate a timeout/transport
+   * error). Absent ⇒ `request` returns a never-settling future (the pre-C4 behavior).
+   */
+  requestHandler?: (topic: string, msg: Message, timeoutMs?: number) => Message | Promise<Message>;
 
   async publish(topic: string, msg: Message): Promise<void> {
     this.published.push({ topic, message: msg });
@@ -51,8 +65,14 @@ export class FakeBus implements IMessagingService {
     this.subscriptions.delete(filter);
   }
 
-  request(_topic: string, _msg: Message, _timeoutMs?: number): ReplyFuture {
-    return new ReplyFuture(new Promise<Message>(() => undefined), () => undefined);
+  request(topic: string, msg: Message, timeoutMs?: number): ReplyFuture {
+    this.requests.push({ topic, message: msg, timeoutMs });
+    if (this.requestHandler === undefined) {
+      return new ReplyFuture(new Promise<Message>(() => undefined), () => undefined);
+    }
+    const handler = this.requestHandler;
+    const promise = Promise.resolve().then(() => handler(topic, msg, timeoutMs));
+    return new ReplyFuture(promise, () => undefined);
   }
   requestFromIoTCore(topic: string, msg: Message, timeoutMs?: number): ReplyFuture {
     return this.request(topic, msg, timeoutMs);
