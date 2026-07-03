@@ -29,6 +29,10 @@ import { FleetStore } from "./store";
 import type { FleetView } from "./store";
 import { ConfigStore } from "./config-store";
 import type { ConfigView } from "./config-store";
+import { EventLogStore } from "./event-log-store";
+import type { EventsView } from "./event-log-store";
+import { MetricSeriesStore } from "./metric-series-store";
+import type { MetricsView } from "./metric-series-store";
 
 /** Connection status surfaced to the UI. */
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -90,6 +94,10 @@ export interface ClientState {
   fleet: FleetView;
   /** The C5 config-review entries (per requested component key). */
   configs: ConfigView;
+  /** The C6 rolling event log (newest-first, populated while subscribed). */
+  events: EventsView;
+  /** The C6 metric surface (latest + bounded series, populated while subscribed). */
+  metrics: MetricsView;
   wsUrl: string;
 }
 
@@ -97,6 +105,10 @@ export class FleetClient {
   readonly store: FleetStore;
   /** The C5 config-review fold core (pure; this client is its IO shell). */
   readonly configStore: ConfigStore;
+  /** The C6 event-log fold core (pure; this client is its IO shell). */
+  readonly eventLog: EventLogStore;
+  /** The C6 metric-series fold core (pure; this client is its IO shell). */
+  readonly metricSeries: MetricSeriesStore;
 
   private readonly url: string;
   private readonly socketFactory: SocketFactory;
@@ -131,6 +143,8 @@ export class FleetClient {
     this.now = opts.now ?? Date.now;
     this.store = new FleetStore(opts.ladder);
     this.configStore = new ConfigStore();
+    this.eventLog = new EventLogStore();
+    this.metricSeries = new MetricSeriesStore();
   }
 
   /** Dial and keep the connection alive until {@link stop}. Idempotent. */
@@ -198,6 +212,40 @@ export class FleetClient {
     this.notify();
   }
 
+  /**
+   * Subscribe to the fleet-wide event stream (C6 `subscribe-events`). The gateway
+   * answers with the recent backlog (replacing the local log) and streams every
+   * later arrival. Server-side interest dies with the connection, so the owning
+   * view re-subscribes whenever the connection comes (back) up — the same
+   * reconnect story as `requestConfig` (no client-side resubscribe machinery).
+   */
+  subscribeEvents(limit?: number): void {
+    this.sendFrame({
+      type: "subscribe-events",
+      protocolVersion: PROTOCOL_VERSION,
+      ...(limit !== undefined ? { limit } : {}),
+    });
+  }
+
+  /** Stop the event stream (e.g. the Events view unmounted). Idempotent. */
+  unsubscribeEvents(): void {
+    this.sendFrame({ type: "unsubscribe-events", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
+   * Subscribe to the metric surface (C6 `subscribe-metrics`): a full latest+series
+   * snapshot replaces the local state, then live samples stream in. Re-subscribe
+   * on reconnect is the owning view's effect, as above.
+   */
+  subscribeMetrics(): void {
+    this.sendFrame({ type: "subscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /** Stop the metric stream. Idempotent. */
+  unsubscribeMetrics(): void {
+    this.sendFrame({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  }
+
   /** Subscribe to state changes; returns the unsubscribe function. */
   subscribe(listener: () => void): () => void {
     this.listeners.push(listener);
@@ -211,10 +259,14 @@ export class FleetClient {
   getState(): ClientState {
     const fleet = this.store.view();
     const configs = this.configStore.view();
+    const events = this.eventLog.view();
+    const metrics = this.metricSeries.view();
     if (
       this.stateCache === undefined ||
       this.stateCache.fleet !== fleet ||
       this.stateCache.configs !== configs ||
+      this.stateCache.events !== events ||
+      this.stateCache.metrics !== metrics ||
       this.stateCache.status !== this.status ||
       this.stateCache.fatalError !== this.fatalError
     ) {
@@ -224,6 +276,8 @@ export class FleetClient {
         hasSnapshot: this.store.hasSnapshot(),
         fleet,
         configs,
+        events,
+        metrics,
         wsUrl: this.url,
       };
     }
@@ -311,6 +365,26 @@ export class FleetClient {
       }
       case "config-unavailable":
         this.configStore.applyUnavailable(msg.key);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "events":
+        this.eventLog.applyBacklog(msg.events);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "event":
+        this.eventLog.applyEvent(msg.event);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "metrics":
+        this.metricSeries.applySnapshot(msg.series);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "metric":
+        this.metricSeries.applyUpdates(msg.updates);
         this.retries = 0;
         this.notify();
         return;

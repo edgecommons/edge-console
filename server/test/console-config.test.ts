@@ -28,6 +28,8 @@ describe("consoleConfigFromGlobal", () => {
           sweepIntervalMs: 500,
         },
         cache: { maxChannelsPerComponent: 64 },
+        events: { maxEvents: 200, maxPerComponent: 20 },
+        metrics: { maxSeriesPoints: 30, maxSeries: 500 },
       },
     });
     expect(parsed).toEqual({
@@ -40,6 +42,8 @@ describe("consoleConfigFromGlobal", () => {
         sweepIntervalMs: 500,
       },
       cache: { maxChannelsPerComponent: 64 },
+      events: { maxEvents: 200, maxPerComponent: 20 },
+      metrics: { maxSeriesPoints: 30, maxSeries: 500 },
     });
   });
 
@@ -49,6 +53,8 @@ describe("consoleConfigFromGlobal", () => {
         ws: { port: 999999, bindAddress: "", heartbeatIntervalMs: -1 },
         staleness: { defaultIntervalSecs: "-1", sweepIntervalMs: 0.4 },
         cache: { maxChannelsPerComponent: -5 },
+        events: { maxEvents: 0, maxPerComponent: "lots" },
+        metrics: { maxSeriesPoints: null, maxSeries: -1 },
       },
     });
     expect(parsed).toEqual(DEFAULT_CONSOLE_CONFIG);

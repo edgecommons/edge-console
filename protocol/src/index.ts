@@ -20,8 +20,12 @@
  * `refresh-config`, server `config`/`config-unavailable`. Breaking because a v1
  * gateway rejects-and-closes on the new client frames; the exact-match version
  * handshake turns that skew into a clean "reload the page" instead.
+ * v3 (slice C6): the activity message family — client `subscribe-events`/
+ * `unsubscribe-events`/`subscribe-metrics`/`unsubscribe-metrics`, server
+ * `events`/`event`/`metrics`/`metric`. Breaking for the same reason as v2: a
+ * v2 gateway rejects-and-closes on the new client frames.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -197,6 +201,152 @@ export type FleetDelta =
     };
 
 /* -----------------------------------------------------------------------------
+ * C6 — events & metrics: the two consumer classes whose BODIES the console serves
+ * (the liveness stream deliberately carries none — same finding as `cfg`/C5).
+ *
+ * `evt` = discrete component notifications. The wire convention is
+ * `evt/{severity}/{type}` (UNS-CANONICAL §4.3, e.g. `evt/critical/overtemp`), but
+ * the class is OPEN — any channel shape is accepted and split leniently. The console
+ * keeps a bounded rolling recent-history (newest-first) and STREAMS arrivals to
+ * subscribed clients (notifications fit subscribe/stream, not request/response).
+ *
+ * `metric` = numeric measures on `metric/{name}`. The body is typically the
+ * library's EMF object (measure values flattened to the top level next to string
+ * dimensions and the `_aws` metadata block), but any body with top-level finite
+ * numbers — or a bare number — folds. The console keeps the latest value plus a
+ * small bounded recent series per (component, metric, measure) and serves
+ * snapshot-then-updates to subscribed clients.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * One component event as the console holds it: the `evt` envelope body plus the
+ * console's attribution/severity split and receipt stamp.
+ */
+export interface ConsoleEvent {
+  /**
+   * Monotonic server-assigned id (arrival order; React keys; live-append dedup).
+   * Restarts with the console process — a fresh `events` backlog resets clients.
+   */
+  id: number;
+  key: ComponentKey;
+  /**
+   * The severity token — the first channel token when the channel follows the
+   * `evt/{severity}/{type}` convention. Verbatim (the UI classifies it); absent
+   * when the channel carried no severity position.
+   */
+  severity?: string;
+  /** The event type/name — the channel remainder (see {@link splitEventChannel}). */
+  type: string;
+  /** The full channel verbatim, when present (diagnostics). */
+  channel?: string;
+  /** The envelope body verbatim — the event detail. */
+  body: unknown;
+  /** Envelope tags, verbatim (`_`-prefixed keys are system-reserved). */
+  tags?: Record<string, unknown>;
+  /** Console receipt time (server-clock ms epoch). */
+  receivedAt: number;
+  /** The publisher's `header.timestamp` claim, when present (display only). */
+  sourceTimestamp?: string;
+}
+
+/** The canonical severity buckets the console renders (raw tokens are classified). */
+export type EventSeverityLevel = "critical" | "error" | "warning" | "info" | "debug";
+
+/** Raw severity token -> canonical bucket (lenient synonym map). */
+const SEVERITY_SYNONYMS: Record<string, EventSeverityLevel> = {
+  critical: "critical",
+  crit: "critical",
+  fatal: "critical",
+  emergency: "critical",
+  alert: "critical",
+  error: "error",
+  err: "error",
+  warning: "warning",
+  warn: "warning",
+  info: "info",
+  notice: "info",
+  debug: "debug",
+  trace: "debug",
+};
+
+/**
+ * Classify a raw severity token into a canonical bucket, or `undefined` for an
+ * unknown/absent token (rendered neutrally — the class is open, never rejected).
+ */
+export function classifyEventSeverity(severity: string | undefined): EventSeverityLevel | undefined {
+  if (severity === undefined) return undefined;
+  return SEVERITY_SYNONYMS[severity.toLowerCase()];
+}
+
+/** The label shown for an event whose channel carried no type token. */
+export const UNNAMED_EVENT_TYPE = "(unnamed)";
+
+/**
+ * Split an `evt` channel into `{severity?, type}` per the `evt/{severity}/{type}`
+ * convention, leniently: with two or more tokens the first is the severity position
+ * (verbatim, even if unrecognized) and the rest join as the type; a single token is
+ * a severity iff it classifies as one (`evt/critical`), otherwise a bare type
+ * (`evt/overtemp`); no channel at all yields the {@link UNNAMED_EVENT_TYPE} type.
+ */
+export function splitEventChannel(channel: string | undefined): {
+  severity?: string;
+  type: string;
+} {
+  if (channel === undefined || channel === "") return { type: UNNAMED_EVENT_TYPE };
+  const tokens = channel.split("/");
+  if (tokens.length === 1) {
+    const token = tokens[0]!;
+    return classifyEventSeverity(token) !== undefined
+      ? { severity: token, type: UNNAMED_EVENT_TYPE }
+      : { type: token };
+  }
+  return { severity: tokens[0]!, type: tokens.slice(1).join("/") };
+}
+
+/** One sample of a metric series (server-clock ms + the measure's numeric value). */
+export interface MetricPoint {
+  at: number;
+  value: number;
+}
+
+/**
+ * The bound both sides keep per metric series (points, drop-oldest). Shared so the
+ * client's fold mirrors the server's retention exactly.
+ */
+export const DEFAULT_METRIC_SERIES_POINTS = 60;
+
+/**
+ * One (component, metric, measure) series as the `metrics` snapshot carries it:
+ * the latest value plus the bounded recent series (ascending time, newest last —
+ * `points` always includes the latest sample).
+ */
+export interface MetricSeriesSnapshot {
+  key: ComponentKey;
+  /** The UNS metric name — the channel under `metric/` (may itself contain `/`). */
+  metric: string;
+  /** The numeric field within the metric body (`"value"` for bare-number bodies). */
+  measure: string;
+  latest: number;
+  /** Console receipt time of the latest sample (server-clock ms epoch). */
+  receivedAt: number;
+  /** The publisher's `header.timestamp` claim on the latest sample, when present. */
+  sourceTimestamp?: string;
+  points: MetricPoint[];
+}
+
+/**
+ * One fresh sample for a series (a live `metric` push): the client appends it to
+ * its bounded series (or starts a new one), latest-wins.
+ */
+export interface MetricSeriesUpdate {
+  key: ComponentKey;
+  metric: string;
+  measure: string;
+  point: MetricPoint;
+  sourceTimestamp?: string;
+}
+
+/* -----------------------------------------------------------------------------
  * C2 — the WS gateway wire envelope: snapshot-then-deltas.
  *
  * Every frame in both directions carries `protocolVersion` (= {@link PROTOCOL_VERSION}
@@ -229,11 +379,26 @@ export type WsErrorCode = "malformed" | "unsupported-protocol-version";
  *    bus and flow to interested clients as `config` pushes. (Whether any component
  *    answers depends on the device-side ggcommons S1 listener — absence is silent,
  *    never an error.)
+ *  - `subscribe-events` (C6) — register this connection's interest in the fleet-wide
+ *    `evt` stream. The gateway answers with ONE `events` backlog frame (the recent
+ *    rolling history, newest-first, optionally capped by `limit`) and then pushes
+ *    every later arrival as an `event` frame for the life of the interest.
+ *    Interest is per-connection (re-subscribe after reconnect, like `get-config`).
+ *  - `unsubscribe-events` (C6) — stop the `event` pushes (e.g. the view unmounted).
+ *    No reply; idempotent.
+ *  - `subscribe-metrics` (C6) — register interest in the metric surface. The gateway
+ *    answers with ONE `metrics` snapshot frame (every known series: latest value +
+ *    bounded recent points) and then pushes fresh samples as `metric` frames.
+ *  - `unsubscribe-metrics` (C6) — stop the `metric` pushes. No reply; idempotent.
  */
 export type ClientMessage =
   | { type: "hello"; protocolVersion: number; resumeSeq?: number }
   | { type: "get-config"; protocolVersion: number; key: ComponentKey }
-  | { type: "refresh-config"; protocolVersion: number; device: string };
+  | { type: "refresh-config"; protocolVersion: number; device: string }
+  | { type: "subscribe-events"; protocolVersion: number; limit?: number }
+  | { type: "unsubscribe-events"; protocolVersion: number }
+  | { type: "subscribe-metrics"; protocolVersion: number }
+  | { type: "unsubscribe-metrics"; protocolVersion: number };
 
 /**
  * Server -> client frames.
@@ -253,6 +418,16 @@ export type ClientMessage =
  *  - `config-unavailable` (C5) — the reply to `get-config` when the console holds no
  *    `cfg` for that key (the component never pushed one since the console started, or
  *    it doesn't exist). Not terminal: a later push flips it via a `config` frame.
+ *  - `events` (C6) — the reply to `subscribe-events`: the rolling recent history,
+ *    NEWEST-FIRST. Replaces whatever event list the client held (the server's ring
+ *    is the truth of "recent" — a fresh backlog after reconnect self-heals).
+ *  - `event` (C6) — one live `evt` arrival, pushed to every subscribed client. The
+ *    monotonic `event.id` dedups the backlog/push seam.
+ *  - `metrics` (C6) — the reply to `subscribe-metrics`: every known metric series
+ *    (latest + bounded recent points). Replaces the client's metric state.
+ *  - `metric` (C6) — fresh samples pushed to subscribed clients; one bus arrival can
+ *    carry several measures, hence a batch. The client appends bounded (see
+ *    {@link DEFAULT_METRIC_SERIES_POINTS}), starting unseen series from scratch.
  *  - `error` — a rejected frame (see {@link WsErrorCode}); the gateway closes the
  *    connection immediately after sending it.
  */
@@ -272,6 +447,10 @@ export type ServerMessage =
       sourceTimestamp?: string;
     }
   | { type: "config-unavailable"; protocolVersion: number; key: ComponentKey }
+  | { type: "events"; protocolVersion: number; events: ConsoleEvent[] }
+  | { type: "event"; protocolVersion: number; event: ConsoleEvent }
+  | { type: "metrics"; protocolVersion: number; series: MetricSeriesSnapshot[] }
+  | { type: "metric"; protocolVersion: number; updates: MetricSeriesUpdate[] }
   | { type: "error"; protocolVersion: number; code: WsErrorCode; message: string };
 
 /** The outcome of validating one raw inbound WS text frame. */
@@ -357,6 +536,27 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
         message: { type: "refresh-config", protocolVersion, device: obj.device },
       };
     }
+    case "subscribe-events": {
+      if (obj.limit !== undefined) {
+        if (typeof obj.limit !== "number" || !Number.isInteger(obj.limit) || obj.limit < 1) {
+          return { ok: false, reason: "subscribe-events limit must be a positive integer" };
+        }
+      }
+      return {
+        ok: true,
+        message: {
+          type: "subscribe-events",
+          protocolVersion,
+          ...(obj.limit !== undefined ? { limit: obj.limit as number } : {}),
+        },
+      };
+    }
+    case "unsubscribe-events":
+      return { ok: true, message: { type: "unsubscribe-events", protocolVersion } };
+    case "subscribe-metrics":
+      return { ok: true, message: { type: "subscribe-metrics", protocolVersion } };
+    case "unsubscribe-metrics":
+      return { ok: true, message: { type: "unsubscribe-metrics", protocolVersion } };
     default:
       return { ok: false, reason: `unknown message type '${String(obj.type)}'` };
   }

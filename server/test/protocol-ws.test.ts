@@ -7,8 +7,10 @@
 import { describe, expect, it } from "vitest";
 import {
   PROTOCOL_VERSION,
+  classifyEventSeverity,
   parseClientMessage,
   parseComponentKey,
+  splitEventChannel,
 } from "@edgecommons/edge-console-protocol";
 
 describe("parseClientMessage", () => {
@@ -131,6 +133,84 @@ describe("parseClientMessage - the C5 config family", () => {
     ],
   ])("rejects: %s", (_label, raw) => {
     expect(parseClientMessage(raw).ok).toBe(false);
+  });
+});
+
+describe("parseClientMessage - the C6 activity family", () => {
+  it("accepts subscribe-events bare and with a positive limit (extras ignored)", () => {
+    expect(
+      parseClientMessage(JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION })),
+    ).toEqual({
+      ok: true,
+      message: { type: "subscribe-events", protocolVersion: PROTOCOL_VERSION },
+    });
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "subscribe-events",
+          protocolVersion: PROTOCOL_VERSION,
+          limit: 50,
+          extra: true,
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: { type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 50 },
+    });
+  });
+
+  it.each(["unsubscribe-events", "subscribe-metrics", "unsubscribe-metrics"] as const)(
+    "accepts the bare %s frame",
+    (type) => {
+      expect(parseClientMessage(JSON.stringify({ type, protocolVersion: PROTOCOL_VERSION }))).toEqual({
+        ok: true,
+        message: { type, protocolVersion: PROTOCOL_VERSION },
+      });
+    },
+  );
+
+  it.each([
+    ["zero limit", JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 0 })],
+    [
+      "negative limit",
+      JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: -1 }),
+    ],
+    [
+      "fractional limit",
+      JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 1.5 }),
+    ],
+    [
+      "string limit",
+      JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: "10" }),
+    ],
+    ["subscribe-metrics without protocolVersion", JSON.stringify({ type: "subscribe-metrics" })],
+  ])("rejects: %s", (_label, raw) => {
+    expect(parseClientMessage(raw).ok).toBe(false);
+  });
+});
+
+describe("splitEventChannel / classifyEventSeverity - the evt/{severity}/{type} split", () => {
+  it.each([
+    ["critical/overtemp", { severity: "critical", type: "overtemp" }],
+    ["warning/slave/retry", { severity: "warning", type: "slave/retry" }], // multi-token type
+    ["machine1/started", { severity: "machine1", type: "started" }], // unknown severity, verbatim
+    ["overtemp", { type: "overtemp" }], // bare type (not a severity token)
+    ["critical", { severity: "critical", type: "(unnamed)" }], // bare KNOWN severity
+    [undefined, { type: "(unnamed)" }],
+    ["", { type: "(unnamed)" }],
+  ])("splits %j", (channel, expected) => {
+    expect(splitEventChannel(channel as string | undefined)).toEqual(expected);
+  });
+
+  it("classifies synonym tokens case-insensitively and unknowns as undefined", () => {
+    expect(classifyEventSeverity("CRIT")).toBe("critical");
+    expect(classifyEventSeverity("fatal")).toBe("critical");
+    expect(classifyEventSeverity("err")).toBe("error");
+    expect(classifyEventSeverity("Warn")).toBe("warning");
+    expect(classifyEventSeverity("notice")).toBe("info");
+    expect(classifyEventSeverity("trace")).toBe("debug");
+    expect(classifyEventSeverity("machine1")).toBeUndefined();
+    expect(classifyEventSeverity(undefined)).toBeUndefined();
   });
 });
 

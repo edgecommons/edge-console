@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Demo gateway — the REAL C2+C5 stack (server/dist FleetModel + ConfigStore +
- * FleetWsGateway + WsServer) fed a synthetic fleet, so the edge-health AND
- * config-review UIs (slices C3/C5) can be driven in a browser without a site broker
- * or real components:
+ * Demo gateway — the REAL C2+C5+C6 stack (server/dist FleetModel + ConfigStore +
+ * EventStore + MetricStore + FleetWsGateway + WsServer) fed a synthetic fleet, so
+ * the edge-health, config-review, events AND metrics UIs (slices C3/C5/C6) can be
+ * driven in a browser without a site broker or real components:
  *
  *   npm run build                       # server/dist must exist
  *   node scripts/demo-gateway.mjs       # gateway on ws://127.0.0.1:8443/ws
@@ -18,9 +18,14 @@
  * for config-review: `cfg` announcements with source-redacted secrets (`"***"`) and
  * `$secret` refs, one component that never pushes cfg (the UNAVAIL path), and a
  * simulated device-side republish listener so the UI's Refresh visibly re-pushes.
+ * For C6: a varied `evt` stream (components x severities, live-appending) and
+ * moving `metric` series (EMF-shaped `sys` cpu/memory per component + a bridge
+ * `relay_dropped_data` counter) so the sparklines visibly move.
  */
 import { FleetModel } from "../server/dist/fleet/fleet-model.js";
 import { ConfigStore } from "../server/dist/fleet/config-store.js";
+import { EventStore } from "../server/dist/fleet/event-store.js";
+import { MetricStore } from "../server/dist/fleet/metric-store.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
 import { WsServer } from "../server/dist/ws/ws-server.js";
 
@@ -29,11 +34,15 @@ const clock = () => Date.now();
 
 const model = new FleetModel(clock);
 const configs = new ConfigStore(clock);
+const events = new EventStore(clock);
+const metrics = new MetricStore(clock);
 
-/** The composition root's ingress tee: FleetModel + ConfigStore (console-app.ts shape). */
+/** The composition root's ingress tee: FleetModel + side stores (console-app.ts shape). */
 function ingest(event) {
   model.ingest(event);
   configs.ingest(event);
+  events.ingest(event);
+  metrics.ingest(event);
 }
 
 /** Build the IngressEvent for one component's state keepalive. */
@@ -65,6 +74,32 @@ function cfgEvent(site, device, component, config) {
   };
 }
 
+/** An `evt` on the `evt/{severity}/{type}` convention. */
+function evtEvent(site, device, component, severity, type, body) {
+  return {
+    ...stateEvent(site, device, component, body),
+    cls: "evt",
+    channel: `${severity}/${type}`,
+    topic: `ecv1/${device}/${component}/main/evt/${severity}/${type}`,
+  };
+}
+
+/** A `metric/{name}` sample (EMF-shaped for `sys`, like the library publisher). */
+function metricEvent(site, device, component, name, measures) {
+  return {
+    ...stateEvent(site, device, component, {
+      coreName: device,
+      category: name,
+      component,
+      ...measures,
+      _aws: { Timestamp: Date.now(), CloudWatchMetrics: [] },
+    }),
+    cls: "metric",
+    channel: name,
+    topic: `ecv1/${device}/${component}/main/metric/${name}`,
+  };
+}
+
 const started = Date.now();
 const uptime = (offsetSecs = 0) => Math.floor((Date.now() - started) / 1000) + offsetSecs;
 
@@ -72,6 +107,7 @@ const uptime = (offsetSecs = 0) => Math.floor((Date.now() - started) / 1000) + o
 const SITE = "dallas";
 let tick = 0;
 let modbusRestartBase = 3600; // pretends it was up an hour before a later restart
+let relayDropped = 0; // the bridge's monotonic drop counter (bursts during asm outages)
 
 // ---- effective configs (redaction as the library publisher would emit it) ---
 /** A realistic redacted effective config for one component. */
@@ -144,14 +180,16 @@ const gateway = new FleetWsGateway(
       }, 800);
     },
   },
+  // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
+  { events, metrics },
 );
 const server = new WsServer(gateway, { port: PORT, bindAddress: "127.0.0.1" });
 
 function feed() {
   tick++;
 
-  // press-gw-01: three healthy components (5 s cadence).
-  for (const comp of ["opcua-adapter", "modbus-adapter", "telemetry-processor"]) {
+  // press-gw-01: three healthy components + its bridge (5 s cadence).
+  for (const comp of ["opcua-adapter", "modbus-adapter", "telemetry-processor", "uns-bridge"]) {
     ingest(stateEvent(SITE, "press-gw-01", comp, { status: "RUNNING", uptimeSecs: uptime() }));
   }
 
@@ -194,10 +232,72 @@ function feed() {
   } else if (tick % 15 < 8) {
     ingest(stateEvent(SITE, "press-gw-01", "batch-runner", { status: "RUNNING", uptimeSecs: uptime() }));
   }
+
+  // ---- C6: moving metric series (EMF-shaped sys per component + a bridge counter).
+  // Sinusoids + jitter so every sparkline visibly moves tick to tick.
+  const wave = (base, amp, phase) =>
+    Math.round((base + amp * Math.sin(tick / 3 + phase) + Math.random() * amp * 0.3) * 10) / 10;
+  ingest(metricEvent(SITE, "press-gw-01", "opcua-adapter", "sys", {
+    cpu: wave(22, 9, 0),
+    memory: wave(38, 3, 1),
+  }));
+  ingest(metricEvent(SITE, "press-gw-01", "modbus-adapter", "sys", {
+    cpu: wave(11, 5, 2),
+    memory: wave(24, 2, 3),
+  }));
+  ingest(metricEvent(SITE, "press-gw-01", "telemetry-processor", "sys", {
+    cpu: wave(41, 14, 4),
+    memory: wave(55, 6, 5),
+  }));
+  relayDropped += asmDown ? Math.floor(Math.random() * 40) + 10 : 0; // bursts while the WAN path is down
+  ingest(metricEvent(SITE, "press-gw-01", "uns-bridge", "relay_dropped_data", {
+    dropped: relayDropped,
+  }));
+
+  // ---- C6: a varied evt stream (components x severities, live-appending).
+  if (tick % 3 === 1) {
+    ingest(evtEvent(SITE, "press-gw-01", "opcua-adapter", "info", "scan-cycle-complete", {
+      message: "browse + subscribe cycle finished",
+      signals: 48,
+      elapsedMs: 180 + Math.floor(Math.random() * 90),
+    }));
+  }
+  if (tick % 5 === 2) {
+    ingest(evtEvent(SITE, "pack-gw-01", "modbus-adapter", "warning", "slave-retry", {
+      message: "slave 192.168.1.224:5020 did not answer, retrying",
+      attempt: (tick % 15) + 1,
+      unitId: 1,
+    }));
+  }
+  if (tick % 7 === 3) {
+    ingest(evtEvent(SITE, "press-gw-01", "telemetry-processor", "error", "pipeline-lag", {
+      message: "aggregate window closed late",
+      lagMs: 900 + Math.floor(Math.random() * 600),
+      stage: "aggregate",
+    }));
+  }
+  if (tick % 14 === 6) {
+    ingest(evtEvent(SITE, "pack-gw-01", "opcua-adapter", "critical", "connection-lost", {
+      message: "OPC UA session dropped by server",
+      endpoint: "opc.tcp://192.168.1.181:49320",
+    }));
+  }
+  if (tick % 15 === 8) {
+    ingest(evtEvent(SITE, "press-gw-01", "batch-runner", "info", "batch-completed", {
+      message: "batch finished cleanly, stopping until the next window",
+      recordsProcessed: 1200 + tick,
+    }));
+  }
+  if (tick % 18 === 0 && tick > 0) {
+    ingest(evtEvent(SITE, "asm-gw-01", "uns-bridge", "warning", "site-reconnect", {
+      message: "site link restored, replaying buffered evt in order",
+      bufferedReplayed: 37,
+    }));
+  }
 }
 
 await server.start();
-console.log(`[demo] C2+C5 gateway (real FleetModel/ConfigStore/FleetWsGateway/WsServer) on ws://127.0.0.1:${PORT}/ws`);
+console.log(`[demo] C2+C5+C6 gateway (real FleetModel/ConfigStore/EventStore/MetricStore/FleetWsGateway/WsServer) on ws://127.0.0.1:${PORT}/ws`);
 
 // cfg announcements on "startup" (the publish-on-startup half of the cfg contract);
 // cadence sources become "cfg" wherever heartbeat.intervalSecs is announced.

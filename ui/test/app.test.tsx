@@ -109,4 +109,80 @@ describe("App shell", () => {
     expect(sockets).toHaveLength(1);
     expect(sockets[0]!.closed).toBe(false);
   });
+
+  it("navigates to Events and Metrics (C6): mount subscribes, unmount unsubscribes, same socket", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+    });
+    const frames = () => sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+
+    // Events: mounting the view subscribes the stream on the shared socket.
+    fireEvent.click(screen.getByRole("link", { name: /Events/ }));
+    expect(screen.getByText("No events yet")).toBeTruthy();
+    expect(frames().at(-1)).toMatchObject({ type: "subscribe-events" });
+
+    // A live backlog + push renders rows without any refetch.
+    act(() => {
+      const backlog: ServerMessage = {
+        type: "events",
+        protocolVersion: PROTOCOL_VERSION,
+        events: [
+          {
+            id: 1,
+            key: key("gw-01", "opcua-adapter"),
+            severity: "warning",
+            type: "connection-retry",
+            channel: "warning/connection-retry",
+            body: { message: "retrying" },
+            receivedAt: T0,
+          },
+        ],
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(backlog));
+    });
+    expect(screen.getByTestId("event-row-1")).toBeTruthy();
+
+    // To Metrics: events unsubscribes, metrics subscribes — still ONE socket.
+    fireEvent.click(screen.getByRole("link", { name: /Metrics/ }));
+    expect(screen.getByText("No metrics yet")).toBeTruthy();
+    const sent = frames();
+    expect(sent.at(-2)).toMatchObject({ type: "unsubscribe-events" });
+    expect(sent.at(-1)).toMatchObject({ type: "subscribe-metrics" });
+
+    act(() => {
+      const snapMsg: ServerMessage = {
+        type: "metrics",
+        protocolVersion: PROTOCOL_VERSION,
+        series: [
+          {
+            key: key("gw-01", "opcua-adapter"),
+            metric: "sys",
+            measure: "cpu",
+            latest: 12.5,
+            receivedAt: T0,
+            points: [{ at: T0, value: 12.5 }],
+          },
+        ],
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(snapMsg));
+    });
+    expect(screen.getByTestId("metric-row-gw-01/opcua-adapter/main::sys::cpu")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
+    expect(frames().at(-1)).toMatchObject({ type: "unsubscribe-metrics" });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.closed).toBe(false);
+  });
 });

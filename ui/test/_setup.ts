@@ -1,6 +1,7 @@
 /**
- * jsdom gaps some Carbon components probe: matchMedia + ResizeObserver. Stubbed
- * here (vitest `setupFiles`) so component tests exercise the real Carbon markup.
+ * jsdom gaps some Carbon components probe: matchMedia + ResizeObserver +
+ * scrollIntoView. Stubbed here (vitest `setupFiles`) so component tests exercise
+ * the real Carbon markup.
  */
 if (typeof window !== "undefined") {
   if (window.matchMedia === undefined) {
@@ -25,5 +26,9 @@ if (typeof window !== "undefined") {
       disconnect(): void {}
     }
     globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+  }
+  if (typeof Element !== "undefined" && Element.prototype.scrollIntoView === undefined) {
+    // jsdom ships no scrollIntoView; Carbon's Dropdown scrolls its highlighted item.
+    Element.prototype.scrollIntoView = () => undefined;
   }
 }

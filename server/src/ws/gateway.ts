@@ -31,13 +31,18 @@ import { PROTOCOL_VERSION, componentKeyId, parseClientMessage } from "@edgecommo
 import type {
   ClientMessage,
   ComponentKey,
+  ConsoleEvent,
   FleetDelta,
   FleetSnapshot,
+  MetricSeriesSnapshot,
+  MetricSeriesUpdate,
   ServerMessage,
   WsErrorCode,
 } from "@edgecommons/edge-console-protocol";
 import type { Clock, DeltaListener } from "../fleet/fleet-model";
 import type { ConfigUpdateListener, StoredConfig } from "../fleet/config-store";
+import type { EventListener } from "../fleet/event-store";
+import type { MetricUpdateListener } from "../fleet/metric-store";
 import { DeltaBuffer } from "./delta-buffer";
 
 /** What the gateway needs from the FleetModel - a narrow interface, no `ws` dependency. `FleetModel` satisfies this structurally. */
@@ -64,6 +69,31 @@ export interface ConfigGatewayDeps {
   configs: ConfigSource;
   /** Trigger the per-device `republish-cfg`/`republish-state` broadcast. */
   refreshDevice: (device: string) => void;
+}
+
+/** What the gateway needs from the rolling event store (C6). `EventStore` satisfies this structurally. */
+export interface EventFeedSource {
+  recent(limit?: number): ConsoleEvent[];
+  onEvent(listener: EventListener): () => void;
+}
+
+/** What the gateway needs from the metric surface (C6). `MetricStore` satisfies this structurally. */
+export interface MetricFeedSource {
+  snapshot(): MetricSeriesSnapshot[];
+  onUpdate(listener: MetricUpdateListener): () => void;
+}
+
+/**
+ * The C6 activity seam (optional fourth constructor argument): the rolling `evt`
+ * history behind `subscribe-events` (backlog reply + live `event` streaming) and
+ * the metric surface behind `subscribe-metrics` (snapshot reply + live `metric`
+ * pushes). Without this seam the gateway still speaks the protocol honestly:
+ * subscriptions are accepted and answered with an empty backlog/snapshot, and no
+ * pushes ever arrive.
+ */
+export interface ActivityGatewayDeps {
+  events: EventFeedSource;
+  metrics: MetricFeedSource;
 }
 
 /** The gateway's view of one client connection. The real `ws` IO edge implements this; tests use an in-memory fake. */
@@ -113,6 +143,10 @@ interface Session {
   missedPushes: number;
   /** Component-key ids this client requested config for — fresh `cfg` arrivals for them are pushed (C5). */
   configKeys: Set<string>;
+  /** Live `event` pushes are streamed while set (C6 `subscribe-events`). */
+  eventsSubscribed: boolean;
+  /** Live `metric` pushes are streamed while set (C6 `subscribe-metrics`). */
+  metricsSubscribed: boolean;
 }
 
 /** The C2 pure fanout core over the FleetModel's snapshot + delta stream. */
@@ -122,16 +156,21 @@ export class FleetWsGateway {
   private readonly buffer: DeltaBuffer;
   private readonly detach: () => void;
   private readonly detachConfig: (() => void) | undefined;
+  private readonly detachEvents: (() => void) | undefined;
+  private readonly detachMetrics: (() => void) | undefined;
 
   constructor(
     private readonly source: FleetSource,
     opts: Partial<Omit<FleetWsGatewayOptions, "clock">> & { clock: Clock },
     private readonly config?: ConfigGatewayDeps,
+    private readonly activity?: ActivityGatewayDeps,
   ) {
     this.opts = { ...DEFAULT_GATEWAY_OPTIONS, ...opts };
     this.buffer = new DeltaBuffer(this.opts.deltaBufferSize, source.snapshot().seq);
     this.detach = source.onDelta((deltas) => this.onDeltas(deltas));
     this.detachConfig = config?.configs.onUpdate((entry) => this.pushConfig(entry));
+    this.detachEvents = activity?.events.onEvent((event) => this.pushEvent(event));
+    this.detachMetrics = activity?.metrics.onUpdate((updates) => this.pushMetricUpdates(updates));
   }
 
   /** Register a newly-opened transport. Sends nothing until the client's `hello` arrives. */
@@ -142,6 +181,8 @@ export class FleetWsGateway {
       ready: false,
       missedPushes: 0,
       configKeys: new Set(),
+      eventsSubscribed: false,
+      metricsSubscribed: false,
     };
     this.sessions.set(transport.id, session);
     return {
@@ -176,10 +217,12 @@ export class FleetWsGateway {
     return this.sessions.size;
   }
 
-  /** Detach from the FleetModel + ConfigStore and close every client (composition-root shutdown). */
+  /** Detach from the FleetModel + side stores and close every client (composition-root shutdown). */
   stop(): void {
     this.detach();
     this.detachConfig?.();
+    this.detachEvents?.();
+    this.detachMetrics?.();
     for (const session of [...this.sessions.values()]) {
       session.transport.close(1001, "server shutting down");
     }
@@ -217,7 +260,7 @@ export class FleetWsGateway {
     this.onRequest(session, msg);
   }
 
-  /** Post-hello client requests (the C5 config family; C4's command frames join here). */
+  /** Post-hello client requests (the C5 config + C6 activity families; C4's command frames join here). */
   private onRequest(session: Session, msg: Exclude<ClientMessage, { type: "hello" }>): void {
     switch (msg.type) {
       case "get-config": {
@@ -239,6 +282,60 @@ export class FleetWsGateway {
         // listener exists) arrives on the bus and flows back as a `config` push.
         this.config?.refreshDevice(msg.device);
         return;
+      case "subscribe-events": {
+        // Register interest first (an event racing in lands as a push, dedupable by
+        // id), then answer with the newest-first backlog — the client's baseline.
+        session.eventsSubscribed = true;
+        this.send(session, {
+          type: "events",
+          protocolVersion: PROTOCOL_VERSION,
+          events: this.activity?.events.recent(msg.limit) ?? [],
+        });
+        return;
+      }
+      case "unsubscribe-events":
+        session.eventsSubscribed = false;
+        return;
+      case "subscribe-metrics": {
+        session.metricsSubscribed = true;
+        this.send(session, {
+          type: "metrics",
+          protocolVersion: PROTOCOL_VERSION,
+          series: this.activity?.metrics.snapshot() ?? [],
+        });
+        return;
+      }
+      case "unsubscribe-metrics":
+        session.metricsSubscribed = false;
+        return;
+    }
+  }
+
+  /** A fresh `evt` arrival: stream to every ready, event-subscribed client. */
+  private pushEvent(event: ConsoleEvent): void {
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.eventsSubscribed) continue;
+      encoded ??= JSON.stringify({
+        type: "event",
+        protocolVersion: PROTOCOL_VERSION,
+        event,
+      } satisfies ServerMessage);
+      this.sendEncoded(session, encoded);
+    }
+  }
+
+  /** A fresh metric sample batch: push to every ready, metric-subscribed client. */
+  private pushMetricUpdates(updates: MetricSeriesUpdate[]): void {
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.metricsSubscribed) continue;
+      encoded ??= JSON.stringify({
+        type: "metric",
+        protocolVersion: PROTOCOL_VERSION,
+        updates,
+      } satisfies ServerMessage);
+      this.sendEncoded(session, encoded);
     }
   }
 

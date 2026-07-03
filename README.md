@@ -14,8 +14,9 @@ from its `cfg` announcements). Design source of truth: `docs/DESIGN.md` (v0.3) r
 against the shipped UNS core in `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md`.
 
 **Status: slices C0 (scaffold) + C1 (BusIngress + FleetModel) + C2 (WS gateway) + C3
-(the edge-health UI — priority #1 closed, zero new ggcommons code).** CommandGateway
-(C4), config-review (C5) and events/metrics screens (C6) follow per the Phase-1 plan.
+(the edge-health UI — priority #1 closed, zero new ggcommons code) + C5 (config-review —
+priority #2 closed) + C6 (events & metrics screens).** CommandGateway (C4) and the
+full-system gate (C7) follow per the Phase-1 plan.
 
 ## Workspace layout
 
@@ -137,6 +138,55 @@ derived from the page origin — `ws(s)://{host}/ws`. In dev, `vite.config.ts` p
 `/ws` to `127.0.0.1:8443` (the server's `console.ws.port` default), so the
 origin-derived URL works in both dev and production shapes.
 
+## Config review, events & metrics (slices C5 + C6)
+
+The liveness stream deliberately carries **no message bodies** (a `value-updated`
+delta is a change notification). Bodies travel over dedicated, versioned message
+families on the **same single WS connection**, each backed by a pure side store fed
+by the one BusIngress tee (`console-app.ts`: FleetModel + ConfigStore + EventStore +
+MetricStore):
+
+- **Config review (C5, protocol v2)** — request/response + interest: `get-config{key}`
+  is answered from the retained-`cfg` cache (`server/src/fleet/config-store.ts`,
+  latest-wins, body VERBATIM — redaction already ran at the publisher: `"***"` masks,
+  `$secret` refs are vault pointers) and registers per-connection interest, so every
+  later `cfg` arrival for that key is pushed unprompted. `refresh-config{device}`
+  fires the per-device `_bcast` `republish-cfg` broadcast (fire-and-forget; absence
+  is silent until the device-side ggcommons S1 listener lands). The view
+  (`ui/src/configreview/`) is the hi-fi's 340 px picker + Structured/Raw-JSON detail,
+  with redaction rendered *as* redaction — closes priority #2.
+- **Events (C6, protocol v3)** — subscribe/stream (events are notifications, not
+  state): `subscribe-events[{limit}]` answers ONE newest-first `events` backlog from
+  the rolling history (`server/src/fleet/event-store.ts`: bounded fleet-wide ring,
+  default 1000, plus independent per-component rings, default 100 — drop-oldest, so
+  a noisy component can't evict the others' history), then streams every arrival as
+  an `event` frame until `unsubscribe-events`/disconnect. The `evt/{severity}/{type}`
+  channel convention is split leniently (`splitEventChannel` — the class is open;
+  unknown severities render neutrally). The **Events view** (`ui/src/events/`)
+  follows the mockup's "Events & alerts" screen scoped to what exists: three header
+  tiles (recent count + severity legend, events/min sparkline, noisiest source),
+  component + severity filters, and the live-appending newest-first log with
+  per-row expandable detail (channel, publisher timestamp, tags, pretty body).
+  Alarm ack/state columns wait for the deferred `events()` facade — no dead UI.
+- **Metrics (C6, protocol v3)** — snapshot + live samples: `subscribe-metrics`
+  answers ONE `metrics` snapshot (every known series: latest value + a bounded
+  recent series per `(component, metric, measure)` — `server/src/fleet/
+  metric-store.ts`, default 60 points/series, 2000 series, drop-oldest/counted),
+  then pushes `metric` update batches. Bodies fold leniently: the library's EMF
+  shape (top-level numeric measures; `_aws` skipped) and bare numbers (`"value"`)
+  alike. The **Metrics view** (`ui/src/metrics/`) is a scannable table — one row
+  per measure with the formatted latest value and a hand-rolled inline-SVG
+  **sparkline** (time-scaled, subtle area fill, emphasized endpoint dot, native
+  hover summary; single hue = the g100 `support-info` blue, validated against the
+  dark surface — no chart dependency).
+
+Interest of all three families is **per-connection**: the owning view re-requests /
+re-subscribes when the connection comes (back) up (the effect keys on the status),
+and the fresh backlog/snapshot self-heals the client store — no client-side
+resubscribe machinery. Client folds mirror the server bounds
+(`ui/src/fleet/event-log-store.ts`, `ui/src/fleet/metric-series-store.ts`), and the
+version handshake turns any protocol skew into a clean "reload the page".
+
 ## Configuration
 
 The console is configured like any ggcommons component; its own knobs live in the permissive
@@ -151,7 +201,9 @@ The console is configured like any ggcommons component; its own knobs live in th
       "staleness": { "warnMultiplier": 2, "staleMultiplier": 2.5,
                      "offlineMultiplier": 5, "defaultIntervalSecs": 5,
                      "sweepIntervalMs": 1000 },
-      "cache":     { "maxChannelsPerComponent": 1024 }
+      "cache":     { "maxChannelsPerComponent": 1024 },
+      "events":    { "maxEvents": 1000, "maxPerComponent": 100 },   // C6 rolling evt history
+      "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 }     // C6 metric series bounds
     }
   }
 }
@@ -182,12 +234,17 @@ node server/dist/main.js \
   -c FILE ./test-configs/config.json \
   -t gw-01
 
-# SEE the edge-health view without a broker or components: a demo gateway that runs
-# the REAL server classes (FleetModel + FleetWsGateway + WsServer) over a synthetic
-# fleet exercising the whole liveness ladder (flapping -> WARN/STALE/OFFLINE, a
-# graceful STOPPED, restarts, and a device whose bridge dies -> UNREACHABLE):
+# SEE every view without a broker or components: a demo gateway that runs the REAL
+# server classes (FleetModel + ConfigStore + EventStore + MetricStore + FleetWsGateway
+# + WsServer) over a synthetic fleet exercising the whole liveness ladder (flapping ->
+# WARN/STALE/OFFLINE, a graceful STOPPED, restarts, a device whose bridge dies ->
+# UNREACHABLE), redacted cfg announcements + a working Refresh, a varied evt stream
+# (components x severities) and moving metric series (sys cpu/memory + a bridge
+# drop counter) so the sparklines visibly move:
 node scripts/demo-gateway.mjs      # ws://127.0.0.1:8443/ws (DEMO_PORT to change)
 npm run dev -w ui                  # http://localhost:5173 (vite proxies /ws to 8443)
+                                   # NOTE: after a protocol/ change, restart vite with
+                                   # --force (its dep-cache prebundles the old package)
 ```
 
 Note: `package-lock.json` is deliberately untracked while the sibling link is the dev path
@@ -203,6 +260,6 @@ console pins a published `@edgecommons/ggcommons` release.
 | ~~C2~~ | ~~HTTP+WS gateway: snapshot-then-deltas, resume-from-seq, per-client backpressure isolation~~ |
 | ~~C3~~ | ~~Edge-health UI (Carbon): the Overview screen — fleet health rollups, liveness/reachability live from the gateway (this slice; **closes priority #1**). Components tree + Component detail ride the C5/C6 screens.~~ |
 | C4 | CommandGateway: RBAC → audit → `uns().topicFor()` + `request()` (timeouts ≤ 30 s) |
-| C5 | Config-review UI (needs ggcommons G-S1 for already-running components) — **closes priority #2** |
-| C6 | Events & metrics screens |
+| ~~C5~~ | ~~Config-review UI (needs ggcommons G-S1 for already-running components) — **closes priority #2**~~ |
+| ~~C6~~ | ~~Events & metrics screens: the `evt` rolling log (subscribe/stream) + generic metric latest-value/sparkline table~~ |
 | C7 | Full-system test + deployment-validation gate (HOST → kind; GG when the bridge's IPC variant lands) |

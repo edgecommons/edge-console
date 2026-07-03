@@ -204,4 +204,102 @@ describe("startConsole - the C1 composition", () => {
 
     await app.stop();
   });
+
+  it("serves the C6 activity round-trip: evt/metric from the bus into the stores, backlog/snapshot answers, live streaming to subscribed clients", async () => {
+    const bus = new FakeBus();
+    const app = await start(bus);
+    const identity = makeIdentity("gw-02", "opcua-adapter");
+    const KEY = { device: "gw-02", component: "opcua-adapter", instance: "main" };
+
+    // Bus -> stores, BEFORE any client: the rolling history / series accumulate.
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/evt/warning/connection-retry",
+      wireEnvelope("evt", identity, { message: "endpoint timeout, retrying" }),
+    );
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/metric/sys",
+      wireEnvelope("Metric", identity, { coreName: "gw-02", cpu: 12.5, memory: 40, _aws: {} }),
+    );
+    expect(app.events.recent()).toHaveLength(1);
+    expect(app.metrics.seriesCount()).toBe(2); // cpu + memory
+
+    const sent: ServerMessage[] = [];
+    const transport: ClientTransport = {
+      id: "browser-1",
+      send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+      bufferedAmount: () => 0,
+      close: () => undefined,
+    };
+    const session = app.gateway.connect(transport);
+    session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+
+    // 1. subscribe-events answers the newest-first backlog.
+    session.onMessage(
+      JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION }),
+    );
+    const backlog = sent.at(-1)!;
+    expect(backlog).toMatchObject({ type: "events" });
+    if (backlog.type !== "events") throw new Error("unreachable");
+    expect(backlog.events[0]).toMatchObject({
+      key: KEY,
+      severity: "warning",
+      type: "connection-retry",
+      body: { message: "endpoint timeout, retrying" },
+    });
+
+    // 2. subscribe-metrics answers the latest+series snapshot.
+    session.onMessage(
+      JSON.stringify({ type: "subscribe-metrics", protocolVersion: PROTOCOL_VERSION }),
+    );
+    const snap = sent.at(-1)!;
+    expect(snap).toMatchObject({ type: "metrics" });
+    if (snap.type !== "metrics") throw new Error("unreachable");
+    expect(snap.series.map((s) => s.measure)).toEqual(["cpu", "memory"]);
+    expect(snap.series[0]).toMatchObject({ key: KEY, metric: "sys", latest: 12.5 });
+
+    // 3. Later bus arrivals stream live to the subscribed client.
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/evt/critical/overtemp",
+      wireEnvelope("evt", identity, { valueC: 91 }),
+    );
+    expect(sent.at(-1)).toMatchObject({
+      type: "event",
+      event: { severity: "critical", type: "overtemp", body: { valueC: 91 } },
+    });
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/metric/sys",
+      wireEnvelope("Metric", identity, { cpu: 20, memory: 41 }),
+    );
+    expect(sent.at(-1)).toMatchObject({
+      type: "metric",
+      updates: [
+        { metric: "sys", measure: "cpu", point: { value: 20 } },
+        { metric: "sys", measure: "memory", point: { value: 41 } },
+      ],
+    });
+
+    // 4. Unsubscribing stops the streams (the connection stays up; the C2 delta
+    //    stream continues — the same arrivals still tick the liveness cache, so
+    //    only the ACTIVITY frames must stop).
+    session.onMessage(
+      JSON.stringify({ type: "unsubscribe-events", protocolVersion: PROTOCOL_VERSION }),
+    );
+    session.onMessage(
+      JSON.stringify({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION }),
+    );
+    const activityCount = sent.filter((m) => m.type === "event" || m.type === "metric").length;
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/evt/info/x",
+      wireEnvelope("evt", identity, {}),
+    );
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/metric/sys",
+      wireEnvelope("Metric", identity, { cpu: 1 }),
+    );
+    expect(sent.filter((m) => m.type === "event" || m.type === "metric")).toHaveLength(
+      activityCount,
+    );
+
+    await app.stop();
+  });
 });

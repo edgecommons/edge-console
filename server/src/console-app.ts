@@ -17,7 +17,11 @@
  *  - the C5 config-review path: the ingress sink tees every event into the
  *    {@link ConfigStore} (retained `cfg` bodies), the gateway answers `get-config`
  *    from it and pushes fresh arrivals, and `refresh-config` triggers the same
- *    per-device `republish-*` broadcast the discovery bootstrap uses.
+ *    per-device `republish-*` broadcast the discovery bootstrap uses;
+ *  - the C6 activity path: the same tee feeds the {@link EventStore} (rolling
+ *    recent `evt` history) and the {@link MetricStore} (latest + bounded series per
+ *    metric measure); the gateway serves `subscribe-events`/`subscribe-metrics`
+ *    from them and streams arrivals to subscribed clients.
  */
 import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
 import { consoleConfigFromGlobal } from "./console-config";
@@ -26,6 +30,8 @@ import { BusIngress } from "./ingress/bus-ingress";
 import { FleetModel } from "./fleet/fleet-model";
 import type { Clock } from "./fleet/fleet-model";
 import { ConfigStore } from "./fleet/config-store";
+import { EventStore } from "./fleet/event-store";
+import { MetricStore } from "./fleet/metric-store";
 import { FleetWsGateway } from "./ws/gateway";
 import { WsServer } from "./ws/ws-server";
 
@@ -43,12 +49,16 @@ export interface ConsoleAppDeps {
   clock?: Clock;
 }
 
-/** The running console core (slices C1 + C2 + C5: ingress + fleet model + cfg cache + sweeper + WS gateway). */
+/** The running console core (slices C1 + C2 + C5 + C6: ingress + fleet model + side stores + sweeper + WS gateway). */
 export interface ConsoleApp {
   readonly config: ConsoleConfig;
   readonly model: FleetModel;
   /** The retained-cfg cache behind the C5 `get-config`/`config` frames. */
   readonly configs: ConfigStore;
+  /** The rolling recent-`evt` history behind the C6 `subscribe-events` stream. */
+  readonly events: EventStore;
+  /** The metric surface (latest + bounded series) behind the C6 `subscribe-metrics` stream. */
+  readonly metrics: MetricStore;
   readonly ingress: BusIngress;
   /** The C2 pure fanout core (mostly for diagnostics/tests — `wsServer` owns the real socket). */
   readonly gateway: FleetWsGateway;
@@ -72,6 +82,16 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   // The retained-cfg cache (C5): fed by the same ingress tee as the FleetModel, read
   // on demand by the WS gateway (the liveness stream carries no bodies by design).
   const configs = new ConfigStore(clock);
+  // The C6 activity stores: rolling `evt` history + metric latest/series, fed by the
+  // same tee, served over the gateway's subscribe/stream frames.
+  const events = new EventStore(clock, {
+    maxEvents: config.events.maxEvents,
+    maxPerComponent: config.events.maxPerComponent,
+  });
+  const metrics = new MetricStore(clock, {
+    maxSeriesPoints: config.metrics.maxSeriesPoints,
+    maxSeries: config.metrics.maxSeries,
+  });
   const ingress = new BusIngress({
     messaging: deps.messaging,
     uns: deps.uns,
@@ -79,6 +99,8 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     sink: (event) => {
       model.ingest(event);
       configs.ingest(event);
+      events.ingest(event);
+      metrics.ingest(event);
     },
   });
 
@@ -114,6 +136,8 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       configs,
       refreshDevice: (device) => void ingress.broadcastRepublish(device),
     },
+    // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
+    { events, metrics },
   );
   const wsServer = new WsServer(gateway, {
     port: config.ws.port,
@@ -127,6 +151,8 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     config,
     model,
     configs,
+    events,
+    metrics,
     ingress,
     gateway,
     wsServer,

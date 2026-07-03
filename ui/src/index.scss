@@ -411,6 +411,109 @@
   margin-top: 0.25rem;
 }
 
+/* ============ events & metrics (C6) ============ */
+// Three-tile header row (the mockup's .row.c3).
+.ec-tiles--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 60rem) {
+  .ec-tiles--3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+// The filter row above the log/table (Carbon Dropdowns side by side).
+.ec-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+
+  .cds--dropdown__wrapper {
+    min-width: 14rem;
+  }
+}
+.ec-filters__count {
+  font-size: 0.75rem;
+  padding-bottom: 0.625rem;
+}
+
+// Event log cells.
+.ec-evt-age {
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+.ec-evt-device {
+  margin-left: 0.5rem;
+}
+.ec-evt-summary {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 0.125rem;
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ec-evt-expandcell {
+  width: 2.5rem;
+}
+.ec-evt-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+
+  svg {
+    fill: var(--cds-icon-secondary);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: -2px;
+  }
+}
+.ec-evt-detail td {
+  background: var(--cds-layer);
+  border-bottom: 1px solid var(--cds-border-strong);
+}
+.ec-evt-detail__meta {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin: 0.375rem 0 0.625rem;
+}
+
+// Generic pretty-JSON pane (the expanded event body; same treatment as the
+// config Raw JSON pane).
+.ec-json-pane {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+  padding: 0.75rem 1rem;
+  margin: 0 0 0.5rem;
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+// The sparkline mark: the validated single-series hue (Carbon g100 support-info
+// blue #4589ff — passes the lightness/chroma/3:1 checks on the g100 surface).
+// currentColor inside the SVG inherits this, so the color lives in ONE place.
+.ec-spark {
+  color: var(--cds-support-info, #4589ff);
+  display: block;
+}
+.ec-metric-latest {
+  font-size: 0.9375rem;
+}
+
 /* ============ empty / loading states ============ */
 .ec-empty {
   margin-top: 0.5rem;

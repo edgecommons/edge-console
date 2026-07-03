@@ -6,11 +6,13 @@
 import type {
   ComponentKey,
   ComponentSnapshot,
+  ConsoleEvent,
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
 } from "@edgecommons/edge-console-protocol";
 import type { ClientState } from "../src/fleet/client";
+import type { MetricSeriesView } from "../src/fleet/metric-series-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 
 /** The pinned server-clock base for all fixtures (ms epoch). */
@@ -118,7 +120,51 @@ export function clientState(
     hasSnapshot: true,
     fleet,
     configs: { entriesById: {} },
+    events: { entries: [] },
+    metrics: { series: [] },
     wsUrl: "ws://console.test/ws",
+    ...overrides,
+  };
+}
+
+/** A {@link ConsoleEvent} with sensible defaults (id/type/severity overridable). */
+export function consoleEvent(overrides: Partial<ConsoleEvent> = {}): ConsoleEvent {
+  const k = overrides.key ?? key();
+  return {
+    id: 1,
+    key: k,
+    severity: "warning",
+    type: "overtemp",
+    channel: "warning/overtemp",
+    body: { message: "temperature above threshold", limitC: 80, valueC: 84.2 },
+    receivedAt: T0,
+    sourceTimestamp: "2026-07-03T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A {@link MetricSeriesView} with defaults; points derived from `values` at 5 s spacing. */
+export function metricSeries(
+  values: number[],
+  overrides: Partial<MetricSeriesView> = {},
+): MetricSeriesView {
+  const k = overrides.key ?? key();
+  const componentId = `${k.device}/${k.component}/${k.instance}`;
+  const metric = overrides.metric ?? "sys";
+  const measure = overrides.measure ?? "cpu";
+  const points = values.map((value, i) => ({
+    at: T0 - (values.length - 1 - i) * 5000,
+    value,
+  }));
+  return {
+    key: k,
+    componentId,
+    seriesId: `${componentId}::${metric}::${measure}`,
+    metric,
+    measure,
+    latest: values[values.length - 1] ?? 0,
+    receivedAt: T0,
+    points,
     ...overrides,
   };
 }

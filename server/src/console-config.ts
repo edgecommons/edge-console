@@ -40,11 +40,29 @@ export interface CacheConfig {
   maxChannelsPerComponent: number;
 }
 
+/** The C6 rolling-event-history bounds (both drop-oldest). */
+export interface EventsConfig {
+  /** Fleet-wide recent-events ring capacity. Default 1000. */
+  maxEvents: number;
+  /** Per-component recent-events ring capacity. Default 100. */
+  maxPerComponent: number;
+}
+
+/** The C6 metric-surface bounds. */
+export interface MetricsConfig {
+  /** Recent points kept per `(component, metric, measure)` series. Default 60. */
+  maxSeriesPoints: number;
+  /** Max distinct series overall; overflow is dropped + counted. Default 2000. */
+  maxSeries: number;
+}
+
 /** The parsed `component.global.console` section. */
 export interface ConsoleConfig {
   ws: WsConfig;
   staleness: StalenessConfig;
   cache: CacheConfig;
+  events: EventsConfig;
+  metrics: MetricsConfig;
 }
 
 /** The default staleness trio + cadence default (DESIGN §6.2 / reconciliation G4). */
@@ -61,6 +79,8 @@ export const DEFAULT_CONSOLE_CONFIG: ConsoleConfig = {
   ws: { port: 8443, bindAddress: "0.0.0.0", heartbeatIntervalMs: 15000 },
   staleness: DEFAULT_STALENESS,
   cache: { maxChannelsPerComponent: 1024 },
+  events: { maxEvents: 1000, maxPerComponent: 100 },
+  metrics: { maxSeriesPoints: 60, maxSeries: 2000 },
 };
 
 function obj(value: unknown): Record<string, unknown> {
@@ -97,6 +117,8 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
   const ws = obj(console_.ws);
   const staleness = obj(console_.staleness);
   const cache = obj(console_.cache);
+  const events = obj(console_.events);
+  const metrics = obj(console_.metrics);
 
   let warnMultiplier = positiveNumber(staleness.warnMultiplier, DEFAULT_STALENESS.warnMultiplier);
   let staleMultiplier = positiveNumber(staleness.staleMultiplier, DEFAULT_STALENESS.staleMultiplier);
@@ -141,6 +163,20 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
         cache.maxChannelsPerComponent,
         DEFAULT_CONSOLE_CONFIG.cache.maxChannelsPerComponent,
       ),
+    },
+    events: {
+      maxEvents: positiveInt(events.maxEvents, DEFAULT_CONSOLE_CONFIG.events.maxEvents),
+      maxPerComponent: positiveInt(
+        events.maxPerComponent,
+        DEFAULT_CONSOLE_CONFIG.events.maxPerComponent,
+      ),
+    },
+    metrics: {
+      maxSeriesPoints: positiveInt(
+        metrics.maxSeriesPoints,
+        DEFAULT_CONSOLE_CONFIG.metrics.maxSeriesPoints,
+      ),
+      maxSeries: positiveInt(metrics.maxSeries, DEFAULT_CONSOLE_CONFIG.metrics.maxSeries),
     },
   };
 }
