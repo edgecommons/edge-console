@@ -189,3 +189,96 @@ export type FleetDelta =
       /** How many components the transition contained/released (the "+N suppressed" rollup). */
       componentCount: number;
     };
+
+/* -----------------------------------------------------------------------------
+ * C2 — the WS gateway wire envelope: snapshot-then-deltas.
+ *
+ * Every frame in both directions carries `protocolVersion` (= {@link PROTOCOL_VERSION}
+ * today) so a version skew between an old browser tab and a redeployed gateway is a
+ * clean rejection, never a silent misparse — the seam DESIGN §6.4/reconciliation G2/G13
+ * call "keep it versioned". `parseClientMessage` is the sole validator: the gateway
+ * accepts nothing it hasn't round-tripped through this function (no partial/lenient
+ * acceptance of client input — "correctness over cleverness" applies to the wire edge
+ * too, unlike the config parsers' deliberate leniency).
+ * --------------------------------------------------------------------------- */
+
+/** Machine-readable error codes the C2 gateway can send back on a rejected frame. */
+export type WsErrorCode = "malformed" | "unsupported-protocol-version";
+
+/**
+ * Client -> server frames. Only `hello` exists in this slice (C4's command frames land
+ * later, as their own union member). A client sends `hello` as its first frame on every
+ * connection (including reconnects); `resumeSeq`, when present, is the last
+ * {@link FleetDelta.seq} the client applied in a prior session — the resume attempt
+ * (§ below). Omit it for a fresh connection (always yields a snapshot).
+ */
+export type ClientMessage = {
+  type: "hello";
+  protocolVersion: number;
+  resumeSeq?: number;
+};
+
+/**
+ * Server -> client frames.
+ *  - `snapshot` — the full {@link FleetSnapshot}; sent on every connect without a
+ *    resumable `resumeSeq`, and as the fallback whenever the gateway can't prove
+ *    contiguous delta coverage (an old/evicted `resumeSeq`, or a backpressured client
+ *    that fell too far behind — "drop-to-resnapshot").
+ *  - `delta`  — a batch of {@link FleetDelta}s, always in increasing `seq` order; applied
+ *    only once a `snapshot` (or a successful resume) established a `seq` baseline.
+ *  - `heartbeat` — periodic liveness/keep-alive; carries the gateway clock as `at`.
+ *  - `error` — a rejected frame (see {@link WsErrorCode}); the gateway closes the
+ *    connection immediately after sending it.
+ */
+export type ServerMessage =
+  | { type: "snapshot"; protocolVersion: number; snapshot: FleetSnapshot }
+  | { type: "delta"; protocolVersion: number; deltas: FleetDelta[] }
+  | { type: "heartbeat"; protocolVersion: number; at: number }
+  | { type: "error"; protocolVersion: number; code: WsErrorCode; message: string };
+
+/** The outcome of validating one raw inbound WS text frame. */
+export type ParsedClientMessage =
+  | { ok: true; message: ClientMessage }
+  | { ok: false; reason: string };
+
+/**
+ * Parse + validate a raw client frame. Pure, no IO — usable by the gateway (to reject)
+ * and by the future UI client (to construct/self-check outgoing frames) alike. Anything
+ * that fails validation is reported as `{ok: false}`; the caller decides the transport
+ * consequence (the C2 gateway sends a `WsErrorCode: "malformed"` error and closes).
+ */
+export function parseClientMessage(raw: string): ParsedClientMessage {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "invalid JSON" };
+  }
+  if (json === null || typeof json !== "object" || Array.isArray(json)) {
+    return { ok: false, reason: "frame must be a JSON object" };
+  }
+  const obj = json as Record<string, unknown>;
+  if (obj.type !== "hello") {
+    return { ok: false, reason: `unknown message type '${String(obj.type)}'` };
+  }
+  if (typeof obj.protocolVersion !== "number" || !Number.isInteger(obj.protocolVersion)) {
+    return { ok: false, reason: "protocolVersion must be an integer" };
+  }
+  if (obj.resumeSeq !== undefined) {
+    if (
+      typeof obj.resumeSeq !== "number" ||
+      !Number.isInteger(obj.resumeSeq) ||
+      obj.resumeSeq < 0
+    ) {
+      return { ok: false, reason: "resumeSeq must be a non-negative integer" };
+    }
+  }
+  return {
+    ok: true,
+    message: {
+      type: "hello",
+      protocolVersion: obj.protocolVersion,
+      ...(obj.resumeSeq !== undefined ? { resumeSeq: obj.resumeSeq as number } : {}),
+    },
+  };
+}

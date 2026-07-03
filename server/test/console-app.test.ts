@@ -8,12 +8,27 @@ import { FakeBus, RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";
 
 const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "gw-01" }], "edge-console");
 
+/**
+ * The `console.ws` section every test below merges in: loopback (never `0.0.0.0`,
+ * which some Windows configurations firewall-prompt on) so binding the real WS
+ * gateway during these otherwise-pure composition tests is safe. Port `0` (OS-assigned
+ * ephemeral - see `ws-server.test.ts`) isn't usable here: `consoleConfigFromGlobal`'s
+ * `port()` validator correctly rejects `0` as a configured port (falls back to the
+ * 8443 default) - that's production-correct (an operator-facing config must name a
+ * real port), so tests instead use a fixed, unlikely-to-collide high port. Tests
+ * within this file run sequentially (each awaits `app.stop()` before the next starts),
+ * so reusing one port across them is safe.
+ */
+const SAFE_WS = { bindAddress: "127.0.0.1", port: 18743 };
+
 function start(bus: FakeBus, globalConfig: unknown = {}): Promise<ConsoleApp> {
+  const g = globalConfig as { console?: Record<string, unknown> };
+  const consoleSection = { ...g.console, ws: { ...SAFE_WS, ...(g.console?.ws as object | undefined) } };
   return startConsole({
     messaging: bus,
     uns: new Uns(CONSOLE_IDENTITY, false),
     newMessage: (name) => MessageBuilder.create(name, "1.0"),
-    globalConfig,
+    globalConfig: { ...g, console: consoleSection },
     // clock defaults to Date.now, which vitest's fake timers control.
   });
 }
@@ -93,12 +108,15 @@ describe("startConsole - the C1 composition", () => {
     const bus = new FakeBus();
     const app = await start(bus, {
       console: {
-        ws: { port: 9001, bindAddress: "127.0.0.1" },
+        ws: { heartbeatIntervalMs: 5000 },
         staleness: { defaultIntervalSecs: 1, sweepIntervalMs: 100 },
         cache: { maxChannelsPerComponent: 1 },
       },
     });
-    expect(app.config.ws).toEqual({ port: 9001, bindAddress: "127.0.0.1" });
+    expect(app.config.ws).toEqual({ ...SAFE_WS, heartbeatIntervalMs: 5000 });
+    // The real WS gateway actually bound (ephemeral port assigned, > 0).
+    expect(app.wsServer.address()?.port).toBeGreaterThan(0);
+    expect(app.gateway.clientCount()).toBe(0);
 
     await bus.emitWire(
       "ecv1/gw-02/press-17/main/data/a",

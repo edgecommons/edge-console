@@ -1,7 +1,8 @@
 /**
  * The console composition root (testable): wires config -> FleetModel -> BusIngress
- * -> the liveness sweeper, over injected collaborators only — `main.ts` adapts the
- * live `GGCommons` runtime onto these five dependencies, tests inject fakes.
+ * -> the liveness sweeper -> the C2 WS gateway, over injected collaborators only —
+ * `main.ts` adapts the live `GGCommons` runtime onto these five dependencies, tests
+ * inject fakes.
  *
  * Wiring rules (reconciliation §3):
  *  - the FleetModel's `device-discovered` delta triggers the per-device
@@ -9,7 +10,10 @@
  *    first message from a new device; the bridge additionally fires the same
  *    broadcast on every site-reconnect rising edge, so rehydration is shared work);
  *  - the sweeper drives miss-detection every `console.staleness.sweepIntervalMs`
- *    (default 1 s), per DESIGN §6.2.
+ *    (default 1 s), per DESIGN §6.2;
+ *  - the C2 WS gateway fans the FleetModel's snapshot + delta stream out to browsers
+ *    (`component.global.console.ws`); its own tick (heartbeats + hello-timeout
+ *    eviction) runs every `console.ws.heartbeatIntervalMs` (default 15 s).
  */
 import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
 import { consoleConfigFromGlobal } from "./console-config";
@@ -17,6 +21,8 @@ import type { ConsoleConfig } from "./console-config";
 import { BusIngress } from "./ingress/bus-ingress";
 import { FleetModel } from "./fleet/fleet-model";
 import type { Clock } from "./fleet/fleet-model";
+import { FleetWsGateway } from "./ws/gateway";
+import { WsServer } from "./ws/ws-server";
 
 /** What `startConsole` needs from the runtime (all injectable). */
 export interface ConsoleAppDeps {
@@ -32,19 +38,24 @@ export interface ConsoleAppDeps {
   clock?: Clock;
 }
 
-/** The running console core (slice C1: ingress + fleet model + sweeper). */
+/** The running console core (slices C1 + C2: ingress + fleet model + sweeper + WS gateway). */
 export interface ConsoleApp {
   readonly config: ConsoleConfig;
   readonly model: FleetModel;
   readonly ingress: BusIngress;
-  /** Stop the sweeper, detach wiring, and unsubscribe the bus (idempotent). */
+  /** The C2 pure fanout core (mostly for diagnostics/tests — `wsServer` owns the real socket). */
+  readonly gateway: FleetWsGateway;
+  /** The C2 IO edge (HTTP + WS listener); `.address()` is only meaningful after `startConsole` resolves. */
+  readonly wsServer: WsServer;
+  /** Stop the WS gateway, the sweeper, detach wiring, and unsubscribe the bus (idempotent). */
   stop(): Promise<void>;
 }
 
-/** Build and start the C1 console core. */
+/** Build and start the C1+C2 console core. */
 export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   const config = consoleConfigFromGlobal(deps.globalConfig);
-  const model = new FleetModel(deps.clock ?? (() => Date.now()), {
+  const clock = deps.clock ?? (() => Date.now());
+  const model = new FleetModel(clock, {
     warnMultiplier: config.staleness.warnMultiplier,
     staleMultiplier: config.staleness.staleMultiplier,
     offlineMultiplier: config.staleness.offlineMultiplier,
@@ -78,16 +89,30 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
 
   const sweeper = setInterval(() => model.sweep(), config.staleness.sweepIntervalMs);
 
+  // The C2 WS gateway: snapshot-then-deltas fanout over the same FleetModel (it
+  // satisfies FleetSource structurally — snapshot() + onDelta()).
+  const gateway = new FleetWsGateway(model, { clock });
+  const wsServer = new WsServer(gateway, {
+    port: config.ws.port,
+    bindAddress: config.ws.bindAddress,
+  });
+  await wsServer.start();
+  const wsTicker = setInterval(() => gateway.tick(), config.ws.heartbeatIntervalMs);
+
   let stopped = false;
   return {
     config,
     model,
     ingress,
+    gateway,
+    wsServer,
     stop: async () => {
       if (stopped) return;
       stopped = true;
       clearInterval(sweeper);
+      clearInterval(wsTicker);
       detach();
+      await wsServer.stop();
       await ingress.stop();
     },
   };

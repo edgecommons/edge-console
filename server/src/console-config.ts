@@ -24,12 +24,14 @@ export interface StalenessConfig {
   sweepIntervalMs: number;
 }
 
-/** The (future C2) WS gateway endpoint settings — parsed now so config-review sees them. */
+/** The C2 WS gateway endpoint + timing settings. */
 export interface WsConfig {
-  /** TCP port the HTTP+WS gateway will bind. Default 8443. */
+  /** TCP port the HTTP+WS gateway binds. Default 8443. */
   port: number;
   /** Bind address. Default "0.0.0.0". */
   bindAddress: string;
+  /** Server->client heartbeat cadence (ms); also the tick granularity for evicting a client that never sends `hello`. Default 15000. */
+  heartbeatIntervalMs: number;
 }
 
 /** FleetModel cache bounds. */
@@ -56,7 +58,7 @@ export const DEFAULT_STALENESS: StalenessConfig = {
 
 /** The full console-config defaults. */
 export const DEFAULT_CONSOLE_CONFIG: ConsoleConfig = {
-  ws: { port: 8443, bindAddress: "0.0.0.0" },
+  ws: { port: 8443, bindAddress: "0.0.0.0", heartbeatIntervalMs: 15000 },
   staleness: DEFAULT_STALENESS,
   cache: { maxChannelsPerComponent: 1024 },
 };
@@ -119,6 +121,10 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
         typeof ws.bindAddress === "string" && ws.bindAddress !== ""
           ? ws.bindAddress
           : DEFAULT_CONSOLE_CONFIG.ws.bindAddress,
+      heartbeatIntervalMs: positiveInt(
+        ws.heartbeatIntervalMs,
+        DEFAULT_CONSOLE_CONFIG.ws.heartbeatIntervalMs,
+      ),
     },
     staleness: {
       warnMultiplier,

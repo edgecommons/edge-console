@@ -14,7 +14,7 @@
   "component": {
     "global": {
       "console": {
-        "ws": { "port": 8443, "bindAddress": "0.0.0.0" },
+        "ws": { "port": 8443, "bindAddress": "0.0.0.0", "heartbeatIntervalMs": 15000 },
         "staleness": {
           "warnMultiplier": 2,
           "staleMultiplier": 2.5,

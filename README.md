@@ -13,9 +13,9 @@ reachability); priority #2 is **config review** (every component's effective, re
 from its `cfg` announcements). Design source of truth: `docs/DESIGN.md` (v0.3) reconciled
 against the shipped UNS core in `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md`.
 
-**Status: slices C0 (scaffold) + C1 (BusIngress + FleetModel) — the backend core.**
-The WS gateway (C2), Carbon UI views (C3), CommandGateway (C4), config-review (C5) and
-events/metrics screens (C6) follow per the Phase-1 plan.
+**Status: slices C0 (scaffold) + C1 (BusIngress + FleetModel) + C2 (WS gateway) — the
+backend core, ready for a UI to attach.** Carbon UI views (C3), CommandGateway (C4),
+config-review (C5) and events/metrics screens (C6) follow per the Phase-1 plan.
 
 ## Workspace layout
 
@@ -71,6 +71,35 @@ broadcast pair `ecv1/{device}/_bcast/main/cmd/republish-state` + `…/republish-
 slice (G-S1) lands; until then the periodic `state` keepalive converges liveness within one
 interval, and `cfg` of long-running components is the known gap.
 
+## The WS gateway (slice C2)
+
+An HTTP + WebSocket server (`ws` + `node:http` — no framework: this slice serves exactly
+`/ws` plus a trivial `/healthz` probe) fans the FleetModel's snapshot + delta stream out to
+browsers, **snapshot-then-deltas**:
+
+- On connect, a client's first frame must be `{"type":"hello","protocolVersion":1}`
+  (optionally `resumeSeq`). The gateway replies with one `snapshot` (the current
+  `FleetSnapshot`, carrying its last-folded `seq`), then streams every subsequent `delta`
+  batch (`FleetDelta[]`, strictly increasing `seq`).
+- **Resume**: a reconnecting client sends `resumeSeq` = the last `seq` it applied. If a
+  bounded recent-delta ring (default 1000) can prove contiguous coverage from there, the
+  gateway sends only the missed `delta` batch — no snapshot. On any gap (evicted range, or
+  `resumeSeq` ahead of the server) it falls back to a fresh `snapshot` — correctness over
+  cleverness.
+- **Fanout + backpressure**: every connected client is served independently; a client whose
+  transport stays backpressured (`bufferedAmount` over a threshold) across several
+  consecutive delta pushes is dropped-and-resnapshotted rather than queued — it never stalls
+  delivery to any other client.
+- A periodic `heartbeat` frame doubles as the tick that evicts a connected socket that never
+  sends `hello`.
+- The fanout/resume/backpressure core (`server/src/ws/gateway.ts`) is pure and injects the
+  client transport — the real `ws` sockets are a thin IO edge (`server/src/ws/ws-server.ts`),
+  mirroring the BusIngress/FleetModel split.
+- **No auth in this slice** (the seam is marked with a `TODO` in `main.ts`/`ws-server.ts`):
+  the WS gateway is the sole browser↔bus bridge and today serves the full fleet snapshot +
+  live stream to anyone who can reach the bound port. Add a credential check at the WS
+  upgrade before exposing this beyond a trusted network.
+
 ## Configuration
 
 The console is configured like any ggcommons component; its own knobs live in the permissive
@@ -80,7 +109,8 @@ The console is configured like any ggcommons component; its own knobs live in th
 "component": {
   "global": {
     "console": {
-      "ws":        { "port": 8443, "bindAddress": "0.0.0.0" },        // C2 gateway endpoint
+      "ws":        { "port": 8443, "bindAddress": "0.0.0.0",
+                     "heartbeatIntervalMs": 15000 },                  // C2 gateway endpoint
       "staleness": { "warnMultiplier": 2, "staleMultiplier": 2.5,
                      "offlineMultiplier": 5, "defaultIntervalSecs": 5,
                      "sweepIntervalMs": 1000 },
@@ -124,9 +154,9 @@ console pins a published `@edgecommons/ggcommons` release.
 
 | Slice | Contents |
 |---|---|
-| ~~C0~~ | ~~repo scaffold (this workspace)~~ |
-| ~~C1~~ | ~~BusIngress + FleetModel core (this slice)~~ |
-| C2 | HTTP+WS gateway: scope subscribe → snapshot-then-deltas, coalescing ≤ 4 Hz, backpressure |
+| ~~C0~~ | ~~repo scaffold~~ |
+| ~~C1~~ | ~~BusIngress + FleetModel core~~ |
+| ~~C2~~ | ~~HTTP+WS gateway: snapshot-then-deltas, resume-from-seq, per-client backpressure isolation (this slice)~~ |
 | C3 | Edge-health UI (Carbon): Overview rollups, Components tree, Component detail — **closes priority #1** |
 | C4 | CommandGateway: RBAC → audit → `uns().topicFor()` + `request()` (timeouts ≤ 30 s) |
 | C5 | Config-review UI (needs ggcommons G-S1 for already-running components) — **closes priority #2** |

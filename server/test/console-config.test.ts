@@ -19,7 +19,7 @@ describe("consoleConfigFromGlobal", () => {
   it("applies explicit overrides field-by-field", () => {
     const parsed = consoleConfigFromGlobal({
       console: {
-        ws: { port: 9443, bindAddress: "10.0.0.5" },
+        ws: { port: 9443, bindAddress: "10.0.0.5", heartbeatIntervalMs: 30000 },
         staleness: {
           warnMultiplier: 1.5,
           staleMultiplier: 3,
@@ -31,7 +31,7 @@ describe("consoleConfigFromGlobal", () => {
       },
     });
     expect(parsed).toEqual({
-      ws: { port: 9443, bindAddress: "10.0.0.5" },
+      ws: { port: 9443, bindAddress: "10.0.0.5", heartbeatIntervalMs: 30000 },
       staleness: {
         warnMultiplier: 1.5,
         staleMultiplier: 3,
@@ -46,7 +46,7 @@ describe("consoleConfigFromGlobal", () => {
   it("falls back per-field on malformed values (lenient, lib house style)", () => {
     const parsed = consoleConfigFromGlobal({
       console: {
-        ws: { port: 999999, bindAddress: "" },
+        ws: { port: 999999, bindAddress: "", heartbeatIntervalMs: -1 },
         staleness: { defaultIntervalSecs: "-1", sweepIntervalMs: 0.4 },
         cache: { maxChannelsPerComponent: -5 },
       },
@@ -87,6 +87,7 @@ describe("test-configs/config.json - the shipped sample", () => {
 
     const parsed = consoleConfigFromGlobal(config.global());
     expect(parsed.ws.port).toBe(8443);
+    expect(parsed.ws.heartbeatIntervalMs).toBe(DEFAULT_CONSOLE_CONFIG.ws.heartbeatIntervalMs);
     expect(parsed.staleness).toEqual(DEFAULT_STALENESS);
     expect(parsed.cache.maxChannelsPerComponent).toBe(1024);
   });

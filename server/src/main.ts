@@ -38,14 +38,21 @@ async function main(): Promise<void> {
     globalConfig: gg.config().global(),
   });
 
-  logger.info(
-    `edge-console ingress up (${app.ingress.subscribedFilters().length} filters); ` +
-      `ws gateway planned on ${app.config.ws.bindAddress}:${app.config.ws.port} (slice C2)`,
-  );
+  logger.info(`edge-console ingress up (${app.ingress.subscribedFilters().length} filters)`);
+  // (WsServer.start() already logged the ws gateway's bound address.)
 
-  // The process stays up on the messaging sockets + sweeper. Graceful shutdown is
-  // library-owned (FR-HB-2): SIGTERM/SIGINT flips readiness, closes the runtime
-  // (unsubscribes, best-effort STOPPED state) and exits 0.
+  // The process stays up on the messaging sockets, the WS gateway, and the sweeper.
+  // Graceful shutdown is library-owned (FR-HB-2): SIGTERM/SIGINT flips readiness,
+  // closes the runtime (unsubscribes, best-effort STOPPED state) and exits 0.
+  //
+  // TODO(prod auth): this WS gateway is the sole browser<->bus bridge and currently
+  // has NO authentication/authorization - anyone who can reach the bound port gets the
+  // full fleet snapshot + live delta stream (read-only in this slice; C4's
+  // CommandGateway adds a write surface). Before this is exposed beyond a trusted dev
+  // network, add a seam here: e.g. reject the WS upgrade unless a bearer
+  // token/mTLS/OIDC session is presented (the `req` passed to WsServer's `connection`
+  // handler already carries the upgrade request's headers for this). Track under the
+  // console's RBAC design (DESIGN §6.5 / C4).
 }
 
 main().catch((err) => {

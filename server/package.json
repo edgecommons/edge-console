@@ -16,10 +16,12 @@
   },
   "dependencies": {
     "@edgecommons/edge-console-protocol": "^0.1.0",
-    "@edgecommons/ggcommons": "^0.1.1"
+    "@edgecommons/ggcommons": "^0.1.1",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.9",
     "typescript": "^5",
     "vitest": "^4.1.9"
