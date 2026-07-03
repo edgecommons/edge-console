@@ -27,20 +27,43 @@
  * client, since sending is a simple non-blocking call per session in a plain loop.
  */
 import { logger } from "@edgecommons/ggcommons";
-import { PROTOCOL_VERSION, parseClientMessage } from "@edgecommons/edge-console-protocol";
+import { PROTOCOL_VERSION, componentKeyId, parseClientMessage } from "@edgecommons/edge-console-protocol";
 import type {
+  ClientMessage,
+  ComponentKey,
   FleetDelta,
   FleetSnapshot,
   ServerMessage,
   WsErrorCode,
 } from "@edgecommons/edge-console-protocol";
 import type { Clock, DeltaListener } from "../fleet/fleet-model";
+import type { ConfigUpdateListener, StoredConfig } from "../fleet/config-store";
 import { DeltaBuffer } from "./delta-buffer";
 
 /** What the gateway needs from the FleetModel - a narrow interface, no `ws` dependency. `FleetModel` satisfies this structurally. */
 export interface FleetSource {
   snapshot(): FleetSnapshot;
   onDelta(listener: DeltaListener): () => void;
+}
+
+/** What the gateway needs from the retained-cfg cache (C5). `ConfigStore` satisfies this structurally. */
+export interface ConfigSource {
+  get(key: ComponentKey): StoredConfig | undefined;
+  onUpdate(listener: ConfigUpdateListener): () => void;
+}
+
+/**
+ * The C5 config seam (optional third constructor argument): the retained-cfg cache to
+ * answer `get-config` from, and the re-pull trigger a `refresh-config` frame fires
+ * (the composition root wires it to BusIngress's per-device `republish-*` `_bcast`
+ * broadcast — fire-and-forget, never awaited on the WS path). Without this seam the
+ * gateway still speaks the protocol honestly: every `get-config` is answered
+ * `config-unavailable` (there is no cache) and `refresh-config` is a no-op.
+ */
+export interface ConfigGatewayDeps {
+  configs: ConfigSource;
+  /** Trigger the per-device `republish-cfg`/`republish-state` broadcast. */
+  refreshDevice: (device: string) => void;
 }
 
 /** The gateway's view of one client connection. The real `ws` IO edge implements this; tests use an in-memory fake. */
@@ -88,6 +111,8 @@ interface Session {
   ready: boolean;
   /** Consecutive delta pushes skipped due to backpressure since the last successful send/resync. */
   missedPushes: number;
+  /** Component-key ids this client requested config for — fresh `cfg` arrivals for them are pushed (C5). */
+  configKeys: Set<string>;
 }
 
 /** The C2 pure fanout core over the FleetModel's snapshot + delta stream. */
@@ -96,14 +121,17 @@ export class FleetWsGateway {
   private readonly sessions = new Map<string, Session>();
   private readonly buffer: DeltaBuffer;
   private readonly detach: () => void;
+  private readonly detachConfig: (() => void) | undefined;
 
   constructor(
     private readonly source: FleetSource,
     opts: Partial<Omit<FleetWsGatewayOptions, "clock">> & { clock: Clock },
+    private readonly config?: ConfigGatewayDeps,
   ) {
     this.opts = { ...DEFAULT_GATEWAY_OPTIONS, ...opts };
     this.buffer = new DeltaBuffer(this.opts.deltaBufferSize, source.snapshot().seq);
     this.detach = source.onDelta((deltas) => this.onDeltas(deltas));
+    this.detachConfig = config?.configs.onUpdate((entry) => this.pushConfig(entry));
   }
 
   /** Register a newly-opened transport. Sends nothing until the client's `hello` arrives. */
@@ -113,6 +141,7 @@ export class FleetWsGateway {
       connectedAt: this.opts.clock(),
       ready: false,
       missedPushes: 0,
+      configKeys: new Set(),
     };
     this.sessions.set(transport.id, session);
     return {
@@ -147,9 +176,10 @@ export class FleetWsGateway {
     return this.sessions.size;
   }
 
-  /** Detach from the FleetModel and close every client (composition-root shutdown). */
+  /** Detach from the FleetModel + ConfigStore and close every client (composition-root shutdown). */
   stop(): void {
     this.detach();
+    this.detachConfig?.();
     for (const session of [...this.sessions.values()]) {
       session.transport.close(1001, "server shutting down");
     }
@@ -164,18 +194,63 @@ export class FleetWsGateway {
       this.reject(session, "malformed", parsed.reason);
       return;
     }
-    const hello = parsed.message;
-    if (hello.protocolVersion !== PROTOCOL_VERSION) {
+    const msg = parsed.message;
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
       this.reject(
         session,
         "unsupported-protocol-version",
-        `gateway is protocol v${PROTOCOL_VERSION}, client sent v${hello.protocolVersion}`,
+        `gateway is protocol v${PROTOCOL_VERSION}, client sent v${msg.protocolVersion}`,
       );
       return;
     }
-    session.ready = true;
-    session.missedPushes = 0;
-    this.resync(session, hello.resumeSeq);
+    if (msg.type === "hello") {
+      session.ready = true;
+      session.missedPushes = 0;
+      this.resync(session, msg.resumeSeq);
+      return;
+    }
+    if (!session.ready) {
+      // The handshake contract: nothing is served before a valid hello.
+      this.reject(session, "malformed", "hello must be the first frame");
+      return;
+    }
+    this.onRequest(session, msg);
+  }
+
+  /** Post-hello client requests (the C5 config family; C4's command frames join here). */
+  private onRequest(session: Session, msg: Exclude<ClientMessage, { type: "hello" }>): void {
+    switch (msg.type) {
+      case "get-config": {
+        // Register interest first: a cfg racing in between lookup and reply is
+        // pushed rather than lost. Interest is per-connection and additive.
+        session.configKeys.add(componentKeyId(msg.key));
+        const entry = this.config?.configs.get(msg.key);
+        this.send(
+          session,
+          entry !== undefined
+            ? configMessage(entry)
+            : { type: "config-unavailable", protocolVersion: PROTOCOL_VERSION, key: msg.key },
+        );
+        return;
+      }
+      case "refresh-config":
+        // Fire-and-forget re-pull: the composition root wires this to the per-device
+        // `_bcast` republish broadcast; the answering `cfg` (once the device-side S1
+        // listener exists) arrives on the bus and flows back as a `config` push.
+        this.config?.refreshDevice(msg.device);
+        return;
+    }
+  }
+
+  /** A fresh retained cfg: push to every ready client that requested this key. */
+  private pushConfig(entry: StoredConfig): void {
+    const id = componentKeyId(entry.key);
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.configKeys.has(id)) continue;
+      encoded ??= JSON.stringify(configMessage(entry));
+      this.sendEncoded(session, encoded);
+    }
   }
 
   /** Snapshot-then-deltas entry point: either resume (deltas only) or a fresh snapshot. */
@@ -254,4 +329,16 @@ export class FleetWsGateway {
       logger.warn(`edge-console ws: send to ${session.transport.id} failed: ${String(e)}`);
     }
   }
+}
+
+/** The `config` frame for one retained entry (body verbatim — already lib-redacted). */
+function configMessage(entry: StoredConfig): ServerMessage {
+  return {
+    type: "config",
+    protocolVersion: PROTOCOL_VERSION,
+    key: entry.key,
+    cfg: entry.body,
+    receivedAt: entry.receivedAt,
+    ...(entry.sourceTimestamp !== undefined ? { sourceTimestamp: entry.sourceTimestamp } : {}),
+  };
 }

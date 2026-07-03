@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/ggcommons";
-import type { FleetDelta } from "@edgecommons/edge-console-protocol";
+import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
+import type { FleetDelta, ServerMessage } from "@edgecommons/edge-console-protocol";
 
 import { startConsole } from "../src/console-app";
 import type { ConsoleApp } from "../src/console-app";
+import type { ClientTransport } from "../src/ws/gateway";
 import { FakeBus, RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";
 
 const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "gw-01" }], "edge-console");
@@ -133,6 +135,72 @@ describe("startConsole - the C1 composition", () => {
     // defaultIntervalSecs 1 => offline after > 5 s of silence.
     await vi.advanceTimersByTimeAsync(6_000);
     expect(app.model.snapshot().devices[0]!.components[0]!.liveness).toBe("OFFLINE");
+
+    await app.stop();
+  });
+
+  it("serves the C5 get/refresh round-trip: cfg retained from the bus, answered and pushed over the gateway, refresh fires the republish broadcast", async () => {
+    const bus = new FakeBus();
+    const app = await start(bus);
+    const KEY = { device: "gw-02", component: "modbus-adapter", instance: "main" };
+    const cfgBody = {
+      config: {
+        heartbeat: { intervalSecs: 5 },
+        messaging: { local: { credentials: { password: "***" } } }, // lib-redacted
+      },
+    };
+
+    // An in-memory transport straight into the app's REAL gateway (the ws socket
+    // edge is ws-server.test.ts's concern).
+    const sent: ServerMessage[] = [];
+    const transport: ClientTransport = {
+      id: "browser-1",
+      send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+      bufferedAmount: () => 0,
+      close: () => undefined,
+    };
+    const session = app.gateway.connect(transport);
+    session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+
+    // 1. Absence is answered honestly: nothing retained for the key yet.
+    session.onMessage(
+      JSON.stringify({ type: "get-config", protocolVersion: PROTOCOL_VERSION, key: KEY }),
+    );
+    expect(sent.at(-1)).toEqual({
+      type: "config-unavailable",
+      protocolVersion: PROTOCOL_VERSION,
+      key: KEY,
+    });
+
+    // 2. The component announces cfg on the bus -> retained AND pushed to the
+    //    interested client (interest was registered by the get-config above).
+    await bus.emitWire("ecv1/gw-02/modbus-adapter/main/cfg", wireEnvelope("cfg", makeIdentity("gw-02", "modbus-adapter"), cfgBody));
+    expect(app.configs.get(KEY)?.body).toEqual(cfgBody); // verbatim, redaction pass-through
+    const push = sent.at(-1)!;
+    expect(push).toMatchObject({ type: "config", key: KEY, cfg: cfgBody });
+    expect(push.type === "config" && push.receivedAt).toBe(Date.now()); // fake-timer clock
+
+    // 3. A later get-config is answered from retention.
+    session.onMessage(
+      JSON.stringify({ type: "get-config", protocolVersion: PROTOCOL_VERSION, key: KEY }),
+    );
+    expect(sent.at(-1)).toMatchObject({ type: "config", key: KEY, cfg: cfgBody });
+
+    // 4. refresh-config drives the per-device republish broadcast on the bus (the
+    //    re-pull; the device-discovery bootstrap already fired one pair — count both).
+    await vi.runOnlyPendingTimersAsync(); // flush the discovery broadcast first
+    const before = bus.published.filter((p) => p.topic === "ecv1/gw-02/_bcast/main/cmd/republish-cfg").length;
+    session.onMessage(
+      JSON.stringify({ type: "refresh-config", protocolVersion: PROTOCOL_VERSION, device: "gw-02" }),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    const after = bus.published.filter((p) => p.topic === "ecv1/gw-02/_bcast/main/cmd/republish-cfg").length;
+    expect(after).toBe(before + 1);
+
+    // 5. The re-pushed cfg (a component answering the broadcast) flows back as a push.
+    const freshBody = { config: { heartbeat: { intervalSecs: 10 } } };
+    await bus.emitWire("ecv1/gw-02/modbus-adapter/main/cfg", wireEnvelope("cfg", makeIdentity("gw-02", "modbus-adapter"), freshBody));
+    expect(sent.at(-1)).toMatchObject({ type: "config", key: KEY, cfg: freshBody });
 
     await app.stop();
   });

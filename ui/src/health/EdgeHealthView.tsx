@@ -13,7 +13,7 @@ import { CircleFilled } from "@carbon/react/icons";
 import type { ClientState, ConnectionStatus, FleetClient } from "../fleet/client";
 import { fleetIssues, summarize } from "../fleet/selectors";
 import { formatDurationMs } from "../fleet/selectors";
-import { useFleetLifecycle, useFleetState, useNowTick } from "../fleet/useFleet";
+import { useFleetState, useNowTick } from "../fleet/useFleet";
 import { FleetTable } from "./FleetTable";
 import { IssueNotifications } from "./IssueNotifications";
 import { SummaryTiles } from "./SummaryTiles";
@@ -129,9 +129,12 @@ export function EdgeHealthView({ state, now }: EdgeHealthViewProps): React.JSX.E
   );
 }
 
-/** The live container: binds the view to a {@link FleetClient} + the 1 Hz tick. */
+/**
+ * The live container: binds the view to a {@link FleetClient} + the 1 Hz tick. The
+ * client's lifecycle is owned by the app shell (ONE shared connection across views —
+ * unmounting this view on a nav switch must not drop the socket).
+ */
 export function ConnectedEdgeHealthView({ client }: { client: FleetClient }): React.JSX.Element {
-  useFleetLifecycle(client);
   const state = useFleetState(client);
   const now = useNowTick(1000);
   return <EdgeHealthView state={state} now={now} />;

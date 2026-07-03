@@ -224,6 +224,193 @@
   font-size: 0.75rem;
 }
 
+/* ============ config review (mockup screen-config: 340px picker + detail) ============ */
+.ec-cfg-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 60rem) {
+  .ec-cfg-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ec-cfg-picker {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-cfg-picker__hd {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--cds-border-strong);
+}
+.ec-cfg-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--cds-border-subtle);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: var(--cds-layer-hover);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: -2px;
+  }
+}
+.ec-cfg-pick--selected {
+  background: var(--cds-layer-selected);
+  border-inline-start: 3px solid var(--cds-border-interactive);
+  padding-inline-start: calc(0.75rem - 3px);
+}
+.ec-cfg-pick__name {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ec-cfg-pick__device {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ec-cfg-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ec-cfg-dot--ok {
+  background: var(--cds-support-success);
+}
+.ec-cfg-dot--warn {
+  background: var(--cds-support-warning);
+}
+.ec-cfg-dot--err {
+  background: var(--cds-support-error);
+}
+.ec-cfg-dot--idle {
+  background: var(--cds-text-placeholder);
+}
+.ec-cfg-dot--un {
+  background: transparent;
+  border: 1px dashed var(--cds-border-strong);
+}
+
+.ec-cfg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.ec-cfg-head__id {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+
+  b {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+}
+.ec-config .cds--inline-notification {
+  max-width: none;
+  margin-bottom: 0.5rem;
+}
+
+/* Structured rows (mockup .slist .r .k/.v) */
+.ec-cfg-rows {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-cfg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--cds-border-subtle);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+.ec-cfg-row__k {
+  color: var(--cds-text-secondary);
+  overflow-wrap: anywhere;
+}
+.ec-cfg-row__v {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.ec-redacted {
+  color: var(--cds-support-error);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.ec-cfg-row__v .ec-tag,
+.ec-redacted .ec-tag {
+  margin: 0 0 0 0.375rem;
+}
+
+/* Raw JSON pane (mockup .chartbox.mono) */
+.ec-cfg-json {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+  padding: 0.75rem 1rem;
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+.ec-json--key {
+  color: var(--cds-support-info, #4589ff);
+}
+.ec-json--string {
+  color: var(--cds-support-success, #42be65);
+}
+.ec-json--number {
+  color: var(--cds-support-warning, #f1c21b);
+}
+.ec-json--literal {
+  color: var(--cds-text-secondary);
+}
+.ec-json--punct {
+  color: var(--cds-text-primary);
+}
+.ec-json--redacted {
+  color: var(--cds-support-error);
+  font-weight: 600;
+}
+.ec-json--secret-ref {
+  color: var(--cds-support-info, #4589ff);
+  font-style: italic;
+}
+.ec-cfg-tabs {
+  margin-top: 0.25rem;
+}
+
 /* ============ empty / loading states ============ */
 .ec-empty {
   margin-top: 0.5rem;

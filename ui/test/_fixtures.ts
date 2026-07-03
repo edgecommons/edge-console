@@ -117,6 +117,7 @@ export function clientState(
     status: "connected",
     hasSnapshot: true,
     fleet,
+    configs: { entriesById: {} },
     wsUrl: "ws://console.test/ws",
     ...overrides,
   };

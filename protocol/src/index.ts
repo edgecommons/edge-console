@@ -14,8 +14,14 @@
  * whole subscription surface.
  */
 
-/** Protocol version stamped into every C2 WS frame (bumped on breaking changes). */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Protocol version stamped into every WS frame (bumped on breaking changes).
+ * v2 (slice C5): the config-review message family — client `get-config`/
+ * `refresh-config`, server `config`/`config-unavailable`. Breaking because a v1
+ * gateway rejects-and-closes on the new client frames; the exact-match version
+ * handshake turns that skew into a clean "reload the page" instead.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -206,17 +212,28 @@ export type FleetDelta =
 export type WsErrorCode = "malformed" | "unsupported-protocol-version";
 
 /**
- * Client -> server frames. Only `hello` exists in this slice (C4's command frames land
- * later, as their own union member). A client sends `hello` as its first frame on every
- * connection (including reconnects); `resumeSeq`, when present, is the last
- * {@link FleetDelta.seq} the client applied in a prior session — the resume attempt
- * (§ below). Omit it for a fresh connection (always yields a snapshot).
+ * Client -> server frames.
+ *  - `hello` — the mandatory FIRST frame on every connection (including reconnects);
+ *    `resumeSeq`, when present, is the last {@link FleetDelta.seq} the client applied
+ *    in a prior session — the resume attempt (§ below). Omit it for a fresh connection
+ *    (always yields a snapshot).
+ *  - `get-config` (C5) — request the named component's latest retained `cfg` body (the
+ *    redacted effective config its library publisher pushed). The gateway answers with
+ *    exactly one `config` or `config-unavailable`, and additionally registers the
+ *    client's INTEREST in that key: every later `cfg` arrival for it is pushed as a
+ *    fresh `config` frame for the life of the connection (interest does not survive
+ *    reconnects — the client re-requests after its next `hello`).
+ *  - `refresh-config` (C5) — trigger the per-device `_bcast` `republish-cfg`
+ *    broadcast on the site bus, asking every component on `device` to re-push its
+ *    `cfg`. Fire-and-forget: no direct reply; the fresh announcements arrive on the
+ *    bus and flow to interested clients as `config` pushes. (Whether any component
+ *    answers depends on the device-side ggcommons S1 listener — absence is silent,
+ *    never an error.)
  */
-export type ClientMessage = {
-  type: "hello";
-  protocolVersion: number;
-  resumeSeq?: number;
-};
+export type ClientMessage =
+  | { type: "hello"; protocolVersion: number; resumeSeq?: number }
+  | { type: "get-config"; protocolVersion: number; key: ComponentKey }
+  | { type: "refresh-config"; protocolVersion: number; device: string };
 
 /**
  * Server -> client frames.
@@ -227,6 +244,15 @@ export type ClientMessage = {
  *  - `delta`  — a batch of {@link FleetDelta}s, always in increasing `seq` order; applied
  *    only once a `snapshot` (or a successful resume) established a `seq` baseline.
  *  - `heartbeat` — periodic liveness/keep-alive; carries the gateway clock as `at`.
+ *  - `config` (C5) — one component's latest retained `cfg` envelope body, VERBATIM as
+ *    the library publisher pushed it (`{"config": {...}}`, secrets already redacted at
+ *    the source). Sent as the reply to `get-config` and pushed on every later `cfg`
+ *    arrival for a key the client requested. `receivedAt` is the console's receipt
+ *    time (server-clock ms) — the "last received Ns ago" stamp; `sourceTimestamp` is
+ *    the publisher's own header claim, display only.
+ *  - `config-unavailable` (C5) — the reply to `get-config` when the console holds no
+ *    `cfg` for that key (the component never pushed one since the console started, or
+ *    it doesn't exist). Not terminal: a later push flips it via a `config` frame.
  *  - `error` — a rejected frame (see {@link WsErrorCode}); the gateway closes the
  *    connection immediately after sending it.
  */
@@ -234,6 +260,18 @@ export type ServerMessage =
   | { type: "snapshot"; protocolVersion: number; snapshot: FleetSnapshot }
   | { type: "delta"; protocolVersion: number; deltas: FleetDelta[] }
   | { type: "heartbeat"; protocolVersion: number; at: number }
+  | {
+      type: "config";
+      protocolVersion: number;
+      key: ComponentKey;
+      /** The retained `cfg` body, verbatim (lib-redacted: `"***"` values, `$secret` refs untouched). */
+      cfg: unknown;
+      /** Console receipt time of this cfg (server-clock ms epoch). */
+      receivedAt: number;
+      /** The publisher's `header.timestamp` claim, when present (display only). */
+      sourceTimestamp?: string;
+    }
+  | { type: "config-unavailable"; protocolVersion: number; key: ComponentKey }
   | { type: "error"; protocolVersion: number; code: WsErrorCode; message: string };
 
 /** The outcome of validating one raw inbound WS text frame. */
@@ -242,10 +280,27 @@ export type ParsedClientMessage =
   | { ok: false; reason: string };
 
 /**
+ * Validate a wire {@link ComponentKey}: an object with non-empty string
+ * `device`/`component`/`instance`. Returns a fresh, extras-stripped copy (never the
+ * caller's object) or `undefined`. Exported for the UI client's own frame checks.
+ */
+export function parseComponentKey(value: unknown): ComponentKey | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const obj = value as Record<string, unknown>;
+  const { device, component, instance } = obj;
+  if (typeof device !== "string" || device === "") return undefined;
+  if (typeof component !== "string" || component === "") return undefined;
+  if (typeof instance !== "string" || instance === "") return undefined;
+  return { device, component, instance };
+}
+
+/**
  * Parse + validate a raw client frame. Pure, no IO — usable by the gateway (to reject)
- * and by the future UI client (to construct/self-check outgoing frames) alike. Anything
+ * and by the UI client (to construct/self-check outgoing frames) alike. Anything
  * that fails validation is reported as `{ok: false}`; the caller decides the transport
  * consequence (the C2 gateway sends a `WsErrorCode: "malformed"` error and closes).
+ * Note: an unsupported `protocolVersion` is NOT a parse failure — the gateway rejects
+ * it distinctly (`unsupported-protocol-version`) so a stale tab gets a clear signal.
  */
 export function parseClientMessage(raw: string): ParsedClientMessage {
   let json: unknown;
@@ -258,27 +313,51 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
     return { ok: false, reason: "frame must be a JSON object" };
   }
   const obj = json as Record<string, unknown>;
-  if (obj.type !== "hello") {
-    return { ok: false, reason: `unknown message type '${String(obj.type)}'` };
-  }
   if (typeof obj.protocolVersion !== "number" || !Number.isInteger(obj.protocolVersion)) {
     return { ok: false, reason: "protocolVersion must be an integer" };
   }
-  if (obj.resumeSeq !== undefined) {
-    if (
-      typeof obj.resumeSeq !== "number" ||
-      !Number.isInteger(obj.resumeSeq) ||
-      obj.resumeSeq < 0
-    ) {
-      return { ok: false, reason: "resumeSeq must be a non-negative integer" };
+  const protocolVersion = obj.protocolVersion;
+
+  switch (obj.type) {
+    case "hello": {
+      if (obj.resumeSeq !== undefined) {
+        if (
+          typeof obj.resumeSeq !== "number" ||
+          !Number.isInteger(obj.resumeSeq) ||
+          obj.resumeSeq < 0
+        ) {
+          return { ok: false, reason: "resumeSeq must be a non-negative integer" };
+        }
+      }
+      return {
+        ok: true,
+        message: {
+          type: "hello",
+          protocolVersion,
+          ...(obj.resumeSeq !== undefined ? { resumeSeq: obj.resumeSeq as number } : {}),
+        },
+      };
     }
+    case "get-config": {
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return {
+          ok: false,
+          reason: "get-config key must be {device, component, instance} non-empty strings",
+        };
+      }
+      return { ok: true, message: { type: "get-config", protocolVersion, key } };
+    }
+    case "refresh-config": {
+      if (typeof obj.device !== "string" || obj.device === "") {
+        return { ok: false, reason: "refresh-config device must be a non-empty string" };
+      }
+      return {
+        ok: true,
+        message: { type: "refresh-config", protocolVersion, device: obj.device },
+      };
+    }
+    default:
+      return { ok: false, reason: `unknown message type '${String(obj.type)}'` };
   }
-  return {
-    ok: true,
-    message: {
-      type: "hello",
-      protocolVersion: obj.protocolVersion,
-      ...(obj.resumeSeq !== undefined ? { resumeSeq: obj.resumeSeq as number } : {}),
-    },
-  };
 }

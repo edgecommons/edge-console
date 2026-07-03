@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
 import type { ServerMessage } from "@edgecommons/edge-console-protocol";
 import App from "../src/App";
@@ -64,5 +64,49 @@ describe("App shell", () => {
     });
     const row = screen.getByTestId("component-row-gw-01/opcua-adapter/main");
     expect(within(row).getByText("Healthy")).toBeTruthy();
+  });
+
+  it("navigates Overview <-> Configuration over the ONE shared client (no socket churn)", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+      const msg: ServerMessage = {
+        type: "snapshot",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: snapshot([deviceSnap("gw-01", [compSnap({ key: key("gw-01", "opcua-adapter") })])]),
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(msg));
+    });
+
+    // To the config view: the second nav destination renders the C5 screen.
+    fireEvent.click(screen.getByRole("link", { name: /Configuration/ }));
+    expect(screen.getByText("Configuration review")).toBeTruthy();
+    expect(screen.getByTestId("config-picker")).toBeTruthy();
+
+    // Selecting a component issues get-config on the SAME socket (no second dial).
+    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter/main"));
+    expect(sockets).toHaveLength(1);
+    const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames.at(-1)).toMatchObject({
+      type: "get-config",
+      key: { device: "gw-01", component: "opcua-adapter", instance: "main" },
+    });
+
+    // And back: the health view returns, the socket still lives.
+    fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
+    expect(screen.getByText("Edge health")).toBeTruthy();
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.closed).toBe(false);
   });
 });

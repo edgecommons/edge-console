@@ -13,7 +13,11 @@
  *    (default 1 s), per DESIGN §6.2;
  *  - the C2 WS gateway fans the FleetModel's snapshot + delta stream out to browsers
  *    (`component.global.console.ws`); its own tick (heartbeats + hello-timeout
- *    eviction) runs every `console.ws.heartbeatIntervalMs` (default 15 s).
+ *    eviction) runs every `console.ws.heartbeatIntervalMs` (default 15 s);
+ *  - the C5 config-review path: the ingress sink tees every event into the
+ *    {@link ConfigStore} (retained `cfg` bodies), the gateway answers `get-config`
+ *    from it and pushes fresh arrivals, and `refresh-config` triggers the same
+ *    per-device `republish-*` broadcast the discovery bootstrap uses.
  */
 import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
 import { consoleConfigFromGlobal } from "./console-config";
@@ -21,6 +25,7 @@ import type { ConsoleConfig } from "./console-config";
 import { BusIngress } from "./ingress/bus-ingress";
 import { FleetModel } from "./fleet/fleet-model";
 import type { Clock } from "./fleet/fleet-model";
+import { ConfigStore } from "./fleet/config-store";
 import { FleetWsGateway } from "./ws/gateway";
 import { WsServer } from "./ws/ws-server";
 
@@ -38,10 +43,12 @@ export interface ConsoleAppDeps {
   clock?: Clock;
 }
 
-/** The running console core (slices C1 + C2: ingress + fleet model + sweeper + WS gateway). */
+/** The running console core (slices C1 + C2 + C5: ingress + fleet model + cfg cache + sweeper + WS gateway). */
 export interface ConsoleApp {
   readonly config: ConsoleConfig;
   readonly model: FleetModel;
+  /** The retained-cfg cache behind the C5 `get-config`/`config` frames. */
+  readonly configs: ConfigStore;
   readonly ingress: BusIngress;
   /** The C2 pure fanout core (mostly for diagnostics/tests — `wsServer` owns the real socket). */
   readonly gateway: FleetWsGateway;
@@ -62,11 +69,17 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     defaultIntervalSecs: config.staleness.defaultIntervalSecs,
     maxChannelsPerComponent: config.cache.maxChannelsPerComponent,
   });
+  // The retained-cfg cache (C5): fed by the same ingress tee as the FleetModel, read
+  // on demand by the WS gateway (the liveness stream carries no bodies by design).
+  const configs = new ConfigStore(clock);
   const ingress = new BusIngress({
     messaging: deps.messaging,
     uns: deps.uns,
     newMessage: deps.newMessage,
-    sink: (event) => model.ingest(event),
+    sink: (event) => {
+      model.ingest(event);
+      configs.ingest(event);
+    },
   });
 
   // Discovery -> late-join rehydration: broadcast the republish pair once per newly
@@ -90,8 +103,18 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   const sweeper = setInterval(() => model.sweep(), config.staleness.sweepIntervalMs);
 
   // The C2 WS gateway: snapshot-then-deltas fanout over the same FleetModel (it
-  // satisfies FleetSource structurally — snapshot() + onDelta()).
-  const gateway = new FleetWsGateway(model, { clock });
+  // satisfies FleetSource structurally — snapshot() + onDelta()), plus the C5 config
+  // seam: get-config answered from the retained-cfg cache, refresh-config wired to
+  // the per-device republish broadcast (the on-demand re-pull; components answer once
+  // the device-side ggcommons S1 listener lands).
+  const gateway = new FleetWsGateway(
+    model,
+    { clock },
+    {
+      configs,
+      refreshDevice: (device) => void ingress.broadcastRepublish(device),
+    },
+  );
   const wsServer = new WsServer(gateway, {
     port: config.ws.port,
     bindAddress: config.ws.bindAddress,
@@ -103,6 +126,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   return {
     config,
     model,
+    configs,
     ingress,
     gateway,
     wsServer,

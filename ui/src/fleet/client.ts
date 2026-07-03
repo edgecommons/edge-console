@@ -22,11 +22,13 @@
  *  - A watchdog treats a silent connection (no frame within `idleTimeoutMs`, default
  *    3x the gateway's 15 s heartbeat) as dead and redials — half-open TCP hygiene.
  */
-import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
-import type { ClientMessage, ServerMessage } from "@edgecommons/edge-console-protocol";
+import { PROTOCOL_VERSION, componentKeyId } from "@edgecommons/edge-console-protocol";
+import type { ClientMessage, ComponentKey, ServerMessage } from "@edgecommons/edge-console-protocol";
 import type { LadderOptions } from "./store";
 import { FleetStore } from "./store";
 import type { FleetView } from "./store";
+import { ConfigStore } from "./config-store";
+import type { ConfigView } from "./config-store";
 
 /** Connection status surfaced to the UI. */
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -75,6 +77,8 @@ export interface FleetClientOptions {
   now?: () => number;
   /** Store ladder options (the snapshot-under-outage fill-in only). */
   ladder?: Partial<LadderOptions>;
+  /** How long a Refresh stays "in flight" without any config arrival before its UX flag clears. Default 10000. */
+  refreshTimeoutMs?: number;
 }
 
 /** The immutable client state handed to React (identity-stable between changes). */
@@ -84,17 +88,22 @@ export interface ClientState {
   fatalError?: string;
   hasSnapshot: boolean;
   fleet: FleetView;
+  /** The C5 config-review entries (per requested component key). */
+  configs: ConfigView;
   wsUrl: string;
 }
 
 export class FleetClient {
   readonly store: FleetStore;
+  /** The C5 config-review fold core (pure; this client is its IO shell). */
+  readonly configStore: ConfigStore;
 
   private readonly url: string;
   private readonly socketFactory: SocketFactory;
   private readonly minRetryDelayMs: number;
   private readonly maxRetryDelayMs: number;
   private readonly idleTimeoutMs: number;
+  private readonly refreshTimeoutMs: number;
   private readonly now: () => number;
 
   private socket: SocketLike | undefined;
@@ -106,6 +115,8 @@ export class FleetClient {
   private lastFrameAt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private watchdogTimer: ReturnType<typeof setInterval> | undefined;
+  /** Per-component-key refresh UX timers (cleared on answer/teardown). */
+  private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private readonly listeners: Array<() => void> = [];
   private stateCache: ClientState | undefined;
@@ -116,8 +127,10 @@ export class FleetClient {
     this.minRetryDelayMs = opts.minRetryDelayMs ?? 1000;
     this.maxRetryDelayMs = opts.maxRetryDelayMs ?? 30_000;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 45_000;
+    this.refreshTimeoutMs = opts.refreshTimeoutMs ?? 10_000;
     this.now = opts.now ?? Date.now;
     this.store = new FleetStore(opts.ladder);
+    this.configStore = new ConfigStore();
   }
 
   /** Dial and keep the connection alive until {@link stop}. Idempotent. */
@@ -141,8 +154,48 @@ export class FleetClient {
     this.retryTimer = undefined;
     if (this.watchdogTimer !== undefined) clearInterval(this.watchdogTimer);
     this.watchdogTimer = undefined;
+    for (const timer of this.refreshTimers.values()) clearTimeout(timer);
+    this.refreshTimers.clear();
     this.teardownSocket();
     this.setStatus("disconnected");
+  }
+
+  /**
+   * Request a component's retained cfg (C5 `get-config`). Marks the entry loading in
+   * the store and — when connected — sends the frame, which also registers this
+   * connection's interest server-side (later pushes arrive unprompted). Server-side
+   * interest dies with the connection, so the owning view re-requests whenever
+   * `(selection, connected)` changes — that covers reconnects with no client-side
+   * resubscribe machinery.
+   */
+  requestConfig(key: ComponentKey): void {
+    this.configStore.noteRequested(key);
+    this.sendFrame({ type: "get-config", protocolVersion: PROTOCOL_VERSION, key });
+    this.notify();
+  }
+
+  /**
+   * Ask the components on the key's device to re-push their cfg (C5 `refresh-config`
+   * → the server's per-device `republish-cfg` broadcast). No direct reply: a fresh
+   * `config` push clears the entry's `refreshing` flag, or the client-side timeout
+   * does (a fleet whose devices lack the republish listener simply never answers —
+   * absence is silent by design).
+   */
+  refreshConfig(key: ComponentKey): void {
+    this.configStore.noteRefreshRequested(key);
+    this.sendFrame({ type: "refresh-config", protocolVersion: PROTOCOL_VERSION, device: key.device });
+    const id = componentKeyId(key);
+    const existing = this.refreshTimers.get(id);
+    if (existing !== undefined) clearTimeout(existing);
+    this.refreshTimers.set(
+      id,
+      setTimeout(() => {
+        this.refreshTimers.delete(id);
+        this.configStore.clearRefreshing(key);
+        this.notify();
+      }, this.refreshTimeoutMs),
+    );
+    this.notify();
   }
 
   /** Subscribe to state changes; returns the unsubscribe function. */
@@ -157,9 +210,11 @@ export class FleetClient {
   /** The current immutable state (cached — stable identity until the next change). */
   getState(): ClientState {
     const fleet = this.store.view();
+    const configs = this.configStore.view();
     if (
       this.stateCache === undefined ||
       this.stateCache.fleet !== fleet ||
+      this.stateCache.configs !== configs ||
       this.stateCache.status !== this.status ||
       this.stateCache.fatalError !== this.fatalError
     ) {
@@ -168,6 +223,7 @@ export class FleetClient {
         ...(this.fatalError !== undefined ? { fatalError: this.fatalError } : {}),
         hasSnapshot: this.store.hasSnapshot(),
         fleet,
+        configs,
         wsUrl: this.url,
       };
     }
@@ -246,6 +302,18 @@ export class FleetClient {
         this.retries = 0;
         this.notify();
         return;
+      case "config": {
+        this.clearRefreshTimer(componentKeyId(msg.key));
+        this.configStore.applyConfig(msg.key, msg.cfg, msg.receivedAt, msg.sourceTimestamp);
+        this.retries = 0;
+        this.notify();
+        return;
+      }
+      case "config-unavailable":
+        this.configStore.applyUnavailable(msg.key);
+        this.retries = 0;
+        this.notify();
+        return;
       case "error":
         if (msg.code === "unsupported-protocol-version") {
           // Version skew between this tab and a redeployed gateway — reload needed;
@@ -259,6 +327,28 @@ export class FleetClient {
         return;
       default:
         return; // unknown frame type — ignore (forward compatibility)
+    }
+  }
+
+  /**
+   * Best-effort send of a client frame. Quietly skipped when not connected — the
+   * store state (e.g. a `loading` entry) survives, and the owning view re-issues the
+   * request when the connection is back (its effect keys on the connection status).
+   */
+  private sendFrame(frame: ClientMessage): void {
+    if (this.socket === undefined || this.status !== "connected") return;
+    try {
+      this.socket.send(JSON.stringify(frame));
+    } catch {
+      // Socket died mid-send; the close handler drives the reconnect.
+    }
+  }
+
+  private clearRefreshTimer(id: string): void {
+    const timer = this.refreshTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.refreshTimers.delete(id);
     }
   }
 
