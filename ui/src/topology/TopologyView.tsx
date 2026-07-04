@@ -19,7 +19,7 @@
  * `TopologyView` is presentational (state in, DOM out); `ConnectedTopologyView` binds it to
  * the shared {@link FleetClient} and requests every component's cfg so the edges render.
  */
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { InlineLoading, InlineNotification, Tag, Tile } from "@carbon/react";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
@@ -184,6 +184,18 @@ function DisconnectMark({ edge }: { edge: PlacedEdge }): React.JSX.Element {
 }
 
 /** The graph itself (defs, groups, captions, edges, labels, nodes) inside its scroll wrap. */
+function clamp(n: number, lo: number, hi: number): number {
+  return n < lo ? lo : n > hi ? hi : n;
+}
+
+/** The SVG "camera" (viewBox) — panning moves x/y, zooming scales w/h; graph coords are fixed. */
+interface Camera {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 function Graph({
   layout,
   onOpenDetail,
@@ -191,15 +203,84 @@ function Graph({
   layout: TopologyLayout;
   onOpenDetail?: (key: ComponentKey) => void;
 }): React.JSX.Element {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [cam, setCam] = useState<Camera>(() => ({ x: 0, y: 0, w: layout.width, h: layout.height }));
+  const drag = useRef<{ x: number; y: number } | null>(null);
+
+  const fit = useCallback((): void => {
+    setCam({ x: 0, y: 0, w: layout.width, h: layout.height });
+  }, [layout.width, layout.height]);
+
+  // Zoom keeping the viewport point (px,py in 0..1) fixed. factor<1 zooms in; bounded 0.33x–3x.
+  const zoomAround = useCallback(
+    (factor: number, px: number, py: number): void => {
+      setCam((c) => {
+        const nw = clamp(c.w * factor, layout.width / 3, layout.width * 3);
+        const nh = c.h * (nw / c.w);
+        return { x: c.x + px * (c.w - nw), y: c.y + py * (c.h - nh), w: nw, h: nh };
+      });
+    },
+    [layout.width],
+  );
+
+  // Native, non-passive wheel listener so preventDefault stops the page scrolling under the zoom.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (svg === null) return;
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const px = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+      const py = clamp((e.clientY - rect.top) / rect.height, 0, 1);
+      zoomAround(e.deltaY < 0 ? 0.9 : 1 / 0.9, px, py);
+    };
+    svg.addEventListener("wheel", onWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", onWheel);
+  }, [zoomAround]);
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>): void => {
+    drag.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>): void => {
+    if (drag.current === null || svgRef.current === null) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const dx = (e.clientX - drag.current.x) * (cam.w / rect.width);
+    const dy = (e.clientY - drag.current.y) * (cam.h / rect.height);
+    drag.current = { x: e.clientX, y: e.clientY };
+    setCam((c) => ({ ...c, x: c.x - dx, y: c.y - dy }));
+  };
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>): void => {
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   return (
     <div className="ec-graphwrap">
+      <div className="ec-graph-controls" data-testid="topo-zoom-controls">
+        <button type="button" className="ec-zoombtn" aria-label="Zoom in" title="Zoom in" onClick={() => zoomAround(0.8, 0.5, 0.5)}>
+          +
+        </button>
+        <button type="button" className="ec-zoombtn" aria-label="Zoom out" title="Zoom out" onClick={() => zoomAround(1.25, 0.5, 0.5)}>
+          −
+        </button>
+        <button type="button" className="ec-zoombtn ec-zoombtn--fit" aria-label="Fit graph to view" title="Fit to view" onClick={fit}>
+          Fit
+        </button>
+      </div>
       <svg
-        className="ec-graph"
-        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        ref={svgRef}
+        className="ec-graph ec-graph--interactive"
+        viewBox={`${round(cam.x)} ${round(cam.y)} ${round(cam.w)} ${round(cam.h)}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Site connectivity graph"
-        style={{ minWidth: `${Math.min(920, layout.width)}px` }}
+        aria-label="Site connectivity graph — scroll to zoom, drag to pan"
         data-testid="topology-graph"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        onDoubleClick={fit}
       >
         <EdgeMarkers />
 
@@ -259,6 +340,7 @@ function Graph({
           <span className="ec-sw ec-sw--flow" /> internal dataflow (pending)
         </span>
         <span className="ec-dim">arrow → the target endpoint</span>
+        <span className="ec-dim ec-gkey__panhint">scroll to zoom · drag to pan · Fit to reset</span>
       </div>
     </div>
   );

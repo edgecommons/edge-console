@@ -1427,14 +1427,61 @@
 }
 
 .ec-graphwrap {
+  position: relative;
   background: var(--cds-layer);
   border: 1px solid var(--cds-border-subtle);
-  overflow-x: auto;
+  overflow: hidden;
 }
 .ec-graph {
   display: block;
   width: 100%;
   height: auto;
+}
+.ec-graph--interactive {
+  height: min(62vh, 640px);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ec-graph--interactive:active {
+  cursor: grabbing;
+}
+.ec-graph-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+.ec-zoombtn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--cds-text-primary);
+  background: var(--cds-layer-accent);
+  border: 1px solid var(--cds-border-subtle);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.ec-zoombtn:hover {
+  background: var(--cds-layer-hover);
+}
+.ec-zoombtn:focus-visible {
+  outline: 2px solid var(--cds-focus);
+  outline-offset: 1px;
+}
+.ec-zoombtn--fit {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.ec-gkey__panhint {
+  font-style: italic;
 }
 .ec-graph text {
   fill: var(--cds-text-primary);
