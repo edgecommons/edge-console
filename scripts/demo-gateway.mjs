@@ -39,6 +39,8 @@ import { ThroughputMeter } from "../server/dist/fleet/throughput-meter.js";
 import { ConsoleSelfMonitor } from "../server/dist/fleet/console-self.js";
 import { CommandGateway } from "../server/dist/command/command-gateway.js";
 import { ConfigRbacPolicy } from "../server/dist/command/rbac.js";
+import { consoleConfigFromGlobal } from "../server/dist/console-config.js";
+import { consoleSettings } from "../server/dist/fleet/console-settings.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
 import { WsServer } from "../server/dist/ws/ws-server.js";
 import { MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/ggcommons";
@@ -60,13 +62,14 @@ const throughput = new ThroughputMeter(clock);
 // identity/platform/transport/broker are the demo's synthetic console self (matching the mockup's
 // gw-dallas-01 / HOST / MQTT / EMQX @ gateway); the cpu/mem/uptime are this REAL node process
 // (the honest half — the same nodeSelfSampler the live console uses).
-const selfMonitor = new ConsoleSelfMonitor({
+const consoleSelfInfo = {
   device: "gw-dallas-01",
   component: "edge-console",
   platform: "HOST",
   transport: "MQTT",
   broker: "EMQX @ gateway",
-});
+};
+const selfMonitor = new ConsoleSelfMonitor(consoleSelfInfo);
 // Per-device platform advertised via the state-envelope `tags.platform` (config-driven metadata),
 // so the Overview group rows show the mockup's `press-gw-01 (Greengrass)` / `pack-gw-01 (HOST)`.
 const PLATFORM_OF = {
@@ -254,11 +257,19 @@ const cfgAnnouncements = {
 // ---- C4: the command seam (a fake CommandInbox responder for the request edge) ------
 const consoleIdentity = new MessageIdentity([{ level: "device", value: "gw-console" }], "edge-console");
 const uns = new Uns(consoleIdentity, false);
-const rbac = new ConfigRbacPolicy({
+// The demo RBAC policy: operator (full control EXCEPT reboot — so a Send-command "reboot" shows
+// FORBIDDEN) + a read-only viewer, so the Settings screen (R6) shows a realistic two-role policy.
+const demoRbacConfig = {
   defaultRole: "operator",
-  // operator may do everything EXCEPT reboot — so a Send-command "reboot" shows FORBIDDEN.
-  roles: { operator: { allow: ["*"], deny: ["reboot"] } },
-});
+  roles: {
+    operator: { allow: ["*"], deny: ["reboot"] },
+    viewer: { allow: ["ping", "get-configuration"], deny: [] },
+  },
+};
+const rbac = new ConfigRbacPolicy(demoRbacConfig);
+// The console's own effective policy + configuration behind the read-only Settings screen (R6):
+// the demo RBAC over the parsed defaults, plus the demo's synthetic console self-identity.
+const demoConsoleConfig = consoleConfigFromGlobal({ console: { rbac: demoRbacConfig } });
 
 /** The fake site-bus request edge: reply as a real ggcommons CommandInbox would. */
 function fakeComponentRequest(topic) {
@@ -318,6 +329,8 @@ const gateway = new FleetWsGateway(
     busThroughput: () => throughput.ratePerSec(),
     busRecentRates: () => throughput.recentRates(),
     consoleSelf: () => selfMonitor.sample(),
+    // R6: the console's own effective policy + configuration behind the read-only Settings screen.
+    consoleSettings: () => consoleSettings(demoConsoleConfig, consoleSelfInfo),
   },
   {
     configs,

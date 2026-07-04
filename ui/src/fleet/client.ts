@@ -28,6 +28,7 @@ import type {
   CommandError,
   ComponentKey,
   ConsoleSelf,
+  ConsoleSettings,
   ServerMessage,
 } from "@edgecommons/edge-console-protocol";
 import type { LadderOptions } from "./store";
@@ -129,6 +130,8 @@ export interface ClientState {
   self?: ConsoleSelf;
   /** The connection's resolved RBAC role (from the `welcome` frame) — the account indicator. */
   role?: string;
+  /** The console's own effective policy + configuration (from the `settings` frame) — the Settings screen (R6). Undefined until it arrives. */
+  settings?: ConsoleSettings;
   /** The C4 command state (per-request phases + per-button latest + the toast feed). */
   commands: CommandView;
   wsUrl: string;
@@ -206,6 +209,9 @@ export class FleetClient {
 
   /** The connection's resolved RBAC role (from the `welcome` frame); undefined until it arrives. */
   private role: string | undefined;
+
+  /** The console's own effective policy + configuration (from the `settings` frame); undefined until it arrives. */
+  private settings: ConsoleSettings | undefined;
 
   /** Dial and keep the connection alive until {@link stop}. Idempotent. */
   start(): void {
@@ -424,6 +430,7 @@ export class FleetClient {
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
       this.stateCache.role !== this.role ||
+      this.stateCache.settings !== this.settings ||
       this.stateCache.busMsgsPerSec !== this.busMsgsPerSec ||
       this.stateCache.busRecentRates !== this.busRecentRates ||
       this.stateCache.self !== this.self ||
@@ -443,6 +450,7 @@ export class FleetClient {
         ...(this.busRecentRates !== undefined ? { busRecentRates: this.busRecentRates } : {}),
         ...(this.self !== undefined ? { self: this.self } : {}),
         ...(this.role !== undefined ? { role: this.role } : {}),
+        ...(this.settings !== undefined ? { settings: this.settings } : {}),
         commands,
         wsUrl: this.url,
       };
@@ -555,6 +563,13 @@ export class FleetClient {
         return;
       case "welcome":
         this.role = msg.role;
+        this.retries = 0;
+        this.notify();
+        return;
+      case "settings":
+        // The console's own effective policy + configuration (R6) — pushed right after
+        // welcome on connect; replaces whatever the client held (fresh on every reconnect).
+        this.settings = msg.settings;
         this.retries = 0;
         this.notify();
         return;

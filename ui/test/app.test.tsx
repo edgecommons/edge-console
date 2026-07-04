@@ -278,6 +278,82 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
+  it("navigates to Settings (R6): renders the console's read-only policy from the settings frame", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+      // The gateway pushes welcome + settings right after hello, then the snapshot.
+      const welcome: ServerMessage = { type: "welcome", protocolVersion: PROTOCOL_VERSION, role: "operator" };
+      const settings: ServerMessage = {
+        type: "settings",
+        protocolVersion: PROTOCOL_VERSION,
+        settings: {
+          rbac: {
+            defaultRole: "operator",
+            roles: [
+              { name: "operator", allow: ["*"], deny: ["reboot"], isDefault: true },
+              { name: "viewer", allow: ["ping"], deny: [], isDefault: false },
+            ],
+          },
+          connection: {
+            device: "gw-dallas-01",
+            component: "edge-console",
+            platform: "HOST",
+            transport: "MQTT",
+            broker: "EMQX @ gateway",
+            wsPort: 8443,
+            wsBindAddress: "0.0.0.0",
+            heartbeatIntervalMs: 15000,
+          },
+          staleness: {
+            warnMultiplier: 2,
+            staleMultiplier: 2.5,
+            offlineMultiplier: 5,
+            defaultIntervalSecs: 5,
+            sweepIntervalMs: 1000,
+          },
+          commands: { defaultTimeoutMs: 30000, maxTimeoutMs: 60000, verbTimeouts: [{ verb: "ping", ms: 10000 }] },
+          retention: {
+            maxChannelsPerComponent: 1024,
+            maxEvents: 1000,
+            maxPerComponent: 100,
+            maxSeriesPoints: 60,
+            maxSeries: 2000,
+          },
+        },
+      };
+      const snap: ServerMessage = {
+        type: "snapshot",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: snapshot([deviceSnap("gw-01", [compSnap({ key: key("gw-01", "opcua-adapter") })])]),
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(welcome));
+      sockets[0]!.onmessage?.(JSON.stringify(settings));
+      sockets[0]!.onmessage?.(JSON.stringify(snap));
+    });
+
+    // The Settings nav lands (last in the rail) and renders the read-only policy — same socket.
+    fireEvent.click(screen.getByRole("link", { name: /Settings/ }));
+    expect(screen.getByTestId("settings-grid")).toBeTruthy();
+    expect(screen.getByTestId("settings-role-operator")).toBeTruthy();
+    expect(screen.getByTestId("settings-staleness").textContent).toContain("2× warn / 2.5× stale / 5× offline");
+    // The current viewer's role is highlighted (welcome said operator).
+    expect(screen.getByTestId("settings-role-you-operator")).toBeTruthy();
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.closed).toBe(false);
+  });
+
   it("filters the fleet from the app-bar global search (shared SearchContext → Overview)", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({

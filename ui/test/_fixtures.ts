@@ -9,6 +9,7 @@ import type {
   ComponentSnapshot,
   ConsoleAlarm,
   ConsoleEvent,
+  ConsoleSettings,
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
@@ -170,6 +171,49 @@ export function attributesView(list: RuntimeAttributes[]): AttributesView {
 
 export function fleetView(devices: DeviceView[], overrides: Partial<FleetView> = {}): FleetView {
   return { seq: 10, devices, clockOffsetMs: 0, lastUpdatedAt: T0, ...overrides };
+}
+
+/** A {@link ConsoleSettings} with realistic defaults (the demo's two-role policy + gw-dallas-01). */
+export function consoleSettings(overrides: Partial<ConsoleSettings> = {}): ConsoleSettings {
+  return {
+    rbac: {
+      defaultRole: "operator",
+      roles: [
+        { name: "operator", allow: ["*"], deny: ["reboot"], isDefault: true },
+        { name: "viewer", allow: ["ping", "get-configuration"], deny: [], isDefault: false },
+      ],
+    },
+    connection: {
+      device: "gw-dallas-01",
+      component: "edge-console",
+      platform: "HOST",
+      transport: "MQTT",
+      broker: "EMQX @ gateway",
+      wsPort: 8443,
+      wsBindAddress: "0.0.0.0",
+      heartbeatIntervalMs: 15000,
+    },
+    staleness: {
+      warnMultiplier: 2,
+      staleMultiplier: 2.5,
+      offlineMultiplier: 5,
+      defaultIntervalSecs: 5,
+      sweepIntervalMs: 1000,
+    },
+    commands: {
+      defaultTimeoutMs: 30000,
+      maxTimeoutMs: 60000,
+      verbTimeouts: [{ verb: "ping", ms: 10000 }],
+    },
+    retention: {
+      maxChannelsPerComponent: 1024,
+      maxEvents: 1000,
+      maxPerComponent: 100,
+      maxSeriesPoints: 60,
+      maxSeries: 2000,
+    },
+    ...overrides,
+  };
 }
 
 /** A ClientState around a view (for presentational-component tests). */

@@ -47,6 +47,12 @@
  *    late-discovered component groups dynamically without waiting for the next snapshot.
  * Breaking for the same reason as v2/v3/v4: a v4 gateway rejects-and-closes on the new
  * client frames, and the exact-match version handshake turns the skew into a clean reload.
+ *
+ * R6 (the Settings screen) adds NO new client frame and one purely-additive server frame
+ * (`settings`, pushed after `welcome`) — so it does NOT bump the version, on the same
+ * additive precedent as the `self`/`busMsgsPerSec` heartbeat fields: an old client ignores
+ * the unknown `settings` frame, and a new client against an old gateway simply never
+ * receives it (the view degrades honestly).
  */
 export const PROTOCOL_VERSION = 5;
 
@@ -524,6 +530,98 @@ export interface ConsoleSelf {
 }
 
 /* -----------------------------------------------------------------------------
+ * R6 — the console's OWN effective policy + configuration (the Settings screen).
+ *
+ * The console read this off its own `component.global.console` subtree at startup
+ * (`console-config.ts`), so it can honestly SHOW itself: the RBAC policy that gates the
+ * command write-path, the site-bus connection + its WS listener, the miss-detection
+ * thresholds, the command deadlines (incl. the bridge reply-map TTL ceiling), and the
+ * store-retention caps. This is a READ-ONLY projection — a curated, wire-friendly copy of
+ * what the console holds, never the raw config document. It rides its own `settings` frame,
+ * pushed right after `welcome` on connect (like `welcome`, server-initiated — no client
+ * request); a gateway with no settings source simply omits it and old/new clients that
+ * never receive it degrade honestly (the view says "not yet received").
+ * --------------------------------------------------------------------------- */
+
+/** One role's verb policy in the {@link ConsoleSettings} projection (order-stable, wire-friendly). */
+export interface ConsoleSettingsRole {
+  /** The role name (`operator`/`viewer`/…). */
+  name: string;
+  /** Verbs this role may invoke (`["*"]` = all). */
+  allow: string[];
+  /** Verbs this role may never invoke (wins over `allow`; `["*"]` = block all). */
+  deny: string[];
+  /** Whether this is the fallback role assigned to a connection with no resolved principal. */
+  isDefault: boolean;
+}
+
+/**
+ * The console's own effective policy + configuration, as the read-only Settings screen (R6)
+ * renders it. Every field is REAL — sourced from the console's resolved runtime config; the
+ * connection-identity fields are optional (present only when the console knows them).
+ */
+export interface ConsoleSettings {
+  /** The C4 command authorization policy (`console.rbac`) — roles + per-verb allow/deny. */
+  rbac: {
+    /** The fallback role assigned to an unauthenticated connection (the auth seam's stub). */
+    defaultRole: string;
+    /** The declared roles (order-stable), each flagged `isDefault` for the fallback. */
+    roles: ConsoleSettingsRole[];
+  };
+  /** The site-bus connection identity + the console's own WS gateway listener. */
+  connection: {
+    /** The console's own node/device name (`identity.device`), when known. */
+    device?: string;
+    /** The console component token (`edge-console`), when known. */
+    component?: string;
+    /** Resolved deployment platform (`HOST`/`GREENGRASS`/`KUBERNETES`), when known. */
+    platform?: string;
+    /** Resolved site-bus messaging transport (`MQTT`/`IPC`), when known. */
+    transport?: string;
+    /** The site-bus broker host (`messaging.local.host`), when known. */
+    broker?: string;
+    /** The console's WS gateway listen port (`console.ws.port`). */
+    wsPort: number;
+    /** The console's WS gateway bind address (`console.ws.bindAddress`). */
+    wsBindAddress: string;
+    /** Server→client heartbeat cadence (ms) (`console.ws.heartbeatIntervalMs`). */
+    heartbeatIntervalMs: number;
+  };
+  /** The miss-detection ladder (`console.staleness`, DESIGN §6.2). */
+  staleness: {
+    warnMultiplier: number;
+    staleMultiplier: number;
+    offlineMultiplier: number;
+    /** The expected keepalive interval (secs) until a component's `cfg` announces one. */
+    defaultIntervalSecs: number;
+    /** The liveness sweeper period (ms). */
+    sweepIntervalMs: number;
+  };
+  /** The command-gateway timeout policy (`console.commands`). */
+  commands: {
+    /** Default per-command deadline (ms) when a verb has no override. */
+    defaultTimeoutMs: number;
+    /** The hard ceiling — the uns-bridge reply-map TTL (paired-knob rule). */
+    maxTimeoutMs: number;
+    /** Per-verb deadline overrides (ms), order-stable by verb. */
+    verbTimeouts: { verb: string; ms: number }[];
+  };
+  /** The FleetModel + activity-store retention caps (`console.cache`/`.events`/`.metrics`). */
+  retention: {
+    /** Max distinct `(class, channel)` cache entries per component (`cache.maxChannelsPerComponent`). */
+    maxChannelsPerComponent: number;
+    /** Fleet-wide recent-events ring capacity (`events.maxEvents`). */
+    maxEvents: number;
+    /** Per-component recent-events ring capacity (`events.maxPerComponent`). */
+    maxPerComponent: number;
+    /** Recent points kept per metric series (`metrics.maxSeriesPoints`). */
+    maxSeriesPoints: number;
+    /** Max distinct metric series overall (`metrics.maxSeries`). */
+    maxSeries: number;
+  };
+}
+
+/* -----------------------------------------------------------------------------
  * R0 — the console-side ALARM tracker (management plane).
  *
  * The console derives alarms from the `evt` severity stream: a critical/error/warning
@@ -777,6 +875,11 @@ export type ServerMessage =
   // R0 welcome: the connection's resolved RBAC role, sent right after a valid `hello`
   // (before the snapshot) — the app-bar account indicator's data source.
   | { type: "welcome"; protocolVersion: number; role: string }
+  // R6 settings: the console's own effective policy + configuration, pushed right after
+  // `welcome` (server-initiated, no client request) — the read-only Settings screen's source.
+  // Optional/additive (a gateway with no settings source omits it; old clients ignore the
+  // unknown frame, new clients against an old gateway degrade honestly), so no version bump.
+  | { type: "settings"; protocolVersion: number; settings: ConsoleSettings }
   | {
       type: "config";
       protocolVersion: number;

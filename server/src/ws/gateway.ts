@@ -34,6 +34,7 @@ import type {
   ComponentKey,
   ConsoleEvent,
   ConsoleSelf,
+  ConsoleSettings,
   FleetDelta,
   FleetSnapshot,
   MetricSeriesSnapshot,
@@ -186,6 +187,13 @@ export interface FleetWsGatewayOptions {
    * transport foot). Optional: without it the heartbeat omits `self` (honest — no self-monitor).
    */
   consoleSelf?: () => ConsoleSelf;
+  /**
+   * The console's OWN effective policy + configuration (R6) — sent once on each `hello`
+   * (right after `welcome`) as the `settings` frame that backs the read-only Settings screen.
+   * Optional: without it the gateway omits `settings` (honest — no policy surfaced) and the
+   * Settings screen shows "not yet received".
+   */
+  consoleSettings?: () => ConsoleSettings;
   /** Bounded recent-delta ring backing resume (count of deltas, not bytes). Default 1000. */
   deltaBufferSize: number;
   /** A transport reporting more than this many buffered bytes is considered backpressured for the current push. Default 1 MiB. */
@@ -366,6 +374,12 @@ export class FleetWsGateway {
       // Welcome first: the connection's resolved RBAC role (the account indicator's
       // source), sent before the snapshot so the shell can render identity immediately.
       this.send(session, { type: "welcome", protocolVersion: PROTOCOL_VERSION, role: session.role });
+      // Then the console's own effective policy + configuration (R6), when a settings
+      // source is wired — the read-only Settings screen's data, sent unprompted like welcome.
+      const settings = this.opts.consoleSettings?.();
+      if (settings !== undefined) {
+        this.send(session, { type: "settings", protocolVersion: PROTOCOL_VERSION, settings });
+      }
       this.resync(session, msg.resumeSeq);
       return;
     }

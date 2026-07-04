@@ -42,6 +42,7 @@ import { AlarmTracker } from "./fleet/alarm-tracker";
 import { ThroughputMeter } from "./fleet/throughput-meter";
 import { ConsoleSelfMonitor } from "./fleet/console-self";
 import type { ConsoleSelfInfo } from "./fleet/console-self";
+import { consoleSettings } from "./fleet/console-settings";
 import { CommandGateway } from "./command/command-gateway";
 import { ConfigRbacPolicy } from "./command/rbac";
 import { FleetWsGateway } from "./ws/gateway";
@@ -198,6 +199,10 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       busThroughput: () => throughput.ratePerSec(),
       busRecentRates: () => throughput.recentRates(),
       ...(selfMonitor !== undefined ? { consoleSelf: () => selfMonitor.sample() } : {}),
+      // The console's OWN effective policy + configuration (R6) — the read-only Settings
+      // screen's data. Always available (it is the parsed config + the static self-identity);
+      // pushed once per hello, right after welcome.
+      consoleSettings: () => consoleSettings(config, deps.self),
     },
     {
       configs,

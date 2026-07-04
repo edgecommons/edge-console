@@ -22,7 +22,7 @@ import {
   SideNavLink,
   Theme,
 } from "@carbon/react";
-import { Activity, Catalog, ChartLine, ChartNetwork, Dashboard, TreeView } from "@carbon/react/icons";
+import { Activity, Catalog, ChartLine, ChartNetwork, Dashboard, Settings, TreeView } from "@carbon/react/icons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { defaultWsUrl } from "./config";
 import { FleetClient } from "./fleet/client";
@@ -34,13 +34,22 @@ import { ConnectedConfigReviewView } from "./configreview/ConfigReviewView";
 import { ConnectedTopologyView } from "./topology/TopologyView";
 import { ConnectedEventsView } from "./events/EventsView";
 import { ConnectedSignalsView, scopeIdFor } from "./signals/SignalsView";
+import { ConnectedSettingsView } from "./settings/SettingsView";
 import { AppBar } from "./shell/AppBar";
 import { SearchContext } from "./shell/search";
 import type { SearchState } from "./shell/search";
 import { useTheme } from "./shell/theme";
 
 /** The shell's view routes (one per shipped screen; `detail` is the Components sub-screen). */
-type Route = "overview" | "components" | "detail" | "topology" | "config" | "events" | "signals";
+type Route =
+  | "overview"
+  | "components"
+  | "detail"
+  | "topology"
+  | "config"
+  | "events"
+  | "signals"
+  | "settings";
 
 export default function App({ client }: { client?: FleetClient }): React.JSX.Element {
   const fleetClient = useMemo(() => client ?? new FleetClient({ url: defaultWsUrl() }), [client]);
@@ -156,6 +165,14 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
             >
               Signals
             </SideNavLink>
+            <SideNavLink
+              renderIcon={Settings}
+              href="#"
+              isActive={route === "settings"}
+              onClick={navigate("settings")}
+            >
+              Settings
+            </SideNavLink>
           </SideNavItems>
         </SideNav>
         <Content id="main-content" className="ec-content">
@@ -185,6 +202,8 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               client={fleetClient}
               {...(signalsScope !== undefined ? { initialComponentId: scopeIdFor(signalsScope) } : {})}
             />
+          ) : route === "settings" ? (
+            <ConnectedSettingsView client={fleetClient} />
           ) : (
             <ConnectedEventsView client={fleetClient} />
           )}
