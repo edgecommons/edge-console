@@ -104,6 +104,36 @@ describe("parseEndpoints", () => {
     expect(eps).toHaveLength(1);
   });
 
+  it("parses the REAL reference-adapter shape: component.instances[].connection", () => {
+    const opc = parseEndpoints({
+      component: {
+        instances: [
+          { id: "filler1", adapter: "opcua", connection: { endpoint: "opc.tcp://192.168.1.180:49320/", securityPolicy: "None" } },
+        ],
+      },
+    });
+    expect(opc[0]).toMatchObject({ direction: "southbound", kind: "OPC UA", label: "192.168.1.180:49320" });
+
+    const mb = parseEndpoints({
+      component: {
+        instances: [{ id: "casepacker1", adapter: "modbus", connection: { host: "192.168.1.224", port: 5020, unitId: 1 } }],
+      },
+    });
+    expect(mb[0]).toMatchObject({
+      direction: "southbound",
+      kind: "Modbus",
+      label: "192.168.1.224:5020",
+      sublabel: "Modbus unit 1 · field",
+    });
+  });
+
+  it("parses the REAL telemetry streaming shape (cloud sink → northbound; local file sink is not a node)", () => {
+    expect(parseEndpoints({ streaming: { streams: [{ name: "archive", sink: { type: "file", dir: "/out/archive" } }] } })).toEqual([]);
+    expect(
+      parseEndpoints({ streaming: { streams: [{ name: "cloud", sink: { type: "kinesis" } }] } })[0],
+    ).toMatchObject({ direction: "northbound", label: "Kinesis" });
+  });
+
   it("returns nothing for empty/garbage config", () => {
     expect(parseEndpoints(undefined)).toEqual([]);
     expect(parseEndpoints(42)).toEqual([]);

@@ -132,6 +132,33 @@ function southboundFromSlave(obj: Record<string, unknown>): ParsedEndpoint | und
 }
 
 /**
+ * A southbound endpoint from a reference-adapter `connection` block — the REAL shipped shape
+ * (`component.instances[].connection`): OPC UA carries a `endpoint` URL string
+ * (`opc.tcp://host:port/`); Modbus carries `{host,port,unitId}` (a `unitId`/`transport` marks
+ * it Modbus, else it is a generic host endpoint). This is the path that makes the graph's
+ * arrows appear against the live adapters (the flatter `endpoint`/`slave` shapes above are the
+ * synthetic-demo / test shapes).
+ */
+function southboundFromConnection(conn: Record<string, unknown>): ParsedEndpoint | undefined {
+  const endpoint = asString(conn.endpoint);
+  if (endpoint !== undefined) {
+    const isOpc = /^opc\.tcp:/i.test(endpoint);
+    const kind = isOpc ? "OPC UA" : "Endpoint";
+    return mkEndpoint("southbound", kind, hostFromUrl(endpoint), `${kind} server · field`);
+  }
+  const host = asString(conn.host);
+  if (host === undefined) return undefined;
+  const port = asNumber(conn.port);
+  const unit = asNumber(conn.unitId) ?? asNumber(conn.unit);
+  const label = port !== undefined ? `${host}:${port}` : host;
+  const transport = asString(conn.transport)?.toLowerCase();
+  const isModbus = unit !== undefined || transport === "tcp" || transport === "rtu";
+  return isModbus
+    ? mkEndpoint("southbound", "Modbus", label, unit !== undefined ? `Modbus unit ${unit} · field` : "Modbus slave · field")
+    : mkEndpoint("southbound", "Endpoint", label, "server · field");
+}
+
+/**
  * Parse the external endpoints a component connects to from its EFFECTIVE cfg (already
  * unwrapped from the `{config:{…}}` envelope). Lenient — every shape is optional, never
  * throws, unknown shapes yield nothing. Covers the reference adapters/processors:
@@ -173,6 +200,30 @@ export function parseEndpoints(effective: unknown): ParsedEndpoint[] {
     if (sv !== undefined) push(southboundFromEndpoint(sv));
     const sl = asObject(o.slave);
     if (sl !== undefined) push(southboundFromSlave(sl));
+  }
+  // REAL reference-adapter shape: component.instances[].connection.{endpoint | host,port,unitId}
+  const component = asObject(cfg.component);
+  if (component !== undefined) {
+    for (const inst of asArray(component.instances)) {
+      const o = asObject(inst);
+      if (o === undefined) continue;
+      const conn = asObject(o.connection);
+      if (conn !== undefined) push(southboundFromConnection(conn));
+    }
+  }
+
+  // REAL telemetry shape: streaming.streams[].sink.type — a cloud sink is northbound; a local
+  // file sink is NOT an external node (it stays on the device), so skip it (no faked cloud edge).
+  const streaming = asObject(cfg.streaming);
+  if (streaming !== undefined) {
+    for (const s of asArray(streaming.streams)) {
+      const o = asObject(s);
+      if (o === undefined) continue;
+      const sink = asObject(o.sink);
+      const type = asString(sink?.type) ?? asString(o.type);
+      const t = type?.toLowerCase();
+      if (t !== undefined && t !== "file" && t !== "local") push(northboundFromKind(type!));
+    }
   }
 
   // --- northbound: streams.* (a named/kinded stream) / northbound / targets[] ---
