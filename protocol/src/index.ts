@@ -138,6 +138,22 @@ export interface CachedValue {
   sourceTimestamp?: string;
 }
 
+/**
+ * One component instance's connectivity, from the `state` keepalive's `instances[]` (#1c): a
+ * multi-connection component (OPC UA servers, Modbus slaves, file-replicator source dirs) reports
+ * each configured instance's reachability here rather than minting a UNS instance per connection.
+ * The library providers report EVERY configured instance, so this array is the config-complete
+ * instance list AND its live status in one.
+ */
+export interface InstanceStatus {
+  /** The component instance / connection id (OPC UA server, Modbus slave, replication instance). */
+  instance: string;
+  /** Whether that instance's southbound/source is currently reachable. */
+  connected: boolean;
+  /** Optional human detail (endpoint, or the down reason). */
+  detail?: string;
+}
+
 /** A component's slice of a {@link FleetSnapshot}. */
 export interface ComponentSnapshot {
   key: ComponentKey;
@@ -151,6 +167,13 @@ export interface ComponentSnapshot {
   status?: string;
   /** Last reported `state.uptimeSecs` (restart detection = a decrease). */
   uptimeSecs?: number;
+  /**
+   * Per-instance connectivity from the last `state` keepalive's `instances[]` (#1c) — every
+   * configured instance (OPC UA server / Modbus slave / file-replicator source dir) with its
+   * reachability. Absent until a state carrying the section arrives (single-instance `main`-only
+   * components never carry it).
+   */
+  instances?: InstanceStatus[];
   /** Receipt time of the last `state` keepalive (ms epoch). */
   lastStateAt?: number;
   /** The expected keepalive interval (seconds) driving miss-detection. */

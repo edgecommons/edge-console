@@ -371,3 +371,51 @@ describe("FleetModel - snapshot/delta contract (the C2 seam)", () => {
     expect(model.devices()).toEqual(["gw-01", "gw-09"]);
   });
 });
+
+describe("FleetModel - #1c per-instance connectivity (state.instances[])", () => {
+  it("carries the state body's instances[] onto the component snapshot", () => {
+    const model = new FleetModel(new TestClock().fn);
+    model.ingest(
+      env({
+        cls: "state",
+        body: {
+          status: "RUNNING",
+          uptimeSecs: 5,
+          instances: [
+            { instance: "filler1", connected: true, detail: "opc.tcp://kep:49320" },
+            { instance: "kep2", connected: false },
+          ],
+        },
+      }),
+    );
+    expect(model.snapshot().devices[0]!.components[0]!.instances).toEqual([
+      { instance: "filler1", connected: true, detail: "opc.tcp://kep:49320" },
+      { instance: "kep2", connected: false },
+    ]);
+  });
+
+  it("omits the section when absent, and skips malformed entries when present", () => {
+    const model = new FleetModel(new TestClock().fn);
+    model.ingest(state("RUNNING", 5)); // no instances key
+    expect(model.snapshot().devices[0]!.components[0]!.instances).toBeUndefined();
+
+    model.ingest(
+      env({
+        cls: "state",
+        body: {
+          status: "RUNNING",
+          uptimeSecs: 6,
+          instances: [
+            { instance: "ok", connected: true },
+            { instance: "", connected: true }, // blank id -> skipped
+            { instance: "noflag" }, // missing connected -> skipped
+            "nonsense", // not an object -> skipped
+          ],
+        },
+      }),
+    );
+    expect(model.snapshot().devices[0]!.components[0]!.instances).toEqual([
+      { instance: "ok", connected: true },
+    ]);
+  });
+});

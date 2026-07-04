@@ -30,11 +30,35 @@ import type {
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
+  InstanceStatus,
   Liveness,
   WireHierLevel,
 } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { EnvelopeEvent, IngressEvent } from "../ingress/normalizer";
+
+/**
+ * Parse the state body's `instances[]` (#1c) defensively — returns the valid entries (skipping
+ * malformed ones); `undefined` when the section is absent / not an array, so a state without it
+ * leaves the component's last-known set untouched.
+ */
+function parseInstanceStatuses(raw: unknown): InstanceStatus[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: InstanceStatus[] = [];
+  for (const e of raw) {
+    if (e === null || typeof e !== "object") continue;
+    const o = e as Record<string, unknown>;
+    if (typeof o.instance !== "string" || o.instance === "" || typeof o.connected !== "boolean") {
+      continue;
+    }
+    out.push({
+      instance: o.instance,
+      connected: o.connected,
+      ...(typeof o.detail === "string" && o.detail !== "" ? { detail: o.detail } : {}),
+    });
+  }
+  return out;
+}
 
 /** Milliseconds since the epoch, injectable for tests (DESIGN's "no sleeps" rule). */
 export type Clock = () => number;
@@ -69,6 +93,8 @@ interface ComponentRecord {
   status?: string;
   uptimeSecs?: number;
   lastStateAt?: number;
+  /** Per-instance connectivity from the last `state` body's `instances[]` (#1c), if carried. */
+  instances?: InstanceStatus[];
   /** Discovery time — the staleness baseline until a first `state` arrives. */
   firstSeenAt: number;
   /** cfg-derived keepalive interval (seconds), once known. */
@@ -198,6 +224,7 @@ export class FleetModel {
       ...(comp.status !== undefined ? { status: comp.status } : {}),
       ...(comp.uptimeSecs !== undefined ? { uptimeSecs: comp.uptimeSecs } : {}),
       ...(comp.lastStateAt !== undefined ? { lastStateAt: comp.lastStateAt } : {}),
+      ...(comp.instances !== undefined ? { instances: comp.instances.map((i) => ({ ...i })) } : {}),
       expectedIntervalSecs: comp.intervalSecs ?? this.opts.defaultIntervalSecs,
       cadenceSource: comp.cadenceSource,
       restarts: comp.restarts,
@@ -307,6 +334,11 @@ export class FleetModel {
         : {};
     const status = typeof body.status === "string" ? body.status : undefined;
     if (status !== undefined) comp.status = status;
+
+    // #1c per-instance connectivity: when the state carries `instances[]` (a multi-instance
+    // component's RUNNING keepalive), refresh it; a state without the section leaves it untouched.
+    const instances = parseInstanceStatuses(body.instances);
+    if (instances !== undefined) comp.instances = instances;
 
     if (status === "STOPPED") {
       // Graceful stop is an explicit truth: hold STOPPED, no staleness decay.
