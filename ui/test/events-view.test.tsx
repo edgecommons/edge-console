@@ -1,149 +1,186 @@
 /**
- * The Events view (C6) — presentational tests: state in, DOM out, callbacks
- * observed. Essentials: newest-first log with severity chips + body summaries,
- * the component/severity filters, the expandable detail row, live-append via a
- * changed entries prop, the header tiles, and the empty/disconnected states.
- * Selector-level logic (buckets, per-minute series, summaries) is covered in
- * `events-selectors.test.ts`; the connected container's subscribe lifecycle in
- * `app.test.tsx`.
+ * The Events & Alarms view (R4) — presentational tests: state in, DOM out, callbacks
+ * observed. Essentials: the merged newest-first table of stateful ALARMS + the
+ * informational event FEED, the State column, a working Ack action, the ack audit,
+ * per-row detail, the active-alarm header tile, filters, and the empty/disconnected
+ * states. The alarm/event split logic is covered in `alarm-selectors.test.ts`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ConsoleEvent } from "@edgecommons/edge-console-protocol";
+import type { ConsoleAlarm, ConsoleEvent } from "@edgecommons/edge-console-protocol";
 import { EventsView } from "../src/events/EventsView";
 import type { EventFilters } from "../src/events/selectors";
-import { T0, clientState, consoleEvent, fleetView, key } from "./_fixtures";
+import type { AckAudit } from "../src/events/alarm-selectors";
+import { T0, alarmSnapshot, clientState, consoleAlarm, consoleEvent, fleetView, key } from "./_fixtures";
 
 afterEach(cleanup);
 
 const OPCUA = key("gw-01", "opcua-adapter");
 const MODBUS = key("gw-02", "modbus-adapter");
 
-/** Three mixed events, newest-first (as the store hands them over). */
-function threeEvents(): ConsoleEvent[] {
+/** Two alarms (one active-critical, one acked-warning) + two informational events. */
+function twoAlarms(): ConsoleAlarm[] {
   return [
-    consoleEvent({
-      id: 3,
-      key: MODBUS,
+    consoleAlarm({
+      key: OPCUA,
+      type: "connection-lost",
       severity: "critical",
-      type: "overtemp",
-      channel: "critical/overtemp",
-      body: { message: "temperature above threshold", valueC: 91 },
-      receivedAt: T0 - 10_000,
+      message: "OPC UA session dropped",
+      raisedAt: T0 - 5000,
+      lastAt: T0 - 5000,
+      count: 2,
+      acked: false,
     }),
+    consoleAlarm({
+      key: MODBUS,
+      type: "slave-retry",
+      severity: "warning",
+      message: "slave did not answer",
+      raisedAt: T0 - 20_000,
+      lastAt: T0 - 20_000,
+      acked: true,
+    }),
+  ];
+}
+
+function twoEvents(): ConsoleEvent[] {
+  return [
     consoleEvent({
       id: 2,
       key: OPCUA,
-      severity: "warning",
-      type: "connection-retry",
-      channel: "warning/connection-retry",
-      body: { message: "endpoint timeout, retrying" },
-      receivedAt: T0 - 20_000,
+      severity: "info",
+      type: "scan-cycle",
+      channel: "info/scan-cycle",
+      body: { message: "browse cycle finished" },
+      receivedAt: T0 - 10_000,
     }),
     consoleEvent({
       id: 1,
       key: OPCUA,
       severity: "info",
-      type: "scan-cycle",
-      channel: "info/scan-cycle",
-      body: "cycle complete",
+      type: "started",
+      channel: "info/started",
+      body: "process up",
       receivedAt: T0 - 30_000,
     }),
   ];
 }
 
+const ALARM_A = "alarm:gw-01/opcua-adapter/main::connection-lost";
+const ALARM_B_ID = "gw-02/modbus-adapter/main::slave-retry";
+
 function renderView({
-  entries = threeEvents(),
+  alarms = twoAlarms(),
+  entries = twoEvents(),
   filters = {} as EventFilters,
   onFiltersChange = vi.fn(),
-  state = clientState(fleetView([]), { events: { entries } }),
+  onAck = vi.fn(),
+  ackAudit = {} as AckAudit,
+  state = clientState(fleetView([]), { events: { entries }, alarms: alarmSnapshot(alarms) }),
 }: {
+  alarms?: ConsoleAlarm[];
   entries?: ConsoleEvent[];
   filters?: EventFilters;
   onFiltersChange?: (f: EventFilters) => void;
+  onAck?: (id: string) => void;
+  ackAudit?: AckAudit;
   state?: ReturnType<typeof clientState>;
 } = {}) {
-  const view = render(
-    <EventsView state={state} now={T0} filters={filters} onFiltersChange={onFiltersChange} />,
+  render(
+    <EventsView
+      state={state}
+      now={T0}
+      filters={filters}
+      onFiltersChange={onFiltersChange}
+      onAck={onAck}
+      ackAudit={ackAudit}
+    />,
   );
-  return { onFiltersChange, view, state };
+  return { onFiltersChange, onAck, state };
 }
 
-describe("EventsView - the log", () => {
-  it("renders newest-first rows with severity chip, source identity, type, and body summary", () => {
+describe("EventsView - the merged alarm+event table", () => {
+  it("renders alarms and events interleaved newest-first, each with a State", () => {
     renderView();
     const table = screen.getByTestId("events-table");
-    const rows = within(table).getAllByTestId(/^event-row-/);
+    const rows = within(table).getAllByTestId(/^feed-row-/);
+    // A (T0-5s alarm) · event 2 (T0-10s) · B (T0-20s alarm) · event 1 (T0-30s).
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
-      "event-row-3",
-      "event-row-2",
-      "event-row-1",
+      `feed-row-${ALARM_A}`,
+      "feed-row-event:2",
+      `feed-row-alarm:${ALARM_B_ID}`,
+      "feed-row-event:1",
     ]);
 
-    const top = rows[0]!;
-    expect(within(top).getByText("critical")).toBeTruthy(); // the raw severity token
-    expect(within(top).getByText("modbus-adapter")).toBeTruthy();
-    expect(within(top).getByText("gw-02")).toBeTruthy();
-    expect(within(top).getByText("overtemp")).toBeTruthy();
-    expect(within(top).getByText("temperature above threshold")).toBeTruthy(); // message field summary
-    expect(within(top).getByText(/10s ago/)).toBeTruthy(); // server-clock age
+    const alarmRow = rows[0]!;
+    expect(within(alarmRow).getByText("critical")).toBeTruthy(); // raw severity token
+    expect(within(alarmRow).getByText("opcua-adapter")).toBeTruthy();
+    expect(within(alarmRow).getByText("connection-lost")).toBeTruthy();
+    expect(within(alarmRow).getByText("Active")).toBeTruthy(); // the alarm State
+    expect(within(alarmRow).getByText("×2")).toBeTruthy(); // re-raise count
+
+    const eventRow = rows[1]!;
+    expect(within(eventRow).getByText("scan-cycle")).toBeTruthy();
+    expect(within(eventRow).getByText("browse cycle finished")).toBeTruthy();
+    expect(within(eventRow).getByText("Event")).toBeTruthy(); // informational marker
   });
 
-  it("live-appends: a new entries prop renders the new row on top", () => {
-    const { view, state } = renderView();
-    const fresh = consoleEvent({ id: 4, key: OPCUA, severity: "error", type: "write-failed", receivedAt: T0 });
-    view.rerender(
-      <EventsView
-        state={{ ...state, events: { entries: [fresh, ...threeEvents()] } }}
-        now={T0}
-        filters={{}}
-        onFiltersChange={vi.fn()}
-      />,
-    );
-    const rows = screen.getAllByTestId(/^event-row-/);
-    expect(rows[0]!.getAttribute("data-testid")).toBe("event-row-4");
-    expect(rows).toHaveLength(4);
+  it("shows an Ack action on the active alarm, and reports the ack via onAck", () => {
+    const { onAck } = renderView();
+    const ackBtn = screen.getByTestId(`ack-gw-01/opcua-adapter/main::connection-lost`);
+    fireEvent.click(ackBtn);
+    expect(onAck).toHaveBeenCalledWith("gw-01/opcua-adapter/main::connection-lost");
   });
 
-  it("expands a row to the full detail (channel, publisher timestamp, pretty body) and collapses it", () => {
+  it("shows Acked (no Ack action) for an already-acked alarm, with the console-side audit", () => {
+    const ackAudit: AckAudit = { [ALARM_B_ID]: { at: new Date(2026, 6, 3, 9, 5, 7).getTime(), by: "operator" } };
+    renderView({ ackAudit });
+    const ackedRow = screen.getByTestId(`feed-row-alarm:${ALARM_B_ID}`);
+    expect(within(ackedRow).getByText("Acked")).toBeTruthy();
+    expect(screen.queryByTestId(`ack-${ALARM_B_ID}`)).toBeNull(); // no Ack action once acked
+
+    // Expanding reveals the who/when audit (console-side state).
+    fireEvent.click(within(ackedRow).getByTestId(`feed-expand-alarm:${ALARM_B_ID}`));
+    const audit = screen.getByTestId(`ack-audit-${ALARM_B_ID}`);
+    expect(audit.textContent).toContain("acked 09:05:07");
+    expect(audit.textContent).toContain("by operator");
+  });
+
+  it("expands an event row to its full envelope detail", () => {
     renderView();
-    expect(screen.queryByTestId("event-detail-3")).toBeNull();
+    fireEvent.click(screen.getByTestId("feed-expand-event:2"));
+    const detail = screen.getByTestId("feed-detail-event:2");
+    expect(within(detail).getByText("evt/info/scan-cycle")).toBeTruthy();
+    expect(within(detail).getByText(/browse cycle finished/)).toBeTruthy();
+  });
+});
 
-    fireEvent.click(screen.getByTestId("event-expand-3"));
-    const detail = screen.getByTestId("event-detail-3");
-    expect(within(detail).getByText("evt/critical/overtemp")).toBeTruthy();
-    expect(within(detail).getByText("2026-07-03T00:00:00.000Z")).toBeTruthy();
-    expect(within(detail).getByText(/"valueC": 91/)).toBeTruthy(); // pretty JSON body
-
-    fireEvent.click(screen.getByTestId("event-expand-3"));
-    expect(screen.queryByTestId("event-detail-3")).toBeNull();
+describe("EventsView - header tiles", () => {
+  it("summarizes ACTIVE ALARMS (count + crit/warn/acked rollup) from the alarm surface", () => {
+    renderView();
+    expect(screen.getByText("Active alarms")).toBeTruthy();
+    expect(screen.getByTestId("active-alarm-count").textContent).toBe("2");
+    // 1 critical active + 1 warning acked.
+    expect(screen.getByText(/1 crit · 1 warn/)).toBeTruthy();
+    expect(screen.getByText(/1 acked/)).toBeTruthy();
+    expect(screen.getByTestId("sparkline")).toBeTruthy(); // events/min trend
   });
 });
 
 describe("EventsView - filters", () => {
-  it("applies the component filter and shows the filtered count", () => {
-    renderView({ filters: { componentId: "gw-01/opcua-adapter/main" } });
-    const rows = screen.getAllByTestId(/^event-row-/);
-    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["event-row-2", "event-row-1"]);
-    expect(screen.getByTestId("filter-count").textContent).toContain("2 of 3");
-  });
-
-  it("applies the severity filter", () => {
+  it("filters the merged feed by severity (alarms + events share the severity space)", () => {
     renderView({ filters: { severity: "critical" } });
-    expect(screen.getAllByTestId(/^event-row-/)).toHaveLength(1);
-    expect(screen.getByTestId("event-row-3")).toBeTruthy();
+    const rows = screen.getAllByTestId(/^feed-row-/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("data-testid")).toBe(`feed-row-${ALARM_A}`);
+    expect(screen.getByTestId("filter-count").textContent).toContain("1 of 4");
   });
 
   it("reports filter changes from the dropdowns via onFiltersChange", () => {
     const { onFiltersChange } = renderView();
-
-    fireEvent.click(screen.getByRole("combobox", { name: /Component/ }));
-    fireEvent.click(screen.getByRole("option", { name: "gw-02/modbus-adapter/main" }));
-    expect(onFiltersChange).toHaveBeenCalledWith({ componentId: "gw-02/modbus-adapter/main" });
-
     fireEvent.click(screen.getByRole("combobox", { name: /Severity/ }));
-    fireEvent.click(screen.getByRole("option", { name: "Warning" }));
-    expect(onFiltersChange).toHaveBeenCalledWith({ severity: "warning" });
+    fireEvent.click(screen.getByRole("option", { name: "Info" }));
+    expect(onFiltersChange).toHaveBeenCalledWith({ severity: "info" });
   });
 
   it("shows the no-match empty state when the filters exclude everything", () => {
@@ -153,21 +190,7 @@ describe("EventsView - filters", () => {
   });
 });
 
-describe("EventsView - header tiles", () => {
-  it("summarizes the recent history: count, severity legend, sparkline, noisiest source", () => {
-    renderView();
-    expect(screen.getByText("Recent events")).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
-    expect(screen.getByText("1 critical")).toBeTruthy();
-    expect(screen.getByText("1 warning")).toBeTruthy();
-    expect(screen.getByTestId("sparkline")).toBeTruthy(); // events/min trend
-    // opcua published 2 of the 3 within the 5-minute window — the noisiest.
-    expect(screen.getByText("gw-01/opcua-adapter/main")).toBeTruthy();
-    expect(screen.getByText(/2 events/)).toBeTruthy();
-  });
-});
-
-describe("EventsView - connection states", () => {
+describe("EventsView - connection / empty states", () => {
   it("shows the live-tail chip when connected and the paused chip + warning when not", () => {
     renderView();
     expect(screen.getByTestId("live-tail").textContent).toContain("Live tail");
@@ -176,35 +199,42 @@ describe("EventsView - connection states", () => {
     renderView({
       state: clientState(fleetView([]), {
         status: "reconnecting",
-        events: { entries: threeEvents() },
+        events: { entries: twoEvents() },
+        alarms: alarmSnapshot(twoAlarms()),
       }),
     });
     expect(screen.getByTestId("live-tail").textContent).toContain("Tail paused");
     expect(screen.getByText(/Gateway connection lost/)).toBeTruthy();
-    expect(screen.getAllByTestId(/^event-row-/)).toHaveLength(3); // last-known kept
+    expect(screen.getAllByTestId(/^feed-row-/)).toHaveLength(4); // last-known kept
   });
 
-  it("shows the connecting spinner with no events yet, and the teaching empty state once connected", () => {
+  it("shows the connecting spinner with nothing yet, and the teaching empty state once connected", () => {
     renderView({
+      alarms: [],
       entries: [],
-      state: clientState(fleetView([]), { status: "connecting", hasSnapshot: false, events: { entries: [] } }),
+      state: clientState(fleetView([]), {
+        status: "connecting",
+        hasSnapshot: false,
+        events: { entries: [] },
+      }),
     });
     expect(screen.getByText("Connecting to the console gateway…")).toBeTruthy();
 
     cleanup();
-    renderView({ entries: [], state: clientState(fleetView([]), { events: { entries: [] } }) });
-    expect(screen.getByText("No events yet")).toBeTruthy();
+    renderView({ alarms: [], entries: [], state: clientState(fleetView([])) });
+    expect(screen.getByText("No events or alarms yet")).toBeTruthy();
     expect(screen.getByTestId("events-empty")).toBeTruthy();
   });
 
   it("surfaces a protocol-version fatal error", () => {
     renderView({
+      alarms: [],
+      entries: [],
       state: clientState(fleetView([]), {
         status: "disconnected",
         fatalError: "gateway is protocol v4",
         events: { entries: [] },
       }),
-      entries: [],
     });
     expect(screen.getByText("Protocol version mismatch")).toBeTruthy();
   });

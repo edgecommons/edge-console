@@ -77,6 +77,130 @@ export function flattenConfig(value: unknown, prefix = ""): ConfigRow[] {
   return [{ path, display: displayScalar(value), kind: classifyValue(value) }];
 }
 
+/* -----------------------------------------------------------------------------
+ * R4 — the GENUINELY HIERARCHICAL structured view.
+ *
+ * `flattenConfig` (above) produces a FLAT dotted-path list — kept only for the
+ * redaction tally + the "N redacted" note. The Structured TAB now renders the
+ * effective config as a real nested TREE: {@link buildConfigTree} yields nested
+ * object/array container nodes (expand/collapse) down to redaction-classified
+ * leaves, so `messaging → local → credentials → password` is four nested rows, and
+ * `component.instances[]` is an array node whose items are structured object
+ * entries — not a single `messaging.local.credentials.password` string.
+ * --------------------------------------------------------------------------- */
+
+/** A config tree node is a container (object/array) or a value leaf. */
+export type ConfigNodeKind = "object" | "array" | "leaf";
+
+/** One node of the nested Structured tree (see {@link buildConfigTree}). */
+export interface ConfigTreeNode {
+  /** The key (object child) or `[i]` (array item) shown at this level. */
+  label: string;
+  /** Full dotted/indexed path — stable React key + expansion identity. */
+  path: string;
+  kind: ConfigNodeKind;
+  /** Leaf only: the display string (unquoted scalars; `{}`/`[]` for empty containers). */
+  display?: string;
+  /** Leaf only: the redaction classification (see the module's redaction contract). */
+  valueKind?: ValueKind;
+  /** Container only: child nodes in document order. */
+  children?: ConfigTreeNode[];
+  /** Container only: a collapsed-row summary (`2 keys` / `3 items`). */
+  summary?: string;
+}
+
+/** Build one node for `value` under `label`/`path` (recursive). */
+function nodeFor(label: string, path: string, value: unknown): ConfigTreeNode {
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return { label, path, kind: "leaf", display: "{}", valueKind: "value" };
+    const children = keys.map((k) => nodeFor(k, path === "" ? k : `${path}.${k}`, value[k]));
+    return {
+      label,
+      path,
+      kind: "object",
+      children,
+      summary: `${keys.length} ${keys.length === 1 ? "key" : "keys"}`,
+    };
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return { label, path, kind: "leaf", display: "[]", valueKind: "value" };
+    const children = value.map((v, i) => nodeFor(`[${i}]`, `${path}[${i}]`, v));
+    return {
+      label,
+      path,
+      kind: "array",
+      children,
+      summary: `${value.length} ${value.length === 1 ? "item" : "items"}`,
+    };
+  }
+  return { label, path, kind: "leaf", display: displayScalar(value), valueKind: classifyValue(value) };
+}
+
+/**
+ * Build the top-level nodes of the effective config (children of the root
+ * object/array). A scalar root yields a single `(value)` leaf; an empty root
+ * yields `[]` (no rows). Document order is preserved (the publisher's order = the
+ * schema's order — never re-sorted).
+ */
+export function buildConfigTree(value: unknown): ConfigTreeNode[] {
+  if (isPlainObject(value)) {
+    return Object.keys(value).map((k) => nodeFor(k, k, value[k]));
+  }
+  if (Array.isArray(value)) {
+    return value.map((v, i) => nodeFor(`[${i}]`, `[${i}]`, v));
+  }
+  return [nodeFor("(value)", "(value)", value)];
+}
+
+/**
+ * The container paths to expand by default: nested OBJECTS down to `maxDepth`
+ * (0-based), leaving ARRAYS collapsed (the mockup shows `instances[]` folded to a
+ * `2 items` summary the operator opens on demand). So the top of the tree is
+ * visibly nested while long lists stay compact.
+ */
+export function defaultExpandedPaths(
+  nodes: ConfigTreeNode[],
+  maxDepth: number,
+  depth = 0,
+  acc: Set<string> = new Set<string>(),
+): Set<string> {
+  for (const node of nodes) {
+    if (node.kind === "object" && node.children !== undefined && depth < maxDepth) {
+      acc.add(node.path);
+      defaultExpandedPaths(node.children, maxDepth, depth + 1, acc);
+    }
+  }
+  return acc;
+}
+
+/** Canonical JSON (object keys sorted) — the stable input to {@link configHash}. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/**
+ * A stable content fingerprint of the effective config — an 8-hex FNV-1a hash over
+ * canonical JSON (keys sorted, so key ORDER doesn't change it, but any VALUE does).
+ * CONSOLE-COMPUTED and labeled as such: the `cfg` envelope carries no publisher
+ * hash, so this is an honest console-side drift key ("did the effective config
+ * change since I last fetched it?"), never a claimed publisher-supplied digest.
+ */
+export function configHash(value: unknown): string {
+  const text = canonicalJson(value);
+  let h = 0x811c9dc5; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 /** Redaction tallies for the "N values redacted" note. */
 export interface RedactionCounts {
   redacted: number;

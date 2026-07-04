@@ -102,19 +102,46 @@ describe("ConfigReviewView - picker", () => {
   });
 });
 
-describe("ConfigReviewView - the loaded detail", () => {
-  it("renders the structured rows with redaction shown AS redaction, never as a value", () => {
+describe("ConfigReviewView - the loaded detail (hierarchical tree)", () => {
+  it("renders a GENUINELY nested tree (containers + leaves), not a flat dotted list", () => {
     renderView({ entry: loadedEntry() });
-    const rows = screen.getByTestId("config-rows");
-    expect(within(rows).getByText("heartbeat.intervalSecs")).toBeTruthy();
-    expect(within(rows).getByText("5")).toBeTruthy();
-    expect(within(rows).getByText("messaging.local.credentials.password")).toBeTruthy();
-    // The masked treatment + chip — and the sentinel is NOT shown as a plain value.
-    expect(within(rows).getByText("●●●●●●")).toBeTruthy();
-    expect(within(rows).getByText("redacted")).toBeTruthy();
-    // The $secret ref is a labeled pointer.
-    expect(within(rows).getByText("$secret:northbound")).toBeTruthy();
-    expect(within(rows).getByText("secret ref")).toBeTruthy();
+    const tree = screen.getByTestId("config-tree");
+    // Top-level containers/leaves are nodes keyed by their own path, not a flat dotted row.
+    expect(within(tree).getByTestId("config-node-heartbeat")).toBeTruthy();
+    expect(within(tree).getByTestId("config-node-messaging")).toBeTruthy();
+    // Nested objects open two levels deep by default: messaging → local → host is visible.
+    expect(within(tree).getByTestId("config-node-messaging.local")).toBeTruthy();
+    expect(within(tree).getByTestId("config-node-messaging.local.host")).toBeTruthy();
+    expect(within(tree).getByText("emqx.local")).toBeTruthy();
+    // The leaf label is just the key ("intervalSecs"), NOT the old flat "heartbeat.intervalSecs".
+    const heartbeatChild = within(tree).getByTestId("config-node-heartbeat.intervalSecs");
+    expect(heartbeatChild.textContent).toContain("intervalSecs");
+    expect(within(tree).queryByText("heartbeat.intervalSecs")).toBeNull();
+    // The deeper `credentials` object is a COLLAPSED group — password not shown until opened.
+    expect(within(tree).getByTestId("config-node-messaging.local.credentials")).toBeTruthy();
+    expect(within(tree).queryByTestId("config-node-messaging.local.credentials.password")).toBeNull();
+  });
+
+  it("expands a nested container on demand and shows redaction AS redaction there", () => {
+    renderView({ entry: loadedEntry() });
+    fireEvent.click(screen.getByTestId("config-toggle-messaging.local.credentials"));
+    const tree = screen.getByTestId("config-tree");
+    expect(within(tree).getByTestId("config-node-messaging.local.credentials.password")).toBeTruthy();
+    // The masked treatment + chip — the sentinel is NOT shown as a plain value.
+    expect(within(tree).getByText("●●●●●●")).toBeTruthy();
+    expect(within(tree).getByText("redacted")).toBeTruthy();
+    // The $secret ref is a labeled pointer (a top-level leaf, visible without expanding).
+    expect(within(tree).getByText("$secret:northbound")).toBeTruthy();
+    expect(within(tree).getByText("secret ref")).toBeTruthy();
+  });
+
+  it("shows the honest provenance badges: real configHash, source/schema flagged not-announced", () => {
+    renderView({ entry: loadedEntry() });
+    // configHash is real (console-computed) — a stable 8-hex fingerprint.
+    expect(screen.getByTestId("config-hash").textContent).toMatch(/configHash [0-9a-f]{8}/);
+    // source + schema are honestly flagged as not carried by the cfg envelope (not fabricated).
+    expect(screen.getByTestId("config-source-pending").textContent).toContain("not announced");
+    expect(screen.getByTestId("config-schema-pending").textContent).toContain("not announced");
   });
 
   it("announces the redaction count", () => {
@@ -187,6 +214,6 @@ describe("ConfigReviewView - loading / unavailable / empty states", () => {
       }),
     });
     expect(screen.getByText("Gateway connection lost — reconnecting")).toBeTruthy();
-    expect(screen.getByTestId("config-rows")).toBeTruthy();
+    expect(screen.getByTestId("config-tree")).toBeTruthy();
   });
 });

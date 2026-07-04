@@ -134,12 +134,12 @@ describe("App shell", () => {
     // On connect the shell subscribes the global alarm surface (the notifications badge).
     expect(frames().some((f) => f.type === "subscribe-alarms")).toBe(true);
 
-    // Events: mounting the view subscribes the stream on the shared socket.
+    // Events & Alarms: mounting the view subscribes the event stream on the shared socket.
     fireEvent.click(screen.getByRole("link", { name: /Events/ }));
-    expect(screen.getByText("No events yet")).toBeTruthy();
+    expect(screen.getByText("No events or alarms yet")).toBeTruthy();
     expect(frames().at(-1)).toMatchObject({ type: "subscribe-events" });
 
-    // A live backlog renders rows without any refetch.
+    // A live backlog renders the informational event feed without any refetch.
     act(() => {
       const backlog: ServerMessage = {
         type: "events",
@@ -148,17 +148,46 @@ describe("App shell", () => {
           {
             id: 1,
             key: key("gw-01", "opcua-adapter"),
-            severity: "warning",
-            type: "connection-retry",
-            channel: "warning/connection-retry",
-            body: { message: "retrying" },
+            severity: "info",
+            type: "scan-cycle",
+            channel: "info/scan-cycle",
+            body: { message: "cycle complete" },
             receivedAt: T0,
           },
         ],
       };
       sockets[0]!.onmessage?.(JSON.stringify(backlog));
     });
-    expect(screen.getByTestId("event-row-1")).toBeTruthy();
+    expect(screen.getByTestId("feed-row-event:1")).toBeTruthy();
+
+    // A live alarm surfaces as a stateful row; clicking Ack fires the `ack-alarm` frame.
+    act(() => {
+      const alarmFrame: ServerMessage = {
+        type: "alarms",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: {
+          active: [
+            {
+              id: "gw-01/opcua-adapter/main::overtemp",
+              key: key("gw-01", "opcua-adapter"),
+              componentId: "gw-01/opcua-adapter/main",
+              severity: "critical",
+              type: "overtemp",
+              message: "too hot",
+              raisedAt: T0,
+              lastAt: T0,
+              count: 1,
+              acked: false,
+              contained: false,
+            },
+          ],
+          counts: { critical: 1, warning: 0, active: 1, contained: 0, acked: 0 },
+        },
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(alarmFrame));
+    });
+    fireEvent.click(screen.getByTestId("ack-gw-01/opcua-adapter/main::overtemp"));
+    expect(frames().some((f) => f.type === "ack-alarm")).toBe(true);
 
     fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
     expect(screen.getByText("Edge health")).toBeTruthy();

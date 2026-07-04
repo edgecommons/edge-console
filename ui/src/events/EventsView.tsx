@@ -1,23 +1,30 @@
 /**
- * The Events view (slice C6) — the mockup's "Events & alerts" screen scoped to what
- * exists today: the live component `evt` feed (the console-alert and operator-audit
- * rows land with C4's CommandGateway; raise/clear alarm STATE lands with the
- * deferred `events()` facade, so no Ack/State columns ship yet — no dead UI).
+ * The Events & Alarms view (slice R4) — the mockup's "Events & Alerts" screen, now
+ * with the REAL alarm State/Ack lifecycle beside the informational event feed.
  *
- * Layout follows the signed-off hi-fi: page header with a live-tail chip, the
- * three summary tiles (recent count + severity legend · events/min sparkline ·
- * noisiest source), then the newest-first log — severity chip, wall-clock time +
- * age, source identity, event name + body summary, and a per-row expander with the
- * full detail (channel, timestamps, tags, pretty-printed body). Rows LIVE-APPEND
- * as `event` frames fold into the store; filtering by component and/or severity
- * is client-side over the rolling history.
+ * Two data sources, one chronological table (see `alarm-selectors.ts`):
+ *  - ALARMS (stateful, ackable) from the R0 AlarmTracker `alarms` snapshot — each
+ *    carries a lifecycle STATE (Active / Acked / Contained) and, while Active, an
+ *    Ack action wired to the `ack-alarm` frame; the server re-pushes a fresh
+ *    snapshot so the row flips to Acked without a refetch. Containment ("the road
+ *    is down, not the houses") is reused from R0.
+ *  - EVENTS (informational) from the EventStore — the NON-alarming `evt`s; the
+ *    alarming ones are represented as their alarm (no double-listing).
  *
- * `EventsView` is purely presentational (state in, DOM out);
- * `ConnectedEventsView` binds it to the shared {@link FleetClient} and owns the
- * subscribe-on-connect / unsubscribe-on-unmount lifecycle.
+ * Layout follows the signed-off hi-fi: header with a live-tail chip, three summary
+ * tiles (active-alarm rollup · events/min sparkline · noisiest source), the
+ * component/severity filters, then the newest-first merged table — Severity / Time /
+ * Source / Event / State / action, with a per-row expander for the full detail
+ * (alarms: raise/ack audit; events: channel, timestamps, tags, pretty body). The
+ * acked-by/at audit is CONSOLE-side state (this console's own Ack action).
+ *
+ * `EventsView` is purely presentational (state in, DOM out); `ConnectedEventsView`
+ * binds it to the shared {@link FleetClient} and owns the subscribe lifecycle + the
+ * console-side ack audit.
  */
 import { useEffect, useState } from "react";
 import {
+  Button,
   Dropdown,
   InlineLoading,
   InlineNotification,
@@ -32,6 +39,7 @@ import {
   Tile,
 } from "@carbon/react";
 import {
+  Checkmark,
   ChevronDown,
   ChevronRight,
   CircleFilled,
@@ -48,16 +56,14 @@ import { useFleetState, useNowTick } from "../fleet/useFleet";
 import { Sparkline } from "../common/Sparkline";
 import type { EventFilters, SeverityFilter } from "./selectors";
 import {
-  eventSourceIds,
   eventsPerMinute,
-  filterEvents,
   formatClockTime,
   noisiestSource,
   prettyBody,
   severityBucket,
-  severityCounts,
-  summarizeBody,
 } from "./selectors";
+import type { AckAudit, FeedRow } from "./alarm-selectors";
+import { FEED_STATE_LABEL, feedRows, feedSourceIds, filterFeed } from "./alarm-selectors";
 
 /** Severity bucket -> Carbon tag treatment (status colors are semantic, never decorative). */
 const SEVERITY_STYLE: Record<
@@ -72,9 +78,8 @@ const SEVERITY_STYLE: Record<
   other: { label: "Event", tagType: "outline", Icon: CircleFilled },
 };
 
-/** One event's severity chip: bucket colors, RAW token as the label when present. */
-export function SeverityTag({ event }: { event: ConsoleEvent }): React.JSX.Element {
-  const bucket = severityBucket(event);
+/** A severity chip for a given bucket + display label. */
+function SeverityChip({ bucket, label }: { bucket: SeverityFilter; label: string }): React.JSX.Element {
   const style = SEVERITY_STYLE[bucket];
   return (
     <Tag
@@ -83,89 +88,200 @@ export function SeverityTag({ event }: { event: ConsoleEvent }): React.JSX.Eleme
       renderIcon={style.Icon}
       className={`ec-tag ${style.className ?? ""}`.trim()}
     >
-      {event.severity ?? style.label}
+      {label}
     </Tag>
   );
 }
 
-const COLUMNS = ["Severity", "Time", "Source", "Event", ""] as const;
+/** One event's severity chip (kept exported — the Component Detail embeds it). */
+export function SeverityTag({ event }: { event: ConsoleEvent }): React.JSX.Element {
+  const bucket = severityBucket(event);
+  return <SeverityChip bucket={bucket} label={event.severity ?? SEVERITY_STYLE[bucket].label} />;
+}
+
+/** One feed row's severity chip (alarm or event — the raw token is the label when present). */
+function FeedSeverityTag({ row }: { row: FeedRow }): React.JSX.Element {
+  const raw = row.event?.severity ?? row.alarm?.severity;
+  return <SeverityChip bucket={row.severity} label={raw ?? SEVERITY_STYLE[row.severity].label} />;
+}
+
+/** The State column: an alarm's lifecycle chip, or the informational event marker. */
+function FeedStateCell({ row }: { row: FeedRow }): React.JSX.Element {
+  if (row.kind === "event") {
+    return <span className="ec-dim ec-feed-state">{FEED_STATE_LABEL.event}</span>;
+  }
+  if (row.state === "acked") {
+    return (
+      <Tag size="sm" type="green" renderIcon={Checkmark} className="ec-tag">
+        {FEED_STATE_LABEL.acked}
+      </Tag>
+    );
+  }
+  if (row.state === "contained") {
+    return (
+      <Tag size="sm" type="gray" className="ec-tag ec-tag--unreach">
+        {FEED_STATE_LABEL.contained}
+      </Tag>
+    );
+  }
+  return (
+    <Tag size="sm" type="gray" className="ec-tag ec-feed-state--active">
+      <span className="ec-feed-dot" aria-hidden="true" />
+      {FEED_STATE_LABEL.active}
+    </Tag>
+  );
+}
+
+/** The expanded detail — an alarm's raise/ack audit, or an event's full envelope. */
+function FeedDetail({ row, ackAudit }: { row: FeedRow; ackAudit: AckAudit }): React.JSX.Element {
+  if (row.kind === "alarm" && row.alarm !== undefined) {
+    const a = row.alarm;
+    const audit = ackAudit[a.id];
+    return (
+      <>
+        <div className="ec-evt-detail__meta">
+          <span>
+            alarm <span className="ec-mono">{a.id}</span>
+          </span>
+          <span>
+            raised <span className="ec-mono">{formatClockTime(a.raisedAt)}</span>
+          </span>
+          <span>
+            last raise <span className="ec-mono">{formatClockTime(a.lastAt)}</span>
+          </span>
+          <span>
+            raises <span className="ec-mono">{a.count}</span>
+          </span>
+          {a.channel !== undefined && (
+            <span>
+              channel <span className="ec-mono">evt/{a.channel}</span>
+            </span>
+          )}
+          {a.contained && <span className="ec-overdue">contained under an UNREACHABLE device</span>}
+          {a.acked && (
+            <span data-testid={`ack-audit-${a.id}`}>
+              acked
+              {audit !== undefined
+                ? ` ${formatClockTime(audit.at)}${audit.by !== undefined ? ` by ${audit.by}` : ""}`
+                : " (by another session)"}
+            </span>
+          )}
+        </div>
+        {a.message !== undefined && a.message !== "" && (
+          <pre className="ec-json-pane">{a.message}</pre>
+        )}
+      </>
+    );
+  }
+  const e = row.event;
+  if (e === undefined) return <></>;
+  return (
+    <>
+      <div className="ec-evt-detail__meta">
+        <span>
+          source <span className="ec-mono">{componentKeyId(e.key)}</span>
+        </span>
+        {e.channel !== undefined && (
+          <span>
+            channel <span className="ec-mono">evt/{e.channel}</span>
+          </span>
+        )}
+        {e.sourceTimestamp !== undefined && (
+          <span>
+            publisher timestamp <span className="ec-mono">{e.sourceTimestamp}</span>
+          </span>
+        )}
+        {e.tags !== undefined && Object.keys(e.tags).length > 0 && (
+          <span>
+            tags <span className="ec-mono">{JSON.stringify(e.tags)}</span>
+          </span>
+        )}
+      </div>
+      <pre className="ec-json-pane">{prettyBody(e.body)}</pre>
+    </>
+  );
+}
+
+const COLUMNS = ["Severity", "Time", "Source", "Event", "State", ""] as const;
 
 /** All-items sentinel for the two filter dropdowns. */
 const ALL = "__all__";
 
-function EventRow({
-  event,
+function FeedRowView({
+  row,
   nowServerMs,
   expanded,
+  ackAudit,
   onToggle,
+  onAck,
 }: {
-  event: ConsoleEvent;
+  row: FeedRow;
   nowServerMs: number;
   expanded: boolean;
-  onToggle: (id: number) => void;
+  ackAudit: AckAudit;
+  onToggle: (id: string) => void;
+  onAck: (alarmId: string) => void;
 }): React.JSX.Element {
   return (
     <>
-      <TableRow data-testid={`event-row-${event.id}`}>
+      <TableRow data-testid={`feed-row-${row.id}`} className={row.kind === "alarm" ? "ec-feed-row--alarm" : undefined}>
         <TableCell>
-          <SeverityTag event={event} />
+          <FeedSeverityTag row={row} />
         </TableCell>
         <TableCell>
-          <span className="ec-mono ec-tnum">{formatClockTime(event.receivedAt)}</span>{" "}
+          <span className="ec-mono ec-tnum">{formatClockTime(row.at)}</span>{" "}
           <span className="ec-dim ec-tnum ec-evt-age">
-            {formatDurationMs(Math.max(0, nowServerMs - event.receivedAt))} ago
+            {formatDurationMs(Math.max(0, nowServerMs - row.at))} ago
           </span>
         </TableCell>
         <TableCell>
-          <span className="ec-pri">{event.key.component}</span>
-          {event.key.instance !== "main" && (
+          <span className="ec-pri">{row.key.component}</span>
+          {row.key.instance !== "main" && (
             <Tag size="sm" type="outline" className="ec-instance">
-              {event.key.instance}
+              {row.key.instance}
             </Tag>
           )}
-          <span className="ec-dim ec-mono ec-evt-device">{event.key.device}</span>
+          <span className="ec-dim ec-mono ec-evt-device">{row.key.device}</span>
         </TableCell>
         <TableCell>
-          <span className="ec-pri">{event.type}</span>
-          <span className="ec-dim ec-evt-summary">{summarizeBody(event.body)}</span>
+          <span className="ec-pri">{row.title}</span>
+          {row.kind === "alarm" && row.count !== undefined && row.count > 1 && (
+            <Tag size="sm" type="gray" className="ec-tag ec-feed-count">
+              ×{row.count}
+            </Tag>
+          )}
+          <span className="ec-dim ec-evt-summary">{row.summary}</span>
         </TableCell>
-        <TableCell className="ec-evt-expandcell">
+        <TableCell>
+          <FeedStateCell row={row} />
+        </TableCell>
+        <TableCell className="ec-feed-actioncell">
+          {row.ackable && row.alarm !== undefined && (
+            <Button
+              kind="ghost"
+              size="sm"
+              data-testid={`ack-${row.alarm.id}`}
+              onClick={() => onAck(row.alarm!.id)}
+            >
+              Ack
+            </Button>
+          )}
           <button
             type="button"
             className="ec-evt-expand"
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Collapse" : "Expand"} event ${event.id} detail`}
-            data-testid={`event-expand-${event.id}`}
-            onClick={() => onToggle(event.id)}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${row.id} detail`}
+            data-testid={`feed-expand-${row.id}`}
+            onClick={() => onToggle(row.id)}
           >
             {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </button>
         </TableCell>
       </TableRow>
       {expanded && (
-        <TableRow className="ec-evt-detail" data-testid={`event-detail-${event.id}`}>
+        <TableRow className="ec-evt-detail" data-testid={`feed-detail-${row.id}`}>
           <TableCell colSpan={COLUMNS.length}>
-            <div className="ec-evt-detail__meta">
-              <span>
-                source <span className="ec-mono">{componentKeyId(event.key)}</span>
-              </span>
-              {event.channel !== undefined && (
-                <span>
-                  channel <span className="ec-mono">evt/{event.channel}</span>
-                </span>
-              )}
-              {event.sourceTimestamp !== undefined && (
-                <span>
-                  publisher timestamp <span className="ec-mono">{event.sourceTimestamp}</span>
-                </span>
-              )}
-              {event.tags !== undefined && Object.keys(event.tags).length > 0 && (
-                <span>
-                  tags <span className="ec-mono">{JSON.stringify(event.tags)}</span>
-                </span>
-              )}
-            </div>
-            <pre className="ec-json-pane">{prettyBody(event.body)}</pre>
+            <FeedDetail row={row} ackAudit={ackAudit} />
           </TableCell>
         </TableRow>
       )}
@@ -179,6 +295,10 @@ export interface EventsViewProps {
   now: number;
   filters: EventFilters;
   onFiltersChange: (filters: EventFilters) => void;
+  /** Acknowledge an active alarm (fires the `ack-alarm` frame). */
+  onAck: (alarmId: string) => void;
+  /** Console-side ack audit (who/when this console acked) — display only. */
+  ackAudit: AckAudit;
 }
 
 export function EventsView({
@@ -186,11 +306,13 @@ export function EventsView({
   now,
   filters,
   onFiltersChange,
+  onAck,
+  ackAudit,
 }: EventsViewProps): React.JSX.Element {
-  const { events, status, fatalError } = state;
+  const { events, alarms, status, fatalError } = state;
   const nowServerMs = now - state.fleet.clockOffsetMs;
-  const [expandedIds, setExpandedIds] = useState<ReadonlySet<number>>(new Set());
-  const toggle = (id: number) =>
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
     setExpandedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -198,22 +320,22 @@ export function EventsView({
       return next;
     });
 
-  const entries = events.entries;
-  const filtered = filterEvents(entries, filters);
-  const counts = severityCounts(entries);
-  const noisiest = noisiestSource(entries, nowServerMs);
-  const perMinute = eventsPerMinute(entries, nowServerMs);
-  const sources = eventSourceIds(entries);
+  const rows = feedRows(alarms.active, events.entries);
+  const filtered = filterFeed(rows, filters);
+  const sources = feedSourceIds(rows);
+  const counts = alarms.counts;
+  const noisiest = noisiestSource(events.entries, nowServerMs);
+  const perMinute = eventsPerMinute(events.entries, nowServerMs);
 
   const live = status === "connected";
 
   return (
     <div className="ec-events">
-      <h1 className="ec-ph">Events</h1>
+      <h1 className="ec-ph">Events &amp; Alarms</h1>
       <div className="ec-ph-sub">
         <span>
-          Component events — the UNS <code>evt</code> class, rolling recent history,
-          newest first.
+          Console alarms (stateful, ackable) and the informational component{" "}
+          <code>evt</code> feed — newest first.
         </span>
         <Tag
           size="sm"
@@ -234,27 +356,28 @@ export function EventsView({
           subtitle={`${fatalError} — reload the page to pick up the current console UI.`}
         />
       )}
-      {fatalError === undefined && entries.length > 0 && !live && (
+      {fatalError === undefined && rows.length > 0 && !live && (
         <InlineNotification
           kind="warning"
           lowContrast
           hideCloseButton
           title="Gateway connection lost — reconnecting"
-          subtitle="Showing the last-received events; the stream resumes automatically."
+          subtitle="Showing the last-received alarms and events; the stream resumes automatically."
         />
       )}
 
-      {entries.length === 0 ? (
+      {rows.length === 0 ? (
         <Tile className="ec-empty" data-testid="events-empty">
           {fatalError === undefined && (status === "connecting" || status === "reconnecting") ? (
             <InlineLoading description="Connecting to the console gateway…" />
           ) : (
             <>
-              <h3>No events yet</h3>
+              <h3>No events or alarms yet</h3>
               <p className="ec-dim">
-                Events appear here the moment any component publishes on its{" "}
-                <code>evt</code> class (<span className="ec-mono">evt/{"{severity}"}/{"{type}"}</span>).
-                The console keeps a rolling recent history — nothing is polled.
+                Alarms are raised from alarming-severity <code>evt</code>s (critical / error /
+                warning) and cleared by a normal-severity follow-up; the feed also carries the
+                informational <code>evt</code>s. Nothing is polled — rows land the moment a
+                component publishes.
               </p>
             </>
           )}
@@ -263,22 +386,14 @@ export function EventsView({
         <>
           <div className="ec-tiles ec-tiles--3">
             <Tile className="ec-tile">
-              <div className="ec-tile__label">Recent events</div>
-              <div className="ec-tile__num">{entries.length}</div>
-              <div className="ec-legend">
-                {(["critical", "error", "warning", "info"] as const).map(
-                  (bucket) =>
-                    counts[bucket] > 0 && (
-                      <Tag
-                        key={bucket}
-                        size="sm"
-                        type={SEVERITY_STYLE[bucket].tagType ?? "gray"}
-                        className={`ec-tag ${SEVERITY_STYLE[bucket].className ?? ""}`.trim()}
-                      >
-                        {counts[bucket]} {bucket}
-                      </Tag>
-                    ),
-                )}
+              <div className="ec-tile__label">Active alarms</div>
+              <div className="ec-tile__num" data-testid="active-alarm-count">
+                {counts.active}
+              </div>
+              <div className="ec-tile__foot">
+                {counts.critical} crit · {counts.warning} warn
+                {counts.contained > 0 ? ` · +${counts.contained} contained` : ""}
+                {counts.acked > 0 ? ` · ${counts.acked} acked` : ""}
               </div>
             </Tile>
             <Tile className="ec-tile">
@@ -345,22 +460,22 @@ export function EventsView({
                 })
               }
             />
-            {filtered.length !== entries.length && (
+            {filtered.length !== rows.length && (
               <span className="ec-dim ec-filters__count" data-testid="filter-count">
-                {filtered.length} of {entries.length} events
+                {filtered.length} of {rows.length} rows
               </span>
             )}
           </div>
 
           {filtered.length === 0 ? (
             <Tile className="ec-empty" data-testid="events-filtered-empty">
-              <h3>No events match the filters</h3>
-              <p className="ec-dim">Widen the component or severity filter to see the rest of the history.</p>
+              <h3>No rows match the filters</h3>
+              <p className="ec-dim">Widen the component or severity filter to see the rest.</p>
             </Tile>
           ) : (
             <TableContainer className="ec-fleet">
               <div className="ec-tablewrap">
-                <Table size="lg" aria-label="Recent component events, newest first">
+                <Table size="lg" aria-label="Alarms and events, newest first">
                   <TableHead>
                     <TableRow>
                       {COLUMNS.map((col, i) => (
@@ -369,13 +484,15 @@ export function EventsView({
                     </TableRow>
                   </TableHead>
                   <TableBody data-testid="events-table">
-                    {filtered.map((event) => (
-                      <EventRow
-                        key={event.id}
-                        event={event}
+                    {filtered.map((row) => (
+                      <FeedRowView
+                        key={row.id}
+                        row={row}
                         nowServerMs={nowServerMs}
-                        expanded={expandedIds.has(event.id)}
+                        expanded={expandedIds.has(row.id)}
+                        ackAudit={ackAudit}
                         onToggle={toggle}
+                        onAck={onAck}
                       />
                     ))}
                   </TableBody>
@@ -390,22 +507,41 @@ export function EventsView({
 }
 
 /**
- * The live container: subscribes the event stream while mounted. Server-side
- * interest dies with the connection, so the subscribe effect keys on the
- * connection status — that is the whole reconnect story (the fresh backlog on
- * re-subscribe self-heals the log). Unmounting unsubscribes (the shared socket
- * stays up for the other views).
+ * The live container: subscribes the event stream while mounted (the alarm surface is
+ * subscribed globally by the app shell — the notifications badge is fleet-wide). The
+ * subscribe effect keys on the connection status (the whole reconnect story — a fresh
+ * backlog on re-subscribe self-heals the log). Ack fires the `ack-alarm` frame AND
+ * records the console-side who/when audit (this console's own action).
  */
 export function ConnectedEventsView({ client }: { client: FleetClient }): React.JSX.Element {
   const state = useFleetState(client);
   const now = useNowTick(1000);
   const [filters, setFilters] = useState<EventFilters>({});
+  const [ackAudit, setAckAudit] = useState<AckAudit>({});
   const status = state.status;
+  const role = state.role;
 
   useEffect(() => {
     if (status === "connected") client.subscribeEvents();
   }, [client, status]);
   useEffect(() => () => client.unsubscribeEvents(), [client]);
 
-  return <EventsView state={state} now={now} filters={filters} onFiltersChange={setFilters} />;
+  const onAck = (alarmId: string) => {
+    client.ackAlarm(alarmId);
+    setAckAudit((prev) => ({
+      ...prev,
+      [alarmId]: { at: Date.now(), ...(role !== undefined ? { by: role } : {}) },
+    }));
+  };
+
+  return (
+    <EventsView
+      state={state}
+      now={now}
+      filters={filters}
+      onFiltersChange={setFilters}
+      onAck={onAck}
+      ackAudit={ackAudit}
+    />
+  );
 }

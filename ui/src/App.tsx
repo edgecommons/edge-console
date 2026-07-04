@@ -136,7 +136,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               isActive={route === "events"}
               onClick={navigate("events")}
             >
-              Events
+              Events &amp; Alarms
             </SideNavLink>
           </SideNavItems>
         </SideNav>

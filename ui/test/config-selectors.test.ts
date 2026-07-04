@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildConfigTree,
   classifyValue,
+  configHash,
+  defaultExpandedPaths,
   effectiveConfig,
   flattenConfig,
   jsonTokens,
@@ -122,5 +125,104 @@ describe("jsonTokens", () => {
   it("handles scalar roots", () => {
     expect(jsonTokens(7)).toEqual([{ text: "7", kind: "number" }]);
     expect(jsonTokens("***")).toEqual([{ text: '"***"', kind: "redacted" }]);
+  });
+});
+
+describe("buildConfigTree - the genuinely hierarchical tree", () => {
+  it("builds NESTED container nodes down to classified leaves (not a flat dotted list)", () => {
+    const tree = buildConfigTree({
+      heartbeat: { intervalSecs: 5 },
+      messaging: { local: { host: "emqx.local", credentials: { password: "***" } } },
+      apiKey: "$secret:x",
+    });
+    // Top level: a heartbeat OBJECT node, a messaging OBJECT node, an apiKey LEAF.
+    expect(tree.map((n) => ({ label: n.label, path: n.path, kind: n.kind }))).toEqual([
+      { label: "heartbeat", path: "heartbeat", kind: "object" },
+      { label: "messaging", path: "messaging", kind: "object" },
+      { label: "apiKey", path: "apiKey", kind: "leaf" },
+    ]);
+    // The heartbeat container nests its own leaf, keyed by the child key alone.
+    const heartbeat = tree[0]!;
+    expect(heartbeat.summary).toBe("1 key");
+    expect(heartbeat.children).toEqual([
+      { label: "intervalSecs", path: "heartbeat.intervalSecs", kind: "leaf", display: "5", valueKind: "value" },
+    ]);
+    // The redaction reaches the DEEP leaf, path-addressed, classified redacted.
+    // messaging → local → credentials → password (four nested levels).
+    const password = tree[1]!.children![0]!.children![1]!.children![0]!;
+    expect(password).toEqual({
+      label: "password",
+      path: "messaging.local.credentials.password",
+      kind: "leaf",
+      display: "***",
+      valueKind: "redacted",
+    });
+    // The secret-ref leaf is a labeled pointer.
+    expect(tree[2]).toEqual({
+      label: "apiKey",
+      path: "apiKey",
+      kind: "leaf",
+      display: "$secret:x",
+      valueKind: "secret-ref",
+    });
+  });
+
+  it("models arrays as indexed container nodes (component.instances[] as structured entries)", () => {
+    const tree = buildConfigTree({
+      instances: [{ id: "main" }, { id: "backup" }],
+      tags: [],
+      note: {},
+    });
+    const instances = tree[0]!;
+    expect(instances.kind).toBe("array");
+    expect(instances.summary).toBe("2 items");
+    expect(instances.children!.map((c) => c.label)).toEqual(["[0]", "[1]"]);
+    expect(instances.children![0]!.path).toBe("instances[0]");
+    expect(instances.children![0]!.children![0]).toEqual({
+      label: "id",
+      path: "instances[0].id",
+      kind: "leaf",
+      display: "main",
+      valueKind: "value",
+    });
+    // Empty containers are single leaf rows ([] / {}).
+    expect(tree[1]).toMatchObject({ label: "tags", kind: "leaf", display: "[]" });
+    expect(tree[2]).toMatchObject({ label: "note", kind: "leaf", display: "{}" });
+  });
+
+  it("a scalar root is a single (value) leaf; an empty root has no nodes", () => {
+    expect(buildConfigTree("bare")).toEqual([
+      { label: "(value)", path: "(value)", kind: "leaf", display: "bare", valueKind: "value" },
+    ]);
+    expect(buildConfigTree({})).toEqual([]);
+    expect(buildConfigTree([])).toEqual([]);
+  });
+});
+
+describe("defaultExpandedPaths", () => {
+  it("expands nested OBJECTS to the depth cap but leaves ARRAYS folded", () => {
+    const tree = buildConfigTree({
+      messaging: { local: { host: "h", credentials: { password: "***" } } },
+      instances: [{ id: "main" }],
+    });
+    const expanded = defaultExpandedPaths(tree, 2);
+    // Depth 0 + 1 objects open; the depth-2 `credentials` object stays folded.
+    expect(expanded.has("messaging")).toBe(true);
+    expect(expanded.has("messaging.local")).toBe(true);
+    expect(expanded.has("messaging.local.credentials")).toBe(false);
+    // Arrays are never auto-expanded (the mockup's collapsed instances[]).
+    expect(expanded.has("instances")).toBe(false);
+  });
+});
+
+describe("configHash - console-computed content fingerprint", () => {
+  it("is stable per content and independent of key order", () => {
+    const a = configHash({ x: 1, y: { z: 2 } });
+    expect(a).toMatch(/^[0-9a-f]{8}$/);
+    expect(configHash({ y: { z: 2 }, x: 1 })).toBe(a); // key order doesn't change it
+  });
+  it("changes when any value changes", () => {
+    expect(configHash({ x: 1 })).not.toBe(configHash({ x: 2 }));
+    expect(configHash({ x: "***" })).not.toBe(configHash({ x: "value" }));
   });
 });
