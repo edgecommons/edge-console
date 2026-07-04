@@ -971,6 +971,40 @@
   gap: 0.5rem;
 }
 
+/* ============ signals screen (R5 — mockup #screen-signals) ============ */
+// The data-plane browser is a lighter table than the 9-col Overview; let it use the
+// full width and only scroll on genuinely narrow viewports.
+.ec-signals-tablewrap table {
+  min-width: 44rem;
+}
+// The owning component, shown dim beside the "{device} / {signal}" primary label.
+.ec-signal-owner {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+}
+// The trend sparkline cell: vertically centered, fixed height so rows stay even.
+.ec-signal-trend {
+  .ec-spark {
+    display: block;
+  }
+}
+.ec-signal-latest .ec-tnum {
+  font-size: 0.9375rem;
+}
+.ec-signal-actioncell {
+  text-align: right;
+  white-space: nowrap;
+}
+// The honest "pending" note in the filter row (units / name / limits not on the data body).
+.ec-signals__pending {
+  margin-left: auto;
+  font-style: italic;
+
+  code {
+    font-style: normal;
+  }
+}
+
 /* ============ components screen (R2 — mockup #screen-components) ============ */
 .ec-components__grid {
   display: grid;

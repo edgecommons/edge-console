@@ -13,6 +13,8 @@ import type {
   FleetDelta,
   FleetSnapshot,
   RuntimeAttributes,
+  SignalPoint,
+  SignalSeriesSnapshot,
   WireHierLevel,
 } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
@@ -126,6 +128,39 @@ export function runtimeAttrs(
   return { key: k, receivedAt: T0, ...overrides };
 }
 
+/** A bounded recent series of signal points (ascending time), values + optional quality. */
+export function signalPoints(
+  values: number[],
+  opts: { quality?: string; startAt?: number; stepMs?: number } = {},
+): SignalPoint[] {
+  const { quality, startAt = T0, stepMs = 1000 } = opts;
+  return values.map((value, i) => ({
+    at: startAt + i * stepMs,
+    value,
+    ...(quality !== undefined ? { quality } : {}),
+  }));
+}
+
+/** A {@link SignalSeriesSnapshot} for one `(component, signal)` series (sensible defaults). */
+export function signalSeries(
+  k: ComponentKey,
+  signal: string,
+  overrides: Partial<SignalSeriesSnapshot> = {},
+): SignalSeriesSnapshot {
+  const points = overrides.points ?? signalPoints([1, 2, 3]);
+  const last = points[points.length - 1];
+  return {
+    key: k,
+    signal,
+    latest: overrides.latest ?? last?.value,
+    ...(overrides.quality !== undefined ? { quality: overrides.quality } : last?.quality !== undefined ? { quality: last.quality } : {}),
+    receivedAt: overrides.receivedAt ?? last?.at ?? T0,
+    ...(overrides.sourceTimestamp !== undefined ? { sourceTimestamp: overrides.sourceTimestamp } : {}),
+    points,
+    ...overrides,
+  };
+}
+
 /** An {@link AttributesView} keyed by component id, from a list of attributes. */
 export function attributesView(list: RuntimeAttributes[]): AttributesView {
   const byId: Record<string, RuntimeAttributes> = {};
@@ -150,6 +185,7 @@ export function clientState(
     events: { entries: [] },
     alarms: { active: [], counts: EMPTY_ALARM_COUNTS },
     attributes: { byId: {} },
+    signals: { series: [] },
     commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,

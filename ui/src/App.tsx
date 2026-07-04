@@ -22,7 +22,7 @@ import {
   SideNavLink,
   Theme,
 } from "@carbon/react";
-import { Activity, Catalog, ChartNetwork, Dashboard, TreeView } from "@carbon/react/icons";
+import { Activity, Catalog, ChartLine, ChartNetwork, Dashboard, TreeView } from "@carbon/react/icons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { defaultWsUrl } from "./config";
 import { FleetClient } from "./fleet/client";
@@ -33,13 +33,14 @@ import { ConnectedComponentDetailView } from "./components/ComponentDetailView";
 import { ConnectedConfigReviewView } from "./configreview/ConfigReviewView";
 import { ConnectedTopologyView } from "./topology/TopologyView";
 import { ConnectedEventsView } from "./events/EventsView";
+import { ConnectedSignalsView, scopeIdFor } from "./signals/SignalsView";
 import { AppBar } from "./shell/AppBar";
 import { SearchContext } from "./shell/search";
 import type { SearchState } from "./shell/search";
 import { useTheme } from "./shell/theme";
 
 /** The shell's view routes (one per shipped screen; `detail` is the Components sub-screen). */
-type Route = "overview" | "components" | "detail" | "topology" | "config" | "events";
+type Route = "overview" | "components" | "detail" | "topology" | "config" | "events" | "signals";
 
 export default function App({ client }: { client?: FleetClient }): React.JSX.Element {
   const fleetClient = useMemo(() => client ?? new FleetClient({ url: defaultWsUrl() }), [client]);
@@ -54,6 +55,9 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   // component the Configuration screen should open pre-selected (set by a detail "View config").
   const [detailKey, setDetailKey] = useState<ComponentKey | undefined>(undefined);
   const [configInitial, setConfigInitial] = useState<ComponentKey | undefined>(undefined);
+  // The component the Signals screen should open scoped to (set by a Component-Detail
+  // "Signals" deep-link); cleared when the side rail opens Signals fleet-wide.
+  const [signalsScope, setSignalsScope] = useState<ComponentKey | undefined>(undefined);
 
   const openDetail = (key: ComponentKey) => {
     setDetailKey(key);
@@ -62,6 +66,10 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const viewConfig = (key: ComponentKey) => {
     setConfigInitial(key);
     setRoute("config");
+  };
+  const openSignals = (key: ComponentKey) => {
+    setSignalsScope(key);
+    setRoute("signals");
   };
 
   // The notifications badge + the Overview columns are global — subscribe the alarm and
@@ -79,6 +87,8 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
 
   const navigate = (to: Route) => (e: React.MouseEvent) => {
     e.preventDefault();
+    // The side rail opens Signals fleet-wide (a Component-Detail deep-link scopes it instead).
+    if (to === "signals") setSignalsScope(undefined);
     setRoute(to);
   };
 
@@ -138,6 +148,14 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
             >
               Events &amp; Alarms
             </SideNavLink>
+            <SideNavLink
+              renderIcon={ChartLine}
+              href="#"
+              isActive={route === "signals"}
+              onClick={navigate("signals")}
+            >
+              Signals
+            </SideNavLink>
           </SideNavItems>
         </SideNav>
         <Content id="main-content" className="ec-content">
@@ -153,6 +171,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               onOpenOverview={() => setRoute("overview")}
               onViewConfig={() => viewConfig(detailKey)}
               onOpenEvents={() => setRoute("events")}
+              onOpenSignals={() => openSignals(detailKey)}
             />
           ) : route === "topology" ? (
             <ConnectedTopologyView client={fleetClient} onOpenDetail={openDetail} />
@@ -160,6 +179,11 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
             <ConnectedConfigReviewView
               client={fleetClient}
               {...(configInitial !== undefined ? { initialSelected: configInitial } : {})}
+            />
+          ) : route === "signals" ? (
+            <ConnectedSignalsView
+              client={fleetClient}
+              {...(signalsScope !== undefined ? { initialComponentId: scopeIdFor(signalsScope) } : {})}
             />
           ) : (
             <ConnectedEventsView client={fleetClient} />

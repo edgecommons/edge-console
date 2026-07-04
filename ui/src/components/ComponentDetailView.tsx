@@ -416,6 +416,8 @@ export interface ComponentDetailViewProps {
   onViewConfig?: () => void;
   /** To the Events & Alarms screen (the events tab link). */
   onOpenEvents?: () => void;
+  /** To the Signals screen, scoped to this component (the header "Signals" deep-link). */
+  onOpenSignals?: () => void;
   /** Fire a C4 command (the header Ping / Query status); defaults to a no-op. */
   onInvoke?: InvokeCommand;
 }
@@ -428,6 +430,7 @@ export function ComponentDetailView({
   onOpenOverview,
   onViewConfig,
   onOpenEvents,
+  onOpenSignals,
   onInvoke = NO_INVOKE,
 }: ComponentDetailViewProps): React.JSX.Element {
   const { fleet, attributes, alarms } = state;
@@ -502,6 +505,14 @@ export function ComponentDetailView({
           </Button>
           <Button kind="ghost" size="sm" onClick={() => onInvoke(comp.key, "get-configuration")}>
             Query status
+          </Button>
+          <Button
+            kind="ghost"
+            size="sm"
+            data-testid="detail-open-signals"
+            onClick={() => onOpenSignals?.()}
+          >
+            Signals
           </Button>
           <Button kind="secondary" size="sm" data-testid="detail-view-config" onClick={() => onViewConfig?.()}>
             View config
@@ -582,6 +593,7 @@ export function ConnectedComponentDetailView({
   onOpenOverview,
   onViewConfig,
   onOpenEvents,
+  onOpenSignals,
 }: {
   client: FleetClient;
   detailKey: ComponentKey;
@@ -589,6 +601,7 @@ export function ConnectedComponentDetailView({
   onOpenOverview?: () => void;
   onViewConfig?: () => void;
   onOpenEvents?: () => void;
+  onOpenSignals?: () => void;
 }): React.JSX.Element {
   const state = useFleetState(client);
   const now = useNowTick(1000);
@@ -615,6 +628,7 @@ export function ConnectedComponentDetailView({
       {...(onOpenOverview !== undefined ? { onOpenOverview } : {})}
       {...(onViewConfig !== undefined ? { onViewConfig } : {})}
       {...(onOpenEvents !== undefined ? { onOpenEvents } : {})}
+      {...(onOpenSignals !== undefined ? { onOpenSignals } : {})}
     />
   );
 }

@@ -282,6 +282,15 @@ function fakeComponentRequest(topic) {
         resolve(reply({ ok: true, result: { config: demoConfig(component) } }));
       } else if (verb === "reload-config") {
         resolve(reply({ ok: true, result: { reloaded: true } }));
+      } else if (verb === "sb.read") {
+        // The Signals-screen "Read": an on-demand southbound re-read of one signal. The demo
+        // synthesizes a fresh reading (a real component would return its live value + quality).
+        resolve(
+          reply({
+            ok: true,
+            result: { value: Math.round(Math.random() * 1000) / 10, quality: "GOOD", at: new Date().toISOString() },
+          }),
+        );
       } else {
         resolve(
           reply({
@@ -426,12 +435,19 @@ function feed() {
   }));
 
   // ---- R0: DATA-plane signals (data/{signal}, {value, quality}) — the Signals screen (R5).
-  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Channel1.Device1.Temp_01",
-    wave(72, 6, 0), "GOOD"));
-  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Channel1.Device1.Pressure",
-    wave(4.2, 0.4, 2), tick % 11 === 0 ? "UNCERTAIN" : "GOOD"));
-  ingest(dataEvent(SITE, "press-gw-01", "modbus-adapter", "holding[0].flow_rate",
-    wave(310, 25, 1), "GOOD"));
+  // Several components across TWO devices publish moving series with real quality, so the
+  // browser groups by component and the trend sparklines visibly move tick to tick.
+  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Temp_01", wave(72, 6, 0), "GOOD"));
+  // Pressure carries an honest UNCERTAIN (a wobbly transducer) — its value still moves, so the
+  // sparkline moves under a non-GOOD quality (matches the mockup's UNCERTAIN row).
+  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Pressure", wave(4.1, 0.4, 2), "UNCERTAIN"));
+  ingest(dataEvent(SITE, "press-gw-01", "modbus-adapter", "flow_rate", wave(310, 25, 1), "GOOD"));
+  // A second device with a live GOOD signal (proves grouping/scoping by component).
+  ingest(dataEvent(SITE, "pack-gw-01", "modbus-adapter", "conveyor_speed", wave(1.5, 0.3, 4), "GOOD"));
+  // A BAD signal whose sensor died: a value-less {value:null, quality:"BAD"} sample published
+  // ONCE, so it ages (the mockup's stale, dashed-out BAD Flow_A). Never re-published — the row
+  // shows "—" / BAD with a growing Age, honest about the last-known state.
+  if (tick === 1) ingest(dataEvent(SITE, "pack-gw-01", "opcua-adapter", "Flow_A", null, "BAD"));
 
   // ---- R0: a persistent CRITICAL alarm from the first tick (so the notifications badge
   //          is populated immediately), plus a visible raise→clear lifecycle below.

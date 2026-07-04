@@ -41,6 +41,8 @@ import { AlarmStore } from "./alarm-store";
 import type { AlarmsView } from "./alarm-store";
 import { AttributeStore } from "./attribute-store";
 import type { AttributesView } from "./attribute-store";
+import { SignalStore } from "./signal-store";
+import type { SignalsView } from "./signal-store";
 import { CommandStore } from "./command-store";
 import type { CommandView } from "./command-store";
 
@@ -117,6 +119,8 @@ export interface ClientState {
   alarms: AlarmsView;
   /** The R0 runtime-attribute projection per component (the Overview CPU/Memory/Conn columns). */
   attributes: AttributesView;
+  /** The R0 DATA-plane signal surface (latest value + quality + bounded series per series) — the Signals screen (R5). */
+  signals: SignalsView;
   /** The console's own bus-ingest throughput (msgs/sec, from the heartbeat) — the Overview "Edge bus" tile. Undefined until a heartbeat carries it. */
   busMsgsPerSec?: number;
   /** The console's own recent per-second bus rates (from the heartbeat) — the "Edge bus" tile sparkline. */
@@ -140,6 +144,8 @@ export class FleetClient {
   readonly alarmStore: AlarmStore;
   /** The R0 runtime-attribute fold core (pure; this client is its IO shell). */
   readonly attributeStore: AttributeStore;
+  /** The R0 DATA-plane signal fold core (pure; this client is its IO shell). */
+  readonly signalStore: SignalStore;
   /** The C4 command fold core (pure; this client is its IO shell). */
   readonly commandStore: CommandStore;
 
@@ -185,6 +191,7 @@ export class FleetClient {
     this.eventLog = new EventLogStore();
     this.alarmStore = new AlarmStore();
     this.attributeStore = new AttributeStore();
+    this.signalStore = new SignalStore();
     this.commandStore = new CommandStore();
   }
 
@@ -320,6 +327,23 @@ export class FleetClient {
   }
 
   /**
+   * Subscribe to the DATA-plane signal surface (R0 `subscribe-signals`): one replace
+   * `signals` snapshot (every known `(component, signal)` series — latest value + quality
+   * + bounded recent points) arrives immediately, then each fresh sample as a `signal`
+   * push. The Signals screen subscribes while mounted (the C5/C6 interest pattern);
+   * server-side interest is per-connection, so the view re-subscribes whenever the
+   * connection comes (back) up — the same reconnect story as the others.
+   */
+  subscribeSignals(): void {
+    this.sendFrame({ type: "subscribe-signals", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /** Stop the signal stream (e.g. the Signals view unmounted). Idempotent. */
+  unsubscribeSignals(): void {
+    this.sendFrame({ type: "unsubscribe-signals", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
    * Acknowledge an active alarm (R0 `ack-alarm`) — console-side state that does not
    * clear the alarm. No direct reply: the tracker re-pushes a fresh `alarms` snapshot
    * (with the alarm now `acked`) to every subscribed client.
@@ -387,6 +411,7 @@ export class FleetClient {
     const events = this.eventLog.view();
     const alarms = this.alarmStore.view();
     const attributes = this.attributeStore.view();
+    const signals = this.signalStore.view();
     const commands = this.commandStore.view();
     if (
       this.stateCache === undefined ||
@@ -395,6 +420,7 @@ export class FleetClient {
       this.stateCache.events !== events ||
       this.stateCache.alarms !== alarms ||
       this.stateCache.attributes !== attributes ||
+      this.stateCache.signals !== signals ||
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
       this.stateCache.role !== this.role ||
@@ -412,6 +438,7 @@ export class FleetClient {
         events,
         alarms,
         attributes,
+        signals,
         ...(this.busMsgsPerSec !== undefined ? { busMsgsPerSec: this.busMsgsPerSec } : {}),
         ...(this.busRecentRates !== undefined ? { busRecentRates: this.busRecentRates } : {}),
         ...(this.self !== undefined ? { self: this.self } : {}),
@@ -543,6 +570,16 @@ export class FleetClient {
         return;
       case "attribute":
         this.attributeStore.applyUpdates(msg.updates);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "signals":
+        this.signalStore.applySnapshot(msg.series);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "signal":
+        this.signalStore.applyUpdates(msg.updates);
         this.retries = 0;
         this.notify();
         return;
