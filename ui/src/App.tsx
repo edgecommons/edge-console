@@ -22,7 +22,7 @@ import {
   SideNavLink,
   Theme,
 } from "@carbon/react";
-import { Activity, Catalog, Dashboard, TreeView } from "@carbon/react/icons";
+import { Activity, Catalog, ChartNetwork, Dashboard, TreeView } from "@carbon/react/icons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { defaultWsUrl } from "./config";
 import { FleetClient } from "./fleet/client";
@@ -31,6 +31,7 @@ import { ConnectedEdgeHealthView } from "./health/EdgeHealthView";
 import { ConnectedComponentsView } from "./components/ComponentsView";
 import { ConnectedComponentDetailView } from "./components/ComponentDetailView";
 import { ConnectedConfigReviewView } from "./configreview/ConfigReviewView";
+import { ConnectedTopologyView } from "./topology/TopologyView";
 import { ConnectedEventsView } from "./events/EventsView";
 import { AppBar } from "./shell/AppBar";
 import { SearchContext } from "./shell/search";
@@ -38,7 +39,7 @@ import type { SearchState } from "./shell/search";
 import { useTheme } from "./shell/theme";
 
 /** The shell's view routes (one per shipped screen; `detail` is the Components sub-screen). */
-type Route = "overview" | "components" | "detail" | "config" | "events";
+type Route = "overview" | "components" | "detail" | "topology" | "config" | "events";
 
 export default function App({ client }: { client?: FleetClient }): React.JSX.Element {
   const fleetClient = useMemo(() => client ?? new FleetClient({ url: defaultWsUrl() }), [client]);
@@ -114,6 +115,14 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               Components
             </SideNavLink>
             <SideNavLink
+              renderIcon={ChartNetwork}
+              href="#"
+              isActive={route === "topology"}
+              onClick={navigate("topology")}
+            >
+              Site Topology
+            </SideNavLink>
+            <SideNavLink
               renderIcon={Catalog}
               href="#"
               isActive={route === "config"}
@@ -145,6 +154,8 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               onViewConfig={() => viewConfig(detailKey)}
               onOpenEvents={() => setRoute("events")}
             />
+          ) : route === "topology" ? (
+            <ConnectedTopologyView client={fleetClient} onOpenDetail={openDetail} />
           ) : route === "config" ? (
             <ConnectedConfigReviewView
               client={fleetClient}

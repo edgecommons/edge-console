@@ -210,6 +210,45 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
+  it("navigates to Site Topology (R3): the graph renders, cfg is requested, a node opens Detail", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+      const msg: ServerMessage = {
+        type: "snapshot",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: snapshot([deviceSnap("gw-01", [compSnap({ key: key("gw-01", "opcua-adapter") })])]),
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(msg));
+    });
+
+    // The Site Topology nav lands; the custom SVG graph renders from the identity hierarchy.
+    fireEvent.click(screen.getByRole("link", { name: /Site Topology/ }));
+    expect(screen.getByTestId("topology-graph")).toBeTruthy();
+
+    // The connected view requested this component's cfg (the edges' source) on the SAME socket.
+    const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames.some((f) => f.type === "get-config")).toBe(true);
+    expect(sockets).toHaveLength(1);
+
+    // Clicking the component node navigates to its Detail (a Topology chip → a component).
+    fireEvent.click(screen.getByTestId("topo-comp-gw-01/opcua-adapter/main"));
+    const crumbs = screen.getByTestId("detail-crumbs");
+    expect(within(crumbs).getByText("opcua-adapter")).toBeTruthy();
+    expect(sockets[0]!.closed).toBe(false);
+  });
+
   it("filters the fleet from the app-bar global search (shared SearchContext → Overview)", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({

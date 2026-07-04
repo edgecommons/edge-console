@@ -232,10 +232,21 @@ const cfgAnnouncements = {
       cfgEvent(SITE, "pack-gw-01", "opcua-adapter", demoConfig("opcua-adapter", {
         endpoint: { url: "opc.tcp://192.168.1.181:49320" },
       })),
-    () => cfgEvent(SITE, "pack-gw-01", "modbus-adapter", demoConfig("modbus-adapter")),
+    () =>
+      cfgEvent(SITE, "pack-gw-01", "modbus-adapter", demoConfig("modbus-adapter", {
+        // Topology (R3): a real slave the adapter connects to — but its southbound_health
+        // reports DISCONNECTED below, so the topology draws the "adapter UP, device link DOWN"
+        // red-dashed-✕ edge (the fault pinned to the exact edge, not the whole device).
+        slave: { host: "192.168.1.50", port: 502, unitId: 3, pollMs: 500 },
+      })),
   ],
   "asm-gw-01": [
-    () => cfgEvent(SITE, "asm-gw-01", "telemetry-processor", demoConfig("telemetry-processor")),
+    () =>
+      cfgEvent(SITE, "asm-gw-01", "telemetry-processor", demoConfig("telemetry-processor", {
+        // A northbound cloud target → a second cloud node (AWS IoT Core); when asm-gw-01 goes
+        // UNREACHABLE the containment shows on the whole subtree, this edge included.
+        streams: { northbound: { kind: "iot-core", credentials: { pin: "***" } } },
+      })),
     // file-replicator: never announces cfg — config-review shows UNAVAIL for it.
   ],
 };
@@ -397,6 +408,20 @@ function feed() {
   ingest(metricEvent(SITE, "press-gw-01", "modbus-adapter", "southbound_health", {
     connectionState: tick % 5 === 2 ? "RECONNECTING" : "CONNECTED",
     readErrors: Math.floor(tick / 5),
+    writeErrors: 0,
+  }));
+  // pack-gw-01/modbus-adapter: the adapter itself is alive (it restarts, keepalives flow) but
+  // its Modbus link to the conveyor slave is DOWN — the Topology "adapter up, device link down"
+  // case (a red, dashed, ✕'d southbound edge with a red field node).
+  ingest(metricEvent(SITE, "pack-gw-01", "modbus-adapter", "southbound_health", {
+    connectionState: "DISCONNECTED",
+    readErrors: 40 + tick,
+    writeErrors: 3,
+  }));
+  // pack-gw-01/opcua-adapter: a healthy southbound link to its OPC UA server.
+  ingest(metricEvent(SITE, "pack-gw-01", "opcua-adapter", "southbound_health", {
+    connectionState: "CONNECTED",
+    readErrors: 0,
     writeErrors: 0,
   }));
 

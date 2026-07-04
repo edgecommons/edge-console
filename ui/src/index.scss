@@ -1261,6 +1261,239 @@
   }
 }
 
+/* ============ site topology (R3 — custom SVG connectivity graph) ============ */
+// The mockup's `--ok/--warn/--err/--link/--gray/--cat1` map to Carbon g10/g100 tokens, so the
+// graph stays faithful to the signed-off hi-fi in both themes.
+.ec-topo-legendrow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.ec-topo-legendrow__stats {
+  font-size: 0.75rem;
+}
+.ec-topo-legendrow__hint {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.ec-graphwrap {
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  overflow-x: auto;
+}
+.ec-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ec-graph text {
+  fill: var(--cds-text-primary);
+  font-family: inherit;
+}
+.ec-nlab {
+  font-size: 13px;
+  font-weight: 500;
+}
+.ec-nsub {
+  font-size: 10px;
+  fill: var(--cds-text-secondary);
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+.ec-layerlab {
+  font-size: 10px;
+  fill: var(--cds-text-helper);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ec-grp {
+  fill: none;
+  stroke: var(--cds-border-strong);
+  stroke-dasharray: 4 4;
+}
+.ec-graph-grp.is-unreachable .ec-grp {
+  stroke: var(--cds-support-error);
+}
+.ec-grplab {
+  font-size: 11px;
+  fill: var(--cds-text-secondary);
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+.ec-graph-grp.is-unreachable .ec-grplab {
+  fill: var(--cds-support-error);
+}
+.ec-elab {
+  font-size: 10px;
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  fill: var(--cds-text-secondary);
+  paint-order: stroke;
+  stroke: var(--cds-layer);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.ec-elab.is-warn {
+  fill: var(--cds-support-warning);
+}
+.ec-elab.is-err {
+  fill: var(--cds-support-error);
+}
+
+// nodes
+.ec-nodebox {
+  fill: var(--cds-layer);
+  stroke: var(--cds-border-strong);
+  stroke-width: 1;
+}
+.ec-gnode {
+  cursor: default;
+}
+.ec-gnode[data-goto] {
+  cursor: pointer;
+}
+.ec-gnode:hover .ec-nodebox,
+.ec-gnode:focus-visible .ec-nodebox {
+  stroke-width: 2;
+}
+.ec-gnode:focus-visible {
+  outline: none;
+}
+.ec-gnode:focus-visible .ec-nodebox {
+  stroke: var(--cds-focus);
+}
+
+// component accent bar + status dot (colored by liveness)
+.ec-accent {
+  fill: var(--cds-text-placeholder);
+}
+.ec-gdot {
+  fill: var(--cds-text-placeholder);
+}
+.ec-gnode--comp.is-ok .ec-accent,
+.ec-gnode--comp.is-ok .ec-gdot {
+  fill: var(--cds-support-success);
+}
+.ec-gnode--comp.is-warn .ec-accent,
+.ec-gnode--comp.is-warn .ec-gdot {
+  fill: var(--cds-support-warning);
+}
+.ec-gnode--comp.is-err .ec-accent,
+.ec-gnode--comp.is-err .ec-gdot {
+  fill: var(--cds-support-error);
+}
+.ec-gnode--comp.is-stopped .ec-accent,
+.ec-gnode--comp.is-stopped .ec-gdot {
+  fill: var(--cds-text-placeholder);
+}
+
+// external endpoint nodes
+.ec-gnode--field .ec-nodebox {
+  fill: var(--cds-tag-background-blue);
+  stroke: var(--cds-support-info);
+}
+.ec-gnode--field.is-err .ec-nodebox {
+  fill: var(--cds-tag-background-red);
+  stroke: var(--cds-support-error);
+}
+.ec-gnode--cloud .ec-nodebox {
+  fill: var(--cds-tag-background-purple);
+  stroke: var(--cds-tag-color-purple);
+}
+.ec-gnode--cloud.is-err .ec-nodebox {
+  fill: var(--cds-tag-background-red);
+  stroke: var(--cds-support-error);
+}
+.ec-gnode--infra .ec-nodebox {
+  fill: var(--cds-layer-accent);
+  stroke: var(--cds-border-strong);
+}
+
+// edges
+.ec-edge {
+  fill: none;
+  stroke: var(--cds-text-placeholder);
+  stroke-width: 1.6;
+}
+.ec-edge--ok {
+  stroke: var(--cds-support-success);
+  stroke-width: 2.4;
+}
+.ec-edge--warn {
+  stroke: var(--cds-support-warning);
+  stroke-width: 2.4;
+}
+.ec-edge--err {
+  stroke: var(--cds-support-error);
+  stroke-width: 2.4;
+  stroke-dasharray: 6 5;
+}
+.ec-edge--bus {
+  stroke: var(--cds-text-placeholder);
+  stroke-width: 1.3;
+  stroke-dasharray: 3 4;
+}
+.ec-edge-x line {
+  stroke: var(--cds-support-error);
+  stroke-width: 2;
+}
+
+// arrowhead markers
+.ec-mk--ok {
+  fill: var(--cds-support-success);
+}
+.ec-mk--warn {
+  fill: var(--cds-support-warning);
+}
+.ec-mk--err {
+  fill: var(--cds-support-error);
+}
+.ec-mk--bus {
+  fill: var(--cds-text-placeholder);
+}
+
+// legend
+.ec-gkey {
+  display: flex;
+  gap: 1.125rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  background: var(--cds-layer-accent);
+  border-top: 1px solid var(--cds-border-subtle);
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  align-items: center;
+}
+.ec-gkey__pending {
+  opacity: 0.75;
+}
+.ec-sw {
+  display: inline-block;
+  width: 22px;
+  height: 0;
+  border-top: 3px solid transparent;
+  vertical-align: middle;
+  margin-right: 0.375rem;
+}
+.ec-sw--ok {
+  border-top-color: var(--cds-support-success);
+}
+.ec-sw--warn {
+  border-top-color: var(--cds-support-warning);
+}
+.ec-sw--err {
+  border-top-color: var(--cds-support-error);
+  border-top-style: dashed;
+}
+.ec-sw--bus {
+  border-top-color: var(--cds-text-placeholder);
+  border-top-style: dashed;
+}
+.ec-sw--flow {
+  border-top-color: var(--cds-link-primary);
+  border-top-style: dashed;
+}
+
 /* ============ motion ============ */
 // The only animated affordances are Carbon's own (InlineLoading spinner etc.), which
 // respect prefers-reduced-motion. Belt-and-braces: disable any residual transitions.
