@@ -130,11 +130,34 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(screen.getByTestId("liveness-state")).toBeTruthy();
   });
 
-  it("Instances: lists the instance(s) from the identity token", () => {
+  it("Instances: a single-instance (main-only) component shows the no-per-instance-connectivity note", () => {
     renderDetail();
     fireEvent.click(screen.getByTestId("tab-instances"));
+    expect(screen.getByTestId("instances-empty")).toBeTruthy();
+  });
+
+  it("Instances: renders state.instances[] connectivity (connected/disconnected + detail)", () => {
+    const state = clientState(
+      fleetView([
+        deviceView("pack-gw-01", [
+          compView({
+            key: DKEY,
+            instances: [
+              { instance: "filler1", connected: true, detail: "opc.tcp://kep:49320" },
+              { instance: "kep2", connected: false },
+            ],
+          }),
+        ]),
+      ]),
+    );
+    renderDetail({ state });
+    fireEvent.click(screen.getByTestId("tab-instances"));
     const list = screen.getByTestId("instances-list");
-    expect(within(list).getByTestId("instance-main")).toBeTruthy();
+    expect(within(list).getByTestId("instance-filler1")).toBeTruthy();
+    expect(within(list).getByTestId("instance-kep2")).toBeTruthy();
+    expect(within(list).getByText("connected")).toBeTruthy();
+    expect(within(list).getByText("disconnected")).toBeTruthy();
+    expect(within(list).getByText("opc.tcp://kep:49320")).toBeTruthy();
   });
 
   it("Configuration: embeds a read-only effective-config view + a link to the full screen", () => {

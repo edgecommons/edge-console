@@ -40,6 +40,7 @@ import type {
   CadenceSource,
   ComponentKey,
   ComponentSnapshot,
+  InstanceStatus,
   FleetDelta,
   FleetSnapshot,
   Liveness,
@@ -78,6 +79,12 @@ export interface ComponentView {
   uptimeAnchorAt?: number;
   /** Server-clock ms of the last `state` arrival. */
   lastStateAt?: number;
+  /**
+   * Per-instance connectivity from the last `state` body's `instances[]` (#1c) — every configured
+   * instance (OPC UA server / Modbus slave / file-replicator source dir) with its
+   * connected/disconnected status. Absent for single-instance/main-only components.
+   */
+  instances?: InstanceStatus[];
   expectedIntervalSecs: number;
   cadenceSource: CadenceSource;
   restarts: number;
@@ -130,6 +137,8 @@ interface ComponentState {
   uptimeSecs?: number;
   uptimeAnchorAt?: number;
   lastStateAt?: number;
+  /** Per-instance connectivity from the last `state` body's `instances[]` (#1c), if carried. */
+  instances?: InstanceStatus[];
   expectedIntervalSecs: number;
   cadenceSource: CadenceSource;
   restarts: number;
@@ -290,6 +299,7 @@ export class FleetStore {
         ? { uptimeAnchorAt: comp.lastStateAt }
         : {}),
       ...(comp.lastStateAt !== undefined ? { lastStateAt: comp.lastStateAt } : {}),
+      ...(comp.instances !== undefined ? { instances: comp.instances.map((i) => ({ ...i })) } : {}),
       expectedIntervalSecs: comp.expectedIntervalSecs,
       cadenceSource: comp.cadenceSource,
       restarts: comp.restarts,
@@ -312,6 +322,7 @@ export class FleetStore {
       ...(comp.uptimeSecs !== undefined ? { uptimeSecs: comp.uptimeSecs } : {}),
       ...(comp.uptimeAnchorAt !== undefined ? { uptimeAnchorAt: comp.uptimeAnchorAt } : {}),
       ...(comp.lastStateAt !== undefined ? { lastStateAt: comp.lastStateAt } : {}),
+      ...(comp.instances !== undefined ? { instances: comp.instances.map((i) => ({ ...i })) } : {}),
       expectedIntervalSecs: comp.expectedIntervalSecs,
       cadenceSource: comp.cadenceSource,
       restarts: comp.restarts,

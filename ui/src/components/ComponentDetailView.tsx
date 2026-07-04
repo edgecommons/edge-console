@@ -36,7 +36,7 @@ import {
   Tile,
 } from "@carbon/react";
 import { ArrowRight, CircleFilled } from "@carbon/react/icons";
-import type { ComponentKey } from "@edgecommons/edge-console-protocol";
+import type { ComponentKey, InstanceStatus } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
 import type { ComponentView } from "../fleet/store";
@@ -56,7 +56,6 @@ import {
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
-  instancesOf,
 } from "./detail-selectors";
 import { findComponent } from "./components-tree";
 
@@ -223,39 +222,47 @@ function HealthTab({
   );
 }
 
-/** The Instances tab (from the identity `instance` token). */
-function InstancesTab({
-  instances,
-  nowServerMs,
-}: {
-  instances: ComponentView[];
-  nowServerMs: number;
-}): React.JSX.Element {
+/**
+ * The Instances tab — per-instance connectivity from the component's `state.instances[]` (#1c):
+ * every configured instance (an OPC UA server, a Modbus slave, a file-replicator source directory)
+ * with its connected/disconnected status. The list is config-complete — the library provider
+ * reports every configured instance — so it is driven by config + state, never by bus traffic.
+ */
+function InstancesTab({ instances }: { instances: InstanceStatus[] }): React.JSX.Element {
+  if (instances.length === 0) {
+    return (
+      <p className="ec-dim ec-detail-note" data-testid="instances-empty">
+        This component reports no per-instance connectivity — it runs as a single{" "}
+        <span className="ec-mono">main</span> instance. Multi-instance components (one adapter per
+        upstream server, or one replication instance per source directory) list every configured
+        instance here with its connection status.
+      </p>
+    );
+  }
   return (
     <div className="ec-slist" data-testid="instances-list">
       <div className="ec-slist__r ec-slist__r--hd">
         <span className="ec-slist__k">Instance</span>
-        <span className="ec-slist__v ec-dim">status · last state</span>
+        <span className="ec-slist__v ec-dim">status · detail</span>
       </div>
       {instances.map((inst) => (
-        <div className="ec-slist__r" key={inst.id} data-testid={`instance-${inst.key.instance}`}>
-          <span className="ec-slist__k ec-mono">{inst.key.instance}</span>
+        <div className="ec-slist__r" key={inst.instance} data-testid={`instance-${inst.instance}`}>
+          <span className="ec-slist__k ec-mono">{inst.instance}</span>
           <span className="ec-slist__v ec-instance-status">
-            <StatusTag liveness={inst.liveness} size="sm" />
-            <span className="ec-dim ec-mono">
-              {inst.lastStateAt !== undefined
-                ? `${formatDurationMs(Math.max(0, nowServerMs - inst.lastStateAt))} ago`
-                : "—"}
-            </span>
+            <Tag
+              size="sm"
+              type={inst.connected ? "green" : "red"}
+              className="ec-tag"
+              renderIcon={CircleFilled}
+            >
+              {inst.connected ? "connected" : "disconnected"}
+            </Tag>
+            {inst.detail !== undefined && inst.detail !== "" && (
+              <span className="ec-dim ec-mono">{inst.detail}</span>
+            )}
           </span>
         </div>
       ))}
-      {instances.length === 1 && (
-        <p className="ec-dim ec-detail-note">
-          A single instance (<span className="ec-mono">{instances[0]!.key.instance}</span>). Multi-instance
-          components (e.g. one adapter per upstream server) list every instance here.
-        </p>
-      )}
     </div>
   );
 }
@@ -478,11 +485,11 @@ export function ComponentDetailView({
     );
   }
 
-  const instances = instancesOf(fleet, detailKey);
+  const instances = comp.instances ?? [];
   const openAlarms = alarmsForComponent(alarms.active, detailKey);
   const attrs = attributes.byId[id];
   const configEntry = state.configs.entriesById[id];
-  const subtitle = detailSubtitleParts(comp, attrs, instances.length, nowServerMs);
+  const subtitle = detailSubtitleParts(comp, attrs, Math.max(1, instances.length), nowServerMs);
 
   return (
     <div className="ec-detail">
@@ -550,7 +557,7 @@ export function ComponentDetailView({
             </PhaseTwoPending>
           </TabPanel>
           <TabPanel>
-            <InstancesTab instances={instances} nowServerMs={nowServerMs} />
+            <InstancesTab instances={instances} />
           </TabPanel>
           <TabPanel>
             <ConfigTab entry={configEntry} {...(onViewConfig !== undefined ? { onViewConfig } : {})} />
