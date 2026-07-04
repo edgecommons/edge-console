@@ -1,14 +1,14 @@
 /**
- * The FleetClient's C6 activity surface: subscribe/unsubscribe frames out,
- * `events`/`event`/`metrics`/`metric` frames folded in — all over the injected
- * fake socket (no network, no sleeps).
+ * The FleetClient's activity surface: subscribe/unsubscribe frames out, and the
+ * `events`/`event` (C6) + `alarms`/`welcome` (R0) frames folded in — all over the
+ * injected fake socket (no network, no sleeps).
  */
 import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
 import type { ServerMessage } from "@edgecommons/edge-console-protocol";
 import { FleetClient } from "../src/fleet/client";
 import type { SocketLike } from "../src/fleet/client";
-import { T0, consoleEvent, key } from "./_fixtures";
+import { T0, alarmSnapshot, consoleAlarm, consoleEvent, key } from "./_fixtures";
 
 class FakeSocket implements SocketLike {
   readonly sent: string[] = [];
@@ -58,24 +58,30 @@ describe("FleetClient - activity subscriptions", () => {
     sockets[0]!.open();
 
     client.subscribeEvents(50);
-    client.subscribeMetrics();
+    client.subscribeAlarms();
+    client.ackAlarm("gw-01/opcua-adapter/main::connection-lost");
     client.unsubscribeEvents();
-    client.unsubscribeMetrics();
+    client.unsubscribeAlarms();
 
     expect(sockets[0]!.frames().slice(1)).toEqual([
       { type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 50 },
-      { type: "subscribe-metrics", protocolVersion: PROTOCOL_VERSION },
+      { type: "subscribe-alarms", protocolVersion: PROTOCOL_VERSION },
+      {
+        type: "ack-alarm",
+        protocolVersion: PROTOCOL_VERSION,
+        alarmId: "gw-01/opcua-adapter/main::connection-lost",
+      },
       { type: "unsubscribe-events", protocolVersion: PROTOCOL_VERSION },
-      { type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION },
+      { type: "unsubscribe-alarms", protocolVersion: PROTOCOL_VERSION },
     ]);
     client.stop();
   });
 
-  it("while disconnected the frames are quietly skipped (the view re-subscribes on reconnect)", () => {
+  it("while disconnected the frames are quietly skipped (the shell re-subscribes on reconnect)", () => {
     const { client, sockets } = rig();
     // never opened — status is "connecting"
     client.subscribeEvents();
-    client.subscribeMetrics();
+    client.subscribeAlarms();
     expect(sockets[0]!.sent).toHaveLength(0);
     client.stop();
   });
@@ -105,34 +111,43 @@ describe("FleetClient - activity subscriptions", () => {
     client.stop();
   });
 
-  it("folds the metrics snapshot then live update batches into the state", () => {
+  it("folds the alarms snapshot (replace) into the state — active list + counts", () => {
     const { client, sockets } = rig();
     sockets[0]!.open();
 
     sockets[0]!.frame({
-      type: "metrics",
+      type: "alarms",
       protocolVersion: PROTOCOL_VERSION,
-      series: [
-        {
-          key: KEY,
-          metric: "sys",
-          measure: "cpu",
-          latest: 10,
-          receivedAt: T0,
-          points: [{ at: T0, value: 10 }],
-        },
-      ],
+      snapshot: alarmSnapshot([
+        consoleAlarm({ key: KEY, type: "connection-lost", severity: "critical" }),
+        consoleAlarm({ key: key("gw-01", "modbus-adapter"), type: "slave-retry", severity: "warning" }),
+      ]),
     });
-    expect(client.getState().metrics.series[0]).toMatchObject({ metric: "sys", latest: 10 });
+    let alarms = client.getState().alarms;
+    expect(alarms.active).toHaveLength(2);
+    expect(alarms.counts).toMatchObject({ critical: 1, warning: 1, active: 2, contained: 0 });
 
+    // A later replace-snapshot supersedes the previous one wholesale (ack/clear/containment).
     sockets[0]!.frame({
-      type: "metric",
+      type: "alarms",
       protocolVersion: PROTOCOL_VERSION,
-      updates: [{ key: KEY, metric: "sys", measure: "cpu", point: { at: T0 + 5000, value: 22 } }],
+      snapshot: alarmSnapshot([
+        consoleAlarm({ key: KEY, type: "connection-lost", severity: "critical", acked: true }),
+      ]),
     });
-    const [series] = client.getState().metrics.series;
-    expect(series!.latest).toBe(22);
-    expect(series!.points.map((p) => p.value)).toEqual([10, 22]);
+    alarms = client.getState().alarms;
+    expect(alarms.active).toHaveLength(1);
+    expect(alarms.counts).toMatchObject({ critical: 1, active: 1, acked: 1 });
+    client.stop();
+  });
+
+  it("folds the welcome frame into the connection's RBAC role", () => {
+    const { client, sockets } = rig();
+    sockets[0]!.open();
+    expect(client.getState().role).toBeUndefined();
+
+    sockets[0]!.frame({ type: "welcome", protocolVersion: PROTOCOL_VERSION, role: "operator" });
+    expect(client.getState().role).toBe("operator");
     client.stop();
   });
 

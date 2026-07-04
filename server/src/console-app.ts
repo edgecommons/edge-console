@@ -36,6 +36,9 @@ import type { Clock } from "./fleet/fleet-model";
 import { ConfigStore } from "./fleet/config-store";
 import { EventStore } from "./fleet/event-store";
 import { MetricStore } from "./fleet/metric-store";
+import { SignalStore } from "./fleet/signal-store";
+import { AttributeStore } from "./fleet/attribute-store";
+import { AlarmTracker } from "./fleet/alarm-tracker";
 import { CommandGateway } from "./command/command-gateway";
 import { ConfigRbacPolicy } from "./command/rbac";
 import { FleetWsGateway } from "./ws/gateway";
@@ -65,6 +68,12 @@ export interface ConsoleApp {
   readonly events: EventStore;
   /** The metric surface (latest + bounded series) behind the C6 `subscribe-metrics` stream. */
   readonly metrics: MetricStore;
+  /** The DATA-plane signal surface (latest + quality + series) behind R0 `subscribe-signals`. */
+  readonly signals: SignalStore;
+  /** The runtime-attribute projection behind R0 `subscribe-attributes`. */
+  readonly attributes: AttributeStore;
+  /** The console-side alarm tracker behind R0 `subscribe-alarms`/`ack-alarm`. */
+  readonly alarms: AlarmTracker;
   readonly ingress: BusIngress;
   /** The C4 pure command core behind the `invoke-command`/`command-result` frames. */
   readonly commandGateway: CommandGateway;
@@ -100,6 +109,13 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     maxSeriesPoints: config.metrics.maxSeriesPoints,
     maxSeries: config.metrics.maxSeries,
   });
+  // The R0 foundation stores (server-defaults; the screens R1-R6 consume them):
+  //  - signals: the DATA plane (`data` class) — latest value + quality + bounded series;
+  //  - attributes: the runtime-attribute projection off the `metric` class (sys.* + conn);
+  //  - alarms: the console-side alarm tracker over the `evt` severity stream (+ containment).
+  const signals = new SignalStore(clock);
+  const attributes = new AttributeStore(clock);
+  const alarms = new AlarmTracker(clock);
   const ingress = new BusIngress({
     messaging: deps.messaging,
     uns: deps.uns,
@@ -109,15 +125,21 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       configs.ingest(event);
       events.ingest(event);
       metrics.ingest(event);
+      signals.ingest(event);
+      attributes.ingest(event);
+      alarms.ingest(event);
     },
   });
 
   // Discovery -> late-join rehydration: broadcast the republish pair once per newly
-  // discovered device (broadcastRepublish never throws).
+  // discovered device; device-reachability transitions drive alarm CONTAINMENT (a device
+  // going UNREACHABLE suppresses its components' alarms; recovery releases them).
   const detach = model.onDelta((deltas) => {
     for (const delta of deltas) {
       if (delta.type === "device-discovered") {
         void ingress.broadcastRepublish(delta.device);
+      } else if (delta.type === "device-reachability-changed") {
+        alarms.setDeviceContainment(delta.device, delta.unreachable);
       }
     }
   });
@@ -159,8 +181,8 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       configs,
       refreshDevice: (device) => void ingress.broadcastRepublish(device),
     },
-    // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
-    { events, metrics },
+    // The activity seam: C6 events/metrics + the R0 signals/attributes/alarms surfaces.
+    { events, metrics, signals, attributes, alarms },
     // The C4 command seam: invoke-command → request/reply, RBAC-gated.
     { gateway: commandGateway, rbac },
   );
@@ -180,6 +202,9 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     configs,
     events,
     metrics,
+    signals,
+    attributes,
+    alarms,
     ingress,
     commandGateway,
     gateway,

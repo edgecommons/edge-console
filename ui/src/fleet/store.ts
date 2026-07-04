@@ -328,7 +328,7 @@ export class FleetStore {
         this.ensureDevice(delta.device);
         return;
       case "component-discovered":
-        this.ensureComponent(delta.key, delta.path);
+        this.ensureComponent(delta.key, delta.path, delta.hier);
         return;
       case "value-updated": {
         const comp = this.ensureComponent(delta.key);
@@ -424,7 +424,7 @@ export class FleetStore {
     return device;
   }
 
-  private ensureComponent(key: ComponentKey, path?: string): ComponentState {
+  private ensureComponent(key: ComponentKey, path?: string, hier?: WireHierLevel[]): ComponentState {
     const device = this.ensureDevice(key.device);
     const id = componentKeyId(key);
     let comp = device.components.get(id);
@@ -433,9 +433,9 @@ export class FleetStore {
         key: { ...key },
         id,
         path: path ?? key.device,
-        // `component-discovered` carries no hier levels — the view derives grouping
-        // labels from `path`; the next snapshot supplies the full hierarchy.
-        hier: [],
+        // `component-discovered` now carries the full hierarchy (protocol v5), so a
+        // late-discovered component groups dynamically without waiting for a snapshot.
+        hier: hier !== undefined ? hier.map((e) => ({ ...e })) : [],
         ladder: "FRESH", // mirrors the server's discovery default
         expectedIntervalSecs: this.opts.defaultIntervalSecs,
         cadenceSource: "default",

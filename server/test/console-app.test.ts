@@ -307,6 +307,71 @@ describe("startConsole - the C1 composition", () => {
 
     await app.stop();
   });
+
+  it("serves the R0 round-trip: data→signals, metric→attributes, evt→alarms, and device-LWT containment", async () => {
+    const bus = new FakeBus();
+    const app = await start(bus);
+    const identity = makeIdentity("gw-03", "opcua-adapter");
+    const KEY = { device: "gw-03", component: "opcua-adapter", instance: "main" };
+
+    // Bus -> the R0 stores (the same ingress tee that feeds the C1/C6 stores).
+    await bus.emitWire(
+      "ecv1/gw-03/opcua-adapter/main/data/Temp_01",
+      wireEnvelope("data", identity, { value: 20.4, quality: "GOOD" }),
+    );
+    await bus.emitWire(
+      "ecv1/gw-03/opcua-adapter/main/metric/sys",
+      wireEnvelope("Metric", identity, { cpu: 33, memory: 128, _aws: {} }),
+    );
+    await bus.emitWire(
+      "ecv1/gw-03/opcua-adapter/main/evt/critical/connection-lost",
+      wireEnvelope("evt", identity, { message: "session dropped" }),
+    );
+    expect(app.signals.seriesCount()).toBe(1);
+    expect(app.attributes.componentCount()).toBe(1);
+    expect(app.alarms.activeCount()).toBe(1);
+
+    const sent: ServerMessage[] = [];
+    const transport: ClientTransport = {
+      id: "browser-1",
+      send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+      bufferedAmount: () => 0,
+      close: () => undefined,
+    };
+    const session = app.gateway.connect(transport);
+    session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+
+    // subscribe-signals -> the data-plane snapshot.
+    session.onMessage(JSON.stringify({ type: "subscribe-signals", protocolVersion: PROTOCOL_VERSION }));
+    const sig = sent.at(-1)!;
+    expect(sig.type).toBe("signals");
+    if (sig.type !== "signals") throw new Error("unreachable");
+    expect(sig.series[0]).toMatchObject({ key: KEY, signal: "Temp_01", latest: 20.4, quality: "GOOD" });
+
+    // subscribe-attributes -> the runtime-attribute projection.
+    session.onMessage(JSON.stringify({ type: "subscribe-attributes", protocolVersion: PROTOCOL_VERSION }));
+    const attr = sent.at(-1)!;
+    expect(attr.type).toBe("attributes");
+    if (attr.type !== "attributes") throw new Error("unreachable");
+    expect(attr.components[0]).toMatchObject({ key: KEY, cpuPercent: 33, memoryMb: 128 });
+
+    // subscribe-alarms -> the active alarm + counts.
+    session.onMessage(JSON.stringify({ type: "subscribe-alarms", protocolVersion: PROTOCOL_VERSION }));
+    const al = sent.at(-1)!;
+    expect(al.type).toBe("alarms");
+    if (al.type !== "alarms") throw new Error("unreachable");
+    expect(al.snapshot.counts).toMatchObject({ critical: 1, active: 1, contained: 0 });
+
+    // The bridge LWT marks the device UNREACHABLE -> the FleetModel reachability delta
+    // drives alarm CONTAINMENT (the alarm leaves the active counts, streamed live as a
+    // fresh `alarms` frame — the C2 `delta` frame for the same transition follows it).
+    await bus.emitWire("ecv1/gw-03/uns-bridge/main/state", RAW_LWT);
+    const contained = sent.filter((m) => m.type === "alarms").at(-1)!;
+    if (contained.type !== "alarms") throw new Error("unreachable");
+    expect(contained.snapshot.counts).toMatchObject({ active: 0, contained: 1 });
+
+    await app.stop();
+  });
 });
 
 describe("startConsole - the C4 command round-trip", () => {

@@ -97,15 +97,32 @@ describe("WsServer - real WS round-trip (the required C2 integration proof)", ()
     const ws = new WebSocket(`${url}/ws`);
     await waitOpen(ws);
 
-    const snapshotPromise = nextMessage(ws);
+    // R0 handshake: `welcome` (the resolved role) precedes the snapshot; buffer frames
+    // so the back-to-back welcome+snapshot pair can't race a once-listener.
+    const buffered: ServerMessage[] = [];
+    const waiters: Array<(m: ServerMessage) => void> = [];
+    ws.addEventListener("message", (ev) => {
+      const m = JSON.parse(String((ev as MessageEvent).data)) as ServerMessage;
+      const w = waiters.shift();
+      if (w !== undefined) w(m);
+      else buffered.push(m);
+    });
+    const take = (): Promise<ServerMessage> =>
+      new Promise((resolve) => {
+        const m = buffered.shift();
+        if (m !== undefined) resolve(m);
+        else waiters.push(resolve);
+      });
+
     ws.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
-    const snapshotMsg = await snapshotPromise;
+    const welcomeMsg = await take();
+    expect(welcomeMsg.type).toBe("welcome");
+    const snapshotMsg = await take();
     expect(snapshotMsg.type).toBe("snapshot");
     expect(snapshotMsg.type === "snapshot" && snapshotMsg.snapshot.devices[0]?.device).toBe("gw-01");
 
-    const deltaPromise = nextMessage(ws);
     model.ingest(dataEvent("live"));
-    const deltaMsg = await deltaPromise;
+    const deltaMsg = await take();
     expect(deltaMsg.type).toBe("delta");
     expect(deltaMsg.type === "delta" && deltaMsg.deltas[0]?.type).toBe("value-updated");
 

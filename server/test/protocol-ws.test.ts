@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   PROTOCOL_VERSION,
   classifyEventSeverity,
+  extractSignalSample,
+  isAlarmingSeverity,
   parseClientMessage,
   parseComponentKey,
   splitEventChannel,
@@ -250,6 +252,71 @@ describe("parseClientMessage - the C4 command family", () => {
     ["primitive args", { type: "invoke-command", protocolVersion: PROTOCOL_VERSION, requestId: "r", key: KEY, verb: "ping", args: 3 }],
   ])("rejects: %s", (_label, frame) => {
     expect(parseClientMessage(JSON.stringify(frame)).ok).toBe(false);
+  });
+});
+
+describe("parseClientMessage - the R0 signal/attribute/alarm families", () => {
+  it.each([
+    "subscribe-signals",
+    "unsubscribe-signals",
+    "subscribe-attributes",
+    "unsubscribe-attributes",
+    "subscribe-alarms",
+    "unsubscribe-alarms",
+  ] as const)("accepts the bare %s frame", (type) => {
+    expect(parseClientMessage(JSON.stringify({ type, protocolVersion: PROTOCOL_VERSION }))).toEqual({
+      ok: true,
+      message: { type, protocolVersion: PROTOCOL_VERSION },
+    });
+  });
+
+  it("accepts ack-alarm with a non-empty alarmId (extras stripped)", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "ack-alarm",
+          protocolVersion: PROTOCOL_VERSION,
+          alarmId: "gw-01/opcua-adapter/main::connection-lost",
+          extra: 1,
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "ack-alarm",
+        protocolVersion: PROTOCOL_VERSION,
+        alarmId: "gw-01/opcua-adapter/main::connection-lost",
+      },
+    });
+  });
+
+  it.each([
+    ["missing alarmId", JSON.stringify({ type: "ack-alarm", protocolVersion: PROTOCOL_VERSION })],
+    ["empty alarmId", JSON.stringify({ type: "ack-alarm", protocolVersion: PROTOCOL_VERSION, alarmId: "" })],
+    ["non-string alarmId", JSON.stringify({ type: "ack-alarm", protocolVersion: PROTOCOL_VERSION, alarmId: 3 })],
+    ["subscribe-signals without protocolVersion", JSON.stringify({ type: "subscribe-signals" })],
+  ])("rejects: %s", (_label, raw) => {
+    expect(parseClientMessage(raw).ok).toBe(false);
+  });
+});
+
+describe("isAlarmingSeverity", () => {
+  it("critical/error/warning raise; info/debug/undefined clear", () => {
+    expect(isAlarmingSeverity("critical")).toBe(true);
+    expect(isAlarmingSeverity("error")).toBe(true);
+    expect(isAlarmingSeverity("warning")).toBe(true);
+    expect(isAlarmingSeverity("info")).toBe(false);
+    expect(isAlarmingSeverity("debug")).toBe(false);
+    expect(isAlarmingSeverity(undefined)).toBe(false);
+  });
+});
+
+describe("extractSignalSample", () => {
+  it("handles {value,quality}, value-less objects, and bare scalars", () => {
+    expect(extractSignalSample({ value: 7, quality: "GOOD" })).toEqual({ value: 7, quality: "GOOD" });
+    expect(extractSignalSample({ a: 1 })).toEqual({ value: { a: 1 } });
+    expect(extractSignalSample(true)).toEqual({ value: true });
+    expect(extractSignalSample(null)).toEqual({ value: null });
   });
 });
 

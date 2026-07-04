@@ -4,16 +4,18 @@
  * the shipped view renders exclusively from the live gateway stream.
  */
 import type {
+  AlarmSnapshot,
   ComponentKey,
   ComponentSnapshot,
+  ConsoleAlarm,
   ConsoleEvent,
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
 } from "@edgecommons/edge-console-protocol";
 import type { ClientState } from "../src/fleet/client";
+import { EMPTY_ALARM_COUNTS } from "../src/fleet/alarm-store";
 import type { CommandEntry, CommandView } from "../src/fleet/command-store";
-import type { MetricSeriesView } from "../src/fleet/metric-series-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 
 /** The pinned server-clock base for all fixtures (ms epoch). */
@@ -122,11 +124,52 @@ export function clientState(
     fleet,
     configs: { entriesById: {} },
     events: { entries: [] },
-    metrics: { series: [] },
+    alarms: { active: [], counts: EMPTY_ALARM_COUNTS },
     commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,
   };
+}
+
+/** A {@link ConsoleAlarm} with sensible defaults (active critical alarm). */
+export function consoleAlarm(overrides: Partial<ConsoleAlarm> = {}): ConsoleAlarm {
+  const k = overrides.key ?? key();
+  const componentId = `${k.device}/${k.component}/${k.instance}`;
+  const type = overrides.type ?? "connection-lost";
+  return {
+    id: `${componentId}::${type}`,
+    key: k,
+    componentId,
+    severity: "critical",
+    type,
+    message: "southbound connection dropped",
+    raisedAt: T0,
+    lastAt: T0,
+    count: 1,
+    acked: false,
+    contained: false,
+    ...overrides,
+  };
+}
+
+/** An {@link AlarmSnapshot} from a list of alarms (counts derived over the active set). */
+export function alarmSnapshot(alarms: ConsoleAlarm[]): AlarmSnapshot {
+  let critical = 0;
+  let warning = 0;
+  let active = 0;
+  let contained = 0;
+  let acked = 0;
+  for (const a of alarms) {
+    if (a.contained) {
+      contained++;
+      continue;
+    }
+    active++;
+    if (a.severity === "critical") critical++;
+    else warning++;
+    if (a.acked) acked++;
+  }
+  return { active: alarms, counts: { critical, warning, active, contained, acked } };
 }
 
 /** A {@link CommandEntry} with defaults (for command-UI tests). */
@@ -170,32 +213,6 @@ export function consoleEvent(overrides: Partial<ConsoleEvent> = {}): ConsoleEven
     body: { message: "temperature above threshold", limitC: 80, valueC: 84.2 },
     receivedAt: T0,
     sourceTimestamp: "2026-07-03T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
-/** A {@link MetricSeriesView} with defaults; points derived from `values` at 5 s spacing. */
-export function metricSeries(
-  values: number[],
-  overrides: Partial<MetricSeriesView> = {},
-): MetricSeriesView {
-  const k = overrides.key ?? key();
-  const componentId = `${k.device}/${k.component}/${k.instance}`;
-  const metric = overrides.metric ?? "sys";
-  const measure = overrides.measure ?? "cpu";
-  const points = values.map((value, i) => ({
-    at: T0 - (values.length - 1 - i) * 5000,
-    value,
-  }));
-  return {
-    key: k,
-    componentId,
-    seriesId: `${componentId}::${metric}::${measure}`,
-    metric,
-    measure,
-    latest: values[values.length - 1] ?? 0,
-    receivedAt: T0,
-    points,
     ...overrides,
   };
 }

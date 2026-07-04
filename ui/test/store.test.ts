@@ -71,7 +71,16 @@ describe("FleetStore - delta fold (seq order)", () => {
     const result = store.applyDeltas(
       seqRun(11, [
         { type: "device-discovered", at: T0 + 100, device: "gw-02" },
-        { type: "component-discovered", at: T0 + 100, key: key("gw-02", "new-comp"), path: "dallas/gw-02" },
+        {
+          type: "component-discovered",
+          at: T0 + 100,
+          key: key("gw-02", "new-comp"),
+          path: "dallas/gw-02",
+          hier: [
+            { level: "site", value: "dallas" },
+            { level: "device", value: "gw-02" },
+          ],
+        },
       ]),
       T0 + 150,
     );
@@ -83,6 +92,8 @@ describe("FleetStore - delta fold (seq order)", () => {
     expect(discovered.liveness).toBe("FRESH"); // the server's discovery default
     expect(discovered.expectedIntervalSecs).toBe(5);
     expect(discovered.cadenceSource).toBe("default");
+    // protocol v5: the discovery delta carries the full hierarchy (dynamic grouping).
+    expect(discovered.hier.map((e) => e.value)).toEqual(["dallas", "gw-02"]);
     expect(view.lastUpdatedAt).toBe(T0 + 150);
     expect(view.clockOffsetMs).toBe(50); // receivedAt - last delta at
   });

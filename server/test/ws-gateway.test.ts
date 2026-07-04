@@ -48,8 +48,13 @@ class FakeTransport implements ClientTransport {
   close(code: number, reason: string): void {
     this.closed = { code, reason };
   }
-  messages(): ServerMessage[] {
+  /** All frames, INCLUDING the R0 `welcome` handshake frame. */
+  rawMessages(): ServerMessage[] {
     return this.sent.map((s) => JSON.parse(s) as ServerMessage);
+  }
+  /** Frames excluding the `welcome` handshake (the C2 fanout tests assert over these). */
+  messages(): ServerMessage[] {
+    return this.rawMessages().filter((m) => m.type !== "welcome");
   }
 }
 
@@ -102,6 +107,18 @@ describe("FleetWsGateway - snapshot-then-deltas on connect", () => {
     expect(new Set(seqs).size).toBe(seqs.length); // no duplicates
   });
 
+  it("sends the welcome frame (the connection's role) right before the snapshot (R0)", () => {
+    const clock = new TestClock();
+    const model = new FleetModel(clock.fn);
+    const gateway = new FleetWsGateway(model, { clock: clock.fn });
+    const t = new FakeTransport("c1");
+    gateway.connect(t, "operator").onMessage(hello());
+
+    const raw = t.rawMessages();
+    expect(raw[0]).toEqual({ type: "welcome", protocolVersion: PROTOCOL_VERSION, role: "operator" });
+    expect(raw[1]!.type).toBe("snapshot");
+  });
+
   it("a pre-hello client gets nothing, not even deltas", () => {
     const clock = new TestClock();
     const model = new FleetModel(clock.fn);
@@ -146,7 +163,7 @@ describe("FleetWsGateway - resume-from-seq", () => {
 
     const t = new FakeTransport("c1");
     gateway.connect(t).onMessage(hello(currentSeq));
-    expect(t.sent).toHaveLength(0);
+    expect(t.messages()).toHaveLength(0); // only the welcome frame; no snapshot/delta
 
     model.ingest(dataEvent("b"));
     expect(t.messages()).toHaveLength(1);
@@ -224,8 +241,10 @@ describe("FleetWsGateway - slow-client isolation / backpressure", () => {
     gateway.connect(slow).onMessage(hello());
     gateway.connect(fast).onMessage(hello());
     slow.setBufferedAmount(1_000_000); // always "backpressured"
-    const slowCountAfterHello = slow.sent.length;
     const fastCountAfterHello = fast.sent.length;
+    // Message-count baselines (welcome filtered out) for the `.messages().slice()` below.
+    const slowMsgsAfterHello = slow.messages().length;
+    const fastMsgsAfterHello = fast.messages().length;
 
     // 3 pushes > maxMissedPushes(2): the 3rd push forces a resnapshot for `slow`.
     model.ingest(dataEvent("p1"));
@@ -237,13 +256,13 @@ describe("FleetWsGateway - slow-client isolation / backpressure", () => {
     expect(
       fast
         .messages()
-        .slice(fastCountAfterHello)
+        .slice(fastMsgsAfterHello)
         .every((m) => m.type === "delta"),
     ).toBe(true);
 
     // `slow` got NO delta messages while backpressured, but exactly one forced
     // snapshot once it exceeded maxMissedPushes.
-    const slowNew = slow.messages().slice(slowCountAfterHello);
+    const slowNew = slow.messages().slice(slowMsgsAfterHello);
     expect(slowNew).toHaveLength(1);
     expect(slowNew[0]!.type).toBe("snapshot");
 

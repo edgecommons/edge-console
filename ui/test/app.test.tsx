@@ -110,7 +110,7 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
-  it("navigates to Events and Metrics (C6): mount subscribes, unmount unsubscribes, same socket", () => {
+  it("navigates to Events (C6): mount subscribes, same socket, no Metrics nav (R0)", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({
       url: "ws://console.test/ws",
@@ -128,12 +128,18 @@ describe("App shell", () => {
     });
     const frames = () => sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
 
+    // The off-contract Metrics page is gone from the nav (R0).
+    expect(screen.queryByRole("link", { name: /Metrics/ })).toBeNull();
+
+    // On connect the shell subscribes the global alarm surface (the notifications badge).
+    expect(frames().some((f) => f.type === "subscribe-alarms")).toBe(true);
+
     // Events: mounting the view subscribes the stream on the shared socket.
     fireEvent.click(screen.getByRole("link", { name: /Events/ }));
     expect(screen.getByText("No events yet")).toBeTruthy();
     expect(frames().at(-1)).toMatchObject({ type: "subscribe-events" });
 
-    // A live backlog + push renders rows without any refetch.
+    // A live backlog renders rows without any refetch.
     act(() => {
       const backlog: ServerMessage = {
         type: "events",
@@ -154,35 +160,65 @@ describe("App shell", () => {
     });
     expect(screen.getByTestId("event-row-1")).toBeTruthy();
 
-    // To Metrics: events unsubscribes, metrics subscribes — still ONE socket.
-    fireEvent.click(screen.getByRole("link", { name: /Metrics/ }));
-    expect(screen.getByText("No metrics yet")).toBeTruthy();
-    const sent = frames();
-    expect(sent.at(-2)).toMatchObject({ type: "unsubscribe-events" });
-    expect(sent.at(-1)).toMatchObject({ type: "subscribe-metrics" });
-
-    act(() => {
-      const snapMsg: ServerMessage = {
-        type: "metrics",
-        protocolVersion: PROTOCOL_VERSION,
-        series: [
-          {
-            key: key("gw-01", "opcua-adapter"),
-            metric: "sys",
-            measure: "cpu",
-            latest: 12.5,
-            receivedAt: T0,
-            points: [{ at: T0, value: 12.5 }],
-          },
-        ],
-      };
-      sockets[0]!.onmessage?.(JSON.stringify(snapMsg));
-    });
-    expect(screen.getByTestId("metric-row-gw-01/opcua-adapter/main::sys::cpu")).toBeTruthy();
-
     fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
-    expect(frames().at(-1)).toMatchObject({ type: "unsubscribe-metrics" });
+    expect(screen.getByText("Edge health")).toBeTruthy();
     expect(sockets).toHaveLength(1);
     expect(sockets[0]!.closed).toBe(false);
+  });
+
+  it("renders the app-bar chrome: search, theme toggle (g100↔g10), alarm badge, account role", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    const { container } = render(<App client={client} />);
+
+    // Global search box present.
+    expect(screen.getByTestId("appbar-search")).toBeTruthy();
+
+    // Theme starts g100 (dark) and the toggle flips it to g10 (light).
+    expect(container.querySelector(".cds--g100")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("appbar-theme"));
+    expect(container.querySelector(".cds--g10")).toBeTruthy();
+    expect(container.querySelector(".cds--g100")).toBeNull();
+
+    // Connect, then a welcome + alarms frame drive the account role + notifications badge.
+    act(() => {
+      sockets[0]!.onopen?.();
+      const welcome: ServerMessage = { type: "welcome", protocolVersion: PROTOCOL_VERSION, role: "operator" };
+      const alarms: ServerMessage = {
+        type: "alarms",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: {
+          active: [
+            {
+              id: "gw-01/opcua-adapter/main::connection-lost",
+              key: key("gw-01", "opcua-adapter"),
+              componentId: "gw-01/opcua-adapter/main",
+              severity: "critical",
+              type: "connection-lost",
+              raisedAt: T0,
+              lastAt: T0,
+              count: 1,
+              acked: false,
+              contained: false,
+            },
+          ],
+          counts: { critical: 1, warning: 0, active: 1, contained: 0, acked: 0 },
+        },
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(welcome));
+      sockets[0]!.onmessage?.(JSON.stringify(alarms));
+    });
+
+    expect(screen.getByTestId("appbar-role").textContent).toBe("operator");
+    expect(screen.getByTestId("appbar-alarm-count").textContent).toBe("1");
   });
 });

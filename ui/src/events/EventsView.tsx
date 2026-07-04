@@ -45,7 +45,7 @@ import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
 import { formatDurationMs } from "../fleet/selectors";
 import { useFleetState, useNowTick } from "../fleet/useFleet";
-import { Sparkline } from "../metrics/Sparkline";
+import { Sparkline } from "../common/Sparkline";
 import type { EventFilters, SeverityFilter } from "./selectors";
 import {
   eventSourceIds,

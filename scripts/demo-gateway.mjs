@@ -32,6 +32,9 @@ import { FleetModel } from "../server/dist/fleet/fleet-model.js";
 import { ConfigStore } from "../server/dist/fleet/config-store.js";
 import { EventStore } from "../server/dist/fleet/event-store.js";
 import { MetricStore } from "../server/dist/fleet/metric-store.js";
+import { SignalStore } from "../server/dist/fleet/signal-store.js";
+import { AttributeStore } from "../server/dist/fleet/attribute-store.js";
+import { AlarmTracker } from "../server/dist/fleet/alarm-tracker.js";
 import { CommandGateway } from "../server/dist/command/command-gateway.js";
 import { ConfigRbacPolicy } from "../server/dist/command/rbac.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
@@ -45,6 +48,18 @@ const model = new FleetModel(clock);
 const configs = new ConfigStore(clock);
 const events = new EventStore(clock);
 const metrics = new MetricStore(clock);
+// R0 foundation stores: the data plane (signals), runtime attributes, console alarms.
+const signals = new SignalStore(clock);
+const attributes = new AttributeStore(clock);
+const alarms = new AlarmTracker(clock);
+
+// R0: device-reachability transitions drive alarm CONTAINMENT (a device going
+// UNREACHABLE suppresses its components' alarms; recovery releases them).
+model.onDelta((deltas) => {
+  for (const d of deltas) {
+    if (d.type === "device-reachability-changed") alarms.setDeviceContainment(d.device, d.unreachable);
+  }
+});
 
 /** The composition root's ingress tee: FleetModel + side stores (console-app.ts shape). */
 function ingest(event) {
@@ -52,25 +67,52 @@ function ingest(event) {
   configs.ingest(event);
   events.ingest(event);
   metrics.ingest(event);
+  signals.ingest(event);
+  attributes.ingest(event);
+  alarms.ingest(event);
 }
+
+/**
+ * The synthetic site is 3 lines (the mockup groups the fleet BY LINE); each device
+ * belongs to one. The identity hierarchy is therefore site → line → device (3 levels),
+ * so the console can group + build topology DYNAMICALLY from `hierarchy.levels` (never a
+ * hardcoded "line" tier).
+ */
+const LINE_OF = {
+  "press-gw-01": "stamping",
+  "pack-gw-01": "packaging",
+  "asm-gw-01": "assembly",
+};
 
 /** Build the IngressEvent for one component's state keepalive. */
 function stateEvent(site, device, component, body, instance = "main") {
+  const line = LINE_OF[device] ?? "unassigned";
   return {
     kind: "envelope",
     cls: "state",
     identity: {
       hier: [
         { level: "site", value: site },
+        { level: "line", value: line },
         { level: "device", value: device },
       ],
-      path: `${site}/${device}`,
+      path: `${site}/${line}/${device}`,
       component,
       instance,
     },
     body,
     sourceTimestamp: new Date().toISOString(),
     topic: `ecv1/${device}/${component}/${instance}/state`,
+  };
+}
+
+/** A `data/{signal}` telemetry sample — the DATA plane ({value, quality}). */
+function dataEvent(site, device, component, signal, value, quality = "GOOD") {
+  return {
+    ...stateEvent(site, device, component, { value, quality }),
+    cls: "data",
+    channel: signal,
+    topic: `ecv1/${device}/${component}/main/data/${signal}`,
   };
 }
 
@@ -240,8 +282,8 @@ const gateway = new FleetWsGateway(
       }, 800);
     },
   },
-  // The C6 activity seam: events backlog+stream, metrics snapshot+updates.
-  { events, metrics },
+  // The activity seam: C6 events/metrics + the R0 signals/attributes/alarms surfaces.
+  { events, metrics, signals, attributes, alarms },
   // The C4 command seam: invoke-command → the fake CommandInbox responder, RBAC-gated.
   { gateway: commandGateway, rbac },
 );
@@ -316,6 +358,35 @@ function feed() {
     dropped: relayDropped,
   }));
 
+  // ---- R0: southbound_health metrics -> the per-component runtime ATTRIBUTES (conn state).
+  ingest(metricEvent(SITE, "press-gw-01", "opcua-adapter", "southbound_health", {
+    connectionState: "CONNECTED",
+    readErrors: 0,
+    writeErrors: 0,
+  }));
+  ingest(metricEvent(SITE, "press-gw-01", "modbus-adapter", "southbound_health", {
+    connectionState: tick % 5 === 2 ? "RECONNECTING" : "CONNECTED",
+    readErrors: Math.floor(tick / 5),
+    writeErrors: 0,
+  }));
+
+  // ---- R0: DATA-plane signals (data/{signal}, {value, quality}) — the Signals screen (R5).
+  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Channel1.Device1.Temp_01",
+    wave(72, 6, 0), "GOOD"));
+  ingest(dataEvent(SITE, "press-gw-01", "opcua-adapter", "Channel1.Device1.Pressure",
+    wave(4.2, 0.4, 2), tick % 11 === 0 ? "UNCERTAIN" : "GOOD"));
+  ingest(dataEvent(SITE, "press-gw-01", "modbus-adapter", "holding[0].flow_rate",
+    wave(310, 25, 1), "GOOD"));
+
+  // ---- R0: a persistent CRITICAL alarm from the first tick (so the notifications badge
+  //          is populated immediately), plus a visible raise→clear lifecycle below.
+  if (tick === 1) {
+    ingest(evtEvent(SITE, "press-gw-01", "modbus-adapter", "critical", "sensor-fault", {
+      message: "flow sensor reading out of range — check wiring",
+      register: 40001,
+    }));
+  }
+
   // ---- C6: a varied evt stream (components x severities, live-appending).
   if (tick % 3 === 1) {
     ingest(evtEvent(SITE, "press-gw-01", "opcua-adapter", "info", "scan-cycle-complete", {
@@ -342,6 +413,13 @@ function feed() {
     ingest(evtEvent(SITE, "pack-gw-01", "opcua-adapter", "critical", "connection-lost", {
       message: "OPC UA session dropped by server",
       endpoint: "opc.tcp://192.168.1.181:49320",
+    }));
+  }
+  if (tick % 14 === 10) {
+    // The matching resolve (normal severity, SAME type) clears the alarm into history —
+    // the console-side raise→clear lifecycle made visible.
+    ingest(evtEvent(SITE, "pack-gw-01", "opcua-adapter", "info", "connection-lost", {
+      message: "OPC UA session re-established",
     }));
   }
   if (tick % 15 === 8) {

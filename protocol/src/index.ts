@@ -31,8 +31,24 @@
  * rewrites `reply_to` transparently) and returns the reply as a `command-result`.
  * Breaking for the same reason as v2/v3: a v3 gateway rejects-and-closes on the new
  * client frame.
+ * v5 (slice R0, the data + shell foundation): four additive surfaces the realigned
+ * screens (R1-R6) consume, plus the account-role handshake.
+ *  - the DATA-plane `signals` family — client `subscribe-signals`/`unsubscribe-signals`,
+ *    server `signals`/`signal` (the UNS `data` class, which was ingested then discarded);
+ *  - the management-plane runtime `attributes` family — client `subscribe-attributes`/
+ *    `unsubscribe-attributes`, server `attributes`/`attribute` (latest `sys.*` cpu/mem/
+ *    threads + adapter `southbound_health` connection state, projected off the metric class);
+ *  - the console-side `alarms` family — client `subscribe-alarms`/`unsubscribe-alarms`/
+ *    `ack-alarm`, server `alarms` (an `evt`-driven raise/clear alarm state machine with
+ *    device-UNREACHABLE containment and console-side ack);
+ *  - the `welcome` server frame (the connection's resolved RBAC role, sent right after a
+ *    valid `hello`) — the account indicator's data source;
+ *  - `component-discovered` deltas now carry `hier` (the full identity hierarchy), so a
+ *    late-discovered component groups dynamically without waiting for the next snapshot.
+ * Breaking for the same reason as v2/v3/v4: a v4 gateway rejects-and-closes on the new
+ * client frames, and the exact-match version handshake turns the skew into a clean reload.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -172,7 +188,15 @@ export interface FleetSnapshot {
  */
 export type FleetDelta =
   | { type: "device-discovered"; seq: number; at: number; device: string }
-  | { type: "component-discovered"; seq: number; at: number; key: ComponentKey; path: string }
+  | {
+      type: "component-discovered";
+      seq: number;
+      at: number;
+      key: ComponentKey;
+      path: string;
+      /** The full identity hierarchy (`[{level,value}]`, last = device) — dynamic grouping without a snapshot. */
+      hier: WireHierLevel[];
+    }
   | {
       type: "value-updated";
       seq: number;
@@ -354,6 +378,176 @@ export interface MetricSeriesUpdate {
 }
 
 /* -----------------------------------------------------------------------------
+ * R0 — the DATA plane: the `signals` family (the UNS `data` class).
+ *
+ * The `data` class carries telemetry / business SIGNALS on `data/{signal}` — the ONE
+ * class the corrected framing calls the "data plane" (everything else is management/
+ * control plane). The uns-bridge already delivers it and the FleetModel already caches
+ * the latest value, but nothing surfaced it: R0 adds a SignalStore (latest value +
+ * quality + a small bounded recent series per `(component, signal)`) with a
+ * subscribe/snapshot surface mirroring the C6 metric family, so the future Signals
+ * screen (R5) has its data.
+ *
+ * A signal body follows the `SouthboundSignalUpdate` contract when it is an object
+ * (`{value, quality}`), but the class is OPEN: a bare scalar body folds as the value
+ * with no quality. {@link extractSignalSample} is the lenient split.
+ * --------------------------------------------------------------------------- */
+
+/** The recent-series bound both sides keep per signal (points, drop-oldest). */
+export const DEFAULT_SIGNAL_SERIES_POINTS = 60;
+
+/** One sample of a signal series (server-clock ms + the value + optional quality). */
+export interface SignalPoint {
+  at: number;
+  /** The signal value verbatim (scalar or the whole body — the class is open). */
+  value: unknown;
+  /** Data-quality token (`GOOD`/`UNCERTAIN`/`BAD`) when the body carried one. */
+  quality?: string;
+}
+
+/**
+ * One `(component, signal)` series as the `signals` snapshot carries it: the latest
+ * value + quality plus the bounded recent series (ascending time, newest last).
+ */
+export interface SignalSeriesSnapshot {
+  key: ComponentKey;
+  /** The UNS signal name — the channel under `data/` (may itself contain `/`). */
+  signal: string;
+  latest: unknown;
+  /** Latest data-quality token, when present. */
+  quality?: string;
+  /** Console receipt time of the latest sample (server-clock ms epoch). */
+  receivedAt: number;
+  sourceTimestamp?: string;
+  points: SignalPoint[];
+}
+
+/** One fresh sample for a signal series (a live `signal` push): bounded append, latest-wins. */
+export interface SignalSeriesUpdate {
+  key: ComponentKey;
+  signal: string;
+  point: SignalPoint;
+  sourceTimestamp?: string;
+}
+
+/**
+ * Split a `data` body into `{value, quality}` leniently: an object body with a
+ * `value` field yields that value (and its `quality` string when present); any other
+ * object yields the whole body as the value; a scalar body is the value with no
+ * quality. Never throws — the class is open, never rejected.
+ */
+export function extractSignalSample(body: unknown): { value: unknown; quality?: string } {
+  if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+    const o = body as Record<string, unknown>;
+    const value = Object.prototype.hasOwnProperty.call(o, "value") ? o.value : body;
+    const quality = typeof o.quality === "string" ? o.quality : undefined;
+    return quality !== undefined ? { value, quality } : { value };
+  }
+  return { value: body };
+}
+
+/* -----------------------------------------------------------------------------
+ * R0 — runtime ATTRIBUTES (management plane): the latest per-component operational
+ * facts the Overview columns (R1) and the Component Detail Health tab (R2) render.
+ *
+ * These are the `sys.*` heartbeat measures (cpu / memory / threads / fds) plus the
+ * adapter `southbound_health` connection state (`connectionState` + `readErrors` /
+ * `writeErrors`) — a PROJECTION over the same `metric`-class ingest that feeds the
+ * MetricStore (repurposed, not a new emission). Every field is optional: a component
+ * that never published a given measure simply omits it (the UI shows "—").
+ * --------------------------------------------------------------------------- */
+
+/** The latest runtime attributes for one component (all fields optional; latest-wins per field). */
+export interface RuntimeAttributes {
+  key: ComponentKey;
+  /** `sys` cpu measure (percent). */
+  cpuPercent?: number;
+  /** `sys` memory measure (whatever unit the component emits — MB by convention). */
+  memoryMb?: number;
+  /** `sys` threads measure. */
+  threads?: number;
+  /** `sys` open file descriptors measure. */
+  fds?: number;
+  /** Southbound connection state string (`southbound_health` body `connectionState`). */
+  connectionState?: string;
+  /** Southbound cumulative read errors. */
+  readErrors?: number;
+  /** Southbound cumulative write errors. */
+  writeErrors?: number;
+  /** Console receipt time of the most recent contributing sample (server-clock ms). */
+  receivedAt: number;
+  sourceTimestamp?: string;
+}
+
+/* -----------------------------------------------------------------------------
+ * R0 — the console-side ALARM tracker (management plane).
+ *
+ * The console derives alarms from the `evt` severity stream: a critical/error/warning
+ * `evt` RAISES an active alarm keyed by `(component, type)`; a normal-severity (info/
+ * debug) follow-up on the same key CLEARS it (into history). `ack` is console-side
+ * state. Device UNREACHABLE CONTAINS a device's component alarms — they are suppressed
+ * from the active counts ("the road is down, not the houses"), not cleared. This is the
+ * data behind the Overview "Active alerts" tile (R1) and the Events & Alarms screen (R4).
+ * --------------------------------------------------------------------------- */
+
+/** The severities that RAISE an alarm (everything else clears — the class is open). */
+export const ALARMING_SEVERITIES: readonly EventSeverityLevel[] = ["critical", "error", "warning"];
+
+/** Whether a classified severity raises an alarm (vs clears one). */
+export function isAlarmingSeverity(level: EventSeverityLevel | undefined): boolean {
+  return level !== undefined && ALARMING_SEVERITIES.includes(level);
+}
+
+/** One console alarm (active or, with `resolvedAt`, a resolved history entry). */
+export interface ConsoleAlarm {
+  /** Stable id `${componentId}::${type}` — React keys, ack correlation, live dedup. */
+  id: string;
+  key: ComponentKey;
+  /** Canonical `device/component/instance` id (grouping). */
+  componentId: string;
+  /** The raising severity (critical/error/warning). */
+  severity: EventSeverityLevel;
+  /** The event type — the `evt/{severity}/{type}` remainder. */
+  type: string;
+  /** The latest raising event's `body.message`, when present. */
+  message?: string;
+  /** Server-clock ms the alarm first became active. */
+  raisedAt: number;
+  /** Server-clock ms of the most recent raising event. */
+  lastAt: number;
+  /** Raising events since it became active. */
+  count: number;
+  /** Console-side acknowledgement (does not clear the alarm). */
+  acked: boolean;
+  /** Suppressed under an UNREACHABLE device (excluded from active counts). */
+  contained: boolean;
+  /** Server-clock ms the alarm cleared (present only on history entries). */
+  resolvedAt?: number;
+  channel?: string;
+}
+
+/** The active-alarm rollup (the Overview tile + the notifications badge). */
+export interface AlarmCounts {
+  /** Active, non-contained critical alarms. */
+  critical: number;
+  /** Active, non-contained warning + error alarms. */
+  warning: number;
+  /** Total active, non-contained alarms (the badge count). */
+  active: number;
+  /** Alarms suppressed under UNREACHABLE devices (the "+N contained" rollup). */
+  contained: number;
+  /** Active alarms that have been acknowledged. */
+  acked: number;
+}
+
+/** The alarm surface as the `alarms` frame carries it (active list + counts). */
+export interface AlarmSnapshot {
+  /** Active alarms (contained ones included, flagged `contained`), newest raise first. */
+  active: ConsoleAlarm[];
+  counts: AlarmCounts;
+}
+
+/* -----------------------------------------------------------------------------
  * C4 — commanding: the console's first WRITE surface (invoke a UNS command verb on a
  * target component). The browser sends `invoke-command`; the gateway RBAC-checks it,
  * issues a `messaging().request()` to the component's own `cmd` inbox
@@ -467,7 +661,17 @@ export type ClientMessage =
       key: ComponentKey;
       verb: string;
       args?: Record<string, unknown>;
-    };
+    }
+  // R0 data-plane signals: snapshot reply + live pushes, per-connection interest (C6 shape).
+  | { type: "subscribe-signals"; protocolVersion: number }
+  | { type: "unsubscribe-signals"; protocolVersion: number }
+  // R0 runtime attributes: snapshot reply + live pushes, per-connection interest.
+  | { type: "subscribe-attributes"; protocolVersion: number }
+  | { type: "unsubscribe-attributes"; protocolVersion: number }
+  // R0 alarms: snapshot reply + live pushes; `ack-alarm` toggles console-side ack.
+  | { type: "subscribe-alarms"; protocolVersion: number }
+  | { type: "unsubscribe-alarms"; protocolVersion: number }
+  | { type: "ack-alarm"; protocolVersion: number; alarmId: string };
 
 /**
  * Server -> client frames.
@@ -511,6 +715,9 @@ export type ServerMessage =
   | { type: "snapshot"; protocolVersion: number; snapshot: FleetSnapshot }
   | { type: "delta"; protocolVersion: number; deltas: FleetDelta[] }
   | { type: "heartbeat"; protocolVersion: number; at: number }
+  // R0 welcome: the connection's resolved RBAC role, sent right after a valid `hello`
+  // (before the snapshot) — the app-bar account indicator's data source.
+  | { type: "welcome"; protocolVersion: number; role: string }
   | {
       type: "config";
       protocolVersion: number;
@@ -527,6 +734,15 @@ export type ServerMessage =
   | { type: "event"; protocolVersion: number; event: ConsoleEvent }
   | { type: "metrics"; protocolVersion: number; series: MetricSeriesSnapshot[] }
   | { type: "metric"; protocolVersion: number; updates: MetricSeriesUpdate[] }
+  // R0 signals (data plane): the `subscribe-signals` reply (every series) + live pushes.
+  | { type: "signals"; protocolVersion: number; series: SignalSeriesSnapshot[] }
+  | { type: "signal"; protocolVersion: number; updates: SignalSeriesUpdate[] }
+  // R0 runtime attributes: the `subscribe-attributes` reply (every component) + live pushes.
+  | { type: "attributes"; protocolVersion: number; components: RuntimeAttributes[] }
+  | { type: "attribute"; protocolVersion: number; updates: RuntimeAttributes[] }
+  // R0 alarms: the `subscribe-alarms` reply AND every later change (active list + counts).
+  // One replace-frame (low volume; ack/containment can move many rows at once).
+  | { type: "alarms"; protocolVersion: number; snapshot: AlarmSnapshot }
   | {
       type: "command-result";
       protocolVersion: number;
@@ -652,6 +868,24 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
       return { ok: true, message: { type: "subscribe-metrics", protocolVersion } };
     case "unsubscribe-metrics":
       return { ok: true, message: { type: "unsubscribe-metrics", protocolVersion } };
+    case "subscribe-signals":
+      return { ok: true, message: { type: "subscribe-signals", protocolVersion } };
+    case "unsubscribe-signals":
+      return { ok: true, message: { type: "unsubscribe-signals", protocolVersion } };
+    case "subscribe-attributes":
+      return { ok: true, message: { type: "subscribe-attributes", protocolVersion } };
+    case "unsubscribe-attributes":
+      return { ok: true, message: { type: "unsubscribe-attributes", protocolVersion } };
+    case "subscribe-alarms":
+      return { ok: true, message: { type: "subscribe-alarms", protocolVersion } };
+    case "unsubscribe-alarms":
+      return { ok: true, message: { type: "unsubscribe-alarms", protocolVersion } };
+    case "ack-alarm": {
+      if (typeof obj.alarmId !== "string" || obj.alarmId === "") {
+        return { ok: false, reason: "ack-alarm alarmId must be a non-empty string" };
+      }
+      return { ok: true, message: { type: "ack-alarm", protocolVersion, alarmId: obj.alarmId } };
+    }
     case "invoke-command": {
       if (typeof obj.requestId !== "string" || obj.requestId === "") {
         return { ok: false, reason: "invoke-command requestId must be a non-empty string" };

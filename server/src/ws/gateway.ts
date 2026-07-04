@@ -29,6 +29,7 @@
 import { logger } from "@edgecommons/ggcommons";
 import { PROTOCOL_VERSION, componentKeyId, parseClientMessage } from "@edgecommons/edge-console-protocol";
 import type {
+  AlarmSnapshot,
   ClientMessage,
   ComponentKey,
   ConsoleEvent,
@@ -36,13 +37,19 @@ import type {
   FleetSnapshot,
   MetricSeriesSnapshot,
   MetricSeriesUpdate,
+  RuntimeAttributes,
   ServerMessage,
+  SignalSeriesSnapshot,
+  SignalSeriesUpdate,
   WsErrorCode,
 } from "@edgecommons/edge-console-protocol";
 import type { Clock, DeltaListener } from "../fleet/fleet-model";
 import type { ConfigUpdateListener, StoredConfig } from "../fleet/config-store";
 import type { EventListener } from "../fleet/event-store";
 import type { MetricUpdateListener } from "../fleet/metric-store";
+import type { SignalUpdateListener } from "../fleet/signal-store";
+import type { AttributeUpdateListener } from "../fleet/attribute-store";
+import type { AlarmListener } from "../fleet/alarm-tracker";
 import type { CommandGateway, CommandResultData } from "../command/command-gateway";
 import type { RbacPolicy } from "../command/rbac";
 import { DeltaBuffer } from "./delta-buffer";
@@ -85,18 +92,48 @@ export interface MetricFeedSource {
   onUpdate(listener: MetricUpdateListener): () => void;
 }
 
+/** What the gateway needs from the DATA-plane signal surface (R0). `SignalStore` satisfies this structurally. */
+export interface SignalFeedSource {
+  snapshot(): SignalSeriesSnapshot[];
+  onUpdate(listener: SignalUpdateListener): () => void;
+}
+
+/** What the gateway needs from the runtime-attribute surface (R0). `AttributeStore` satisfies this structurally. */
+export interface AttributeFeedSource {
+  snapshot(): RuntimeAttributes[];
+  onUpdate(listener: AttributeUpdateListener): () => void;
+}
+
+/** What the gateway needs from the console-side alarm tracker (R0). `AlarmTracker` satisfies this structurally. */
+export interface AlarmFeedSource {
+  snapshot(): AlarmSnapshot;
+  onUpdate(listener: AlarmListener): () => void;
+  /** Toggle console-side ack for an active alarm; returns whether it changed. */
+  ack(alarmId: string): boolean;
+}
+
 /**
- * The C6 activity seam (optional fourth constructor argument): the rolling `evt`
- * history behind `subscribe-events` (backlog reply + live `event` streaming) and
- * the metric surface behind `subscribe-metrics` (snapshot reply + live `metric`
- * pushes). Without this seam the gateway still speaks the protocol honestly:
- * subscriptions are accepted and answered with an empty backlog/snapshot, and no
- * pushes ever arrive.
+ * The activity seam (optional fourth constructor argument). `events`/`metrics` are the
+ * C6 surfaces (backlog/snapshot reply + live streaming). `signals`/`attributes`/`alarms`
+ * are the R0 additions (the data-plane signal surface, the runtime-attribute projection,
+ * and the console-side alarm tracker) — all optional, all following the same
+ * per-connection subscribe/snapshot-then-push discipline. Without a given source the
+ * gateway still speaks the protocol honestly: subscriptions are accepted and answered with
+ * an empty backlog/snapshot, and no pushes ever arrive.
  */
 export interface ActivityGatewayDeps {
   events: EventFeedSource;
   metrics: MetricFeedSource;
+  signals?: SignalFeedSource;
+  attributes?: AttributeFeedSource;
+  alarms?: AlarmFeedSource;
 }
+
+/** The empty alarm snapshot the gateway answers with when there is no alarm source. */
+const EMPTY_ALARM_SNAPSHOT: AlarmSnapshot = {
+  active: [],
+  counts: { critical: 0, warning: 0, active: 0, contained: 0, acked: 0 },
+};
 
 /**
  * The C4 command seam (optional fifth constructor argument): the pure
@@ -164,6 +201,12 @@ interface Session {
   eventsSubscribed: boolean;
   /** Live `metric` pushes are streamed while set (C6 `subscribe-metrics`). */
   metricsSubscribed: boolean;
+  /** Live `signal` pushes are streamed while set (R0 `subscribe-signals`). */
+  signalsSubscribed: boolean;
+  /** Live `attribute` pushes are streamed while set (R0 `subscribe-attributes`). */
+  attributesSubscribed: boolean;
+  /** Live `alarms` pushes are streamed while set (R0 `subscribe-alarms`). */
+  alarmsSubscribed: boolean;
   /** In-flight command `requestId`s (C4) — for correlation + drop-on-disconnect. */
   pendingCommands: Set<string>;
 }
@@ -177,6 +220,9 @@ export class FleetWsGateway {
   private readonly detachConfig: (() => void) | undefined;
   private readonly detachEvents: (() => void) | undefined;
   private readonly detachMetrics: (() => void) | undefined;
+  private readonly detachSignals: (() => void) | undefined;
+  private readonly detachAttributes: (() => void) | undefined;
+  private readonly detachAlarms: (() => void) | undefined;
 
   constructor(
     private readonly source: FleetSource,
@@ -191,6 +237,11 @@ export class FleetWsGateway {
     this.detachConfig = config?.configs.onUpdate((entry) => this.pushConfig(entry));
     this.detachEvents = activity?.events.onEvent((event) => this.pushEvent(event));
     this.detachMetrics = activity?.metrics.onUpdate((updates) => this.pushMetricUpdates(updates));
+    this.detachSignals = activity?.signals?.onUpdate((updates) => this.pushSignalUpdates(updates));
+    this.detachAttributes = activity?.attributes?.onUpdate((updates) =>
+      this.pushAttributeUpdates(updates),
+    );
+    this.detachAlarms = activity?.alarms?.onUpdate((snapshot) => this.pushAlarms(snapshot));
   }
 
   /**
@@ -210,6 +261,9 @@ export class FleetWsGateway {
       configKeys: new Set(),
       eventsSubscribed: false,
       metricsSubscribed: false,
+      signalsSubscribed: false,
+      attributesSubscribed: false,
+      alarmsSubscribed: false,
       pendingCommands: new Set(),
     };
     this.sessions.set(transport.id, session);
@@ -251,6 +305,9 @@ export class FleetWsGateway {
     this.detachConfig?.();
     this.detachEvents?.();
     this.detachMetrics?.();
+    this.detachSignals?.();
+    this.detachAttributes?.();
+    this.detachAlarms?.();
     for (const session of [...this.sessions.values()]) {
       session.transport.close(1001, "server shutting down");
     }
@@ -277,6 +334,9 @@ export class FleetWsGateway {
     if (msg.type === "hello") {
       session.ready = true;
       session.missedPushes = 0;
+      // Welcome first: the connection's resolved RBAC role (the account indicator's
+      // source), sent before the snapshot so the shell can render identity immediately.
+      this.send(session, { type: "welcome", protocolVersion: PROTOCOL_VERSION, role: session.role });
       this.resync(session, msg.resumeSeq);
       return;
     }
@@ -335,6 +395,47 @@ export class FleetWsGateway {
       }
       case "unsubscribe-metrics":
         session.metricsSubscribed = false;
+        return;
+      case "subscribe-signals": {
+        session.signalsSubscribed = true;
+        this.send(session, {
+          type: "signals",
+          protocolVersion: PROTOCOL_VERSION,
+          series: this.activity?.signals?.snapshot() ?? [],
+        });
+        return;
+      }
+      case "unsubscribe-signals":
+        session.signalsSubscribed = false;
+        return;
+      case "subscribe-attributes": {
+        session.attributesSubscribed = true;
+        this.send(session, {
+          type: "attributes",
+          protocolVersion: PROTOCOL_VERSION,
+          components: this.activity?.attributes?.snapshot() ?? [],
+        });
+        return;
+      }
+      case "unsubscribe-attributes":
+        session.attributesSubscribed = false;
+        return;
+      case "subscribe-alarms": {
+        session.alarmsSubscribed = true;
+        this.send(session, {
+          type: "alarms",
+          protocolVersion: PROTOCOL_VERSION,
+          snapshot: this.activity?.alarms?.snapshot() ?? EMPTY_ALARM_SNAPSHOT,
+        });
+        return;
+      }
+      case "unsubscribe-alarms":
+        session.alarmsSubscribed = false;
+        return;
+      case "ack-alarm":
+        // Ack toggles console-side state; the tracker's onUpdate re-pushes the fresh
+        // `alarms` snapshot to every subscribed client (no direct reply needed).
+        this.activity?.alarms?.ack(msg.alarmId);
         return;
       case "invoke-command":
         this.onInvokeCommand(session, msg);
@@ -430,6 +531,48 @@ export class FleetWsGateway {
         type: "metric",
         protocolVersion: PROTOCOL_VERSION,
         updates,
+      } satisfies ServerMessage);
+      this.sendEncoded(session, encoded);
+    }
+  }
+
+  /** A fresh signal sample batch (R0 data plane): push to every signal-subscribed client. */
+  private pushSignalUpdates(updates: SignalSeriesUpdate[]): void {
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.signalsSubscribed) continue;
+      encoded ??= JSON.stringify({
+        type: "signal",
+        protocolVersion: PROTOCOL_VERSION,
+        updates,
+      } satisfies ServerMessage);
+      this.sendEncoded(session, encoded);
+    }
+  }
+
+  /** A fresh runtime-attribute batch (R0): push to every attribute-subscribed client. */
+  private pushAttributeUpdates(updates: RuntimeAttributes[]): void {
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.attributesSubscribed) continue;
+      encoded ??= JSON.stringify({
+        type: "attribute",
+        protocolVersion: PROTOCOL_VERSION,
+        updates,
+      } satisfies ServerMessage);
+      this.sendEncoded(session, encoded);
+    }
+  }
+
+  /** A fresh alarm snapshot (R0): replace-push to every alarm-subscribed client. */
+  private pushAlarms(snapshot: AlarmSnapshot): void {
+    let encoded: string | undefined;
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready || !session.alarmsSubscribed) continue;
+      encoded ??= JSON.stringify({
+        type: "alarms",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot,
       } satisfies ServerMessage);
       this.sendEncoded(session, encoded);
     }

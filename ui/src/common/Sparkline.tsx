@@ -13,6 +13,9 @@
  * zero time span) render as a centered flat line + endpoint dot. A native SVG
  * `<title>` carries the min/max/latest summary as the lightweight hover layer, and
  * `role="img"` + `aria-label` state the trend for assistive tech.
+ *
+ * A generic mark (shared across screens — e.g. the Events "per minute" tile);
+ * relocated to `common/` when the off-contract Metrics page was removed in R0.
  */
 import type { MetricPoint } from "@edgecommons/edge-console-protocol";
 

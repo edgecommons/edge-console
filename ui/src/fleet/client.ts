@@ -36,8 +36,8 @@ import { ConfigStore } from "./config-store";
 import type { ConfigView } from "./config-store";
 import { EventLogStore } from "./event-log-store";
 import type { EventsView } from "./event-log-store";
-import { MetricSeriesStore } from "./metric-series-store";
-import type { MetricsView } from "./metric-series-store";
+import { AlarmStore } from "./alarm-store";
+import type { AlarmsView } from "./alarm-store";
 import { CommandStore } from "./command-store";
 import type { CommandView } from "./command-store";
 
@@ -110,8 +110,10 @@ export interface ClientState {
   configs: ConfigView;
   /** The C6 rolling event log (newest-first, populated while subscribed). */
   events: EventsView;
-  /** The C6 metric surface (latest + bounded series, populated while subscribed). */
-  metrics: MetricsView;
+  /** The R0 console-side alarm surface (active list + counts) — the notifications badge. */
+  alarms: AlarmsView;
+  /** The connection's resolved RBAC role (from the `welcome` frame) — the account indicator. */
+  role?: string;
   /** The C4 command state (per-request phases + per-button latest + the toast feed). */
   commands: CommandView;
   wsUrl: string;
@@ -123,8 +125,8 @@ export class FleetClient {
   readonly configStore: ConfigStore;
   /** The C6 event-log fold core (pure; this client is its IO shell). */
   readonly eventLog: EventLogStore;
-  /** The C6 metric-series fold core (pure; this client is its IO shell). */
-  readonly metricSeries: MetricSeriesStore;
+  /** The R0 alarm fold core (pure; this client is its IO shell). */
+  readonly alarmStore: AlarmStore;
   /** The C4 command fold core (pure; this client is its IO shell). */
   readonly commandStore: CommandStore;
 
@@ -168,9 +170,12 @@ export class FleetClient {
     this.store = new FleetStore(opts.ladder);
     this.configStore = new ConfigStore();
     this.eventLog = new EventLogStore();
-    this.metricSeries = new MetricSeriesStore();
+    this.alarmStore = new AlarmStore();
     this.commandStore = new CommandStore();
   }
+
+  /** The connection's resolved RBAC role (from the `welcome` frame); undefined until it arrives. */
+  private role: string | undefined;
 
   /** Dial and keep the connection alive until {@link stop}. Idempotent. */
   start(): void {
@@ -259,17 +264,28 @@ export class FleetClient {
   }
 
   /**
-   * Subscribe to the metric surface (C6 `subscribe-metrics`): a full latest+series
-   * snapshot replaces the local state, then live samples stream in. Re-subscribe
-   * on reconnect is the owning view's effect, as above.
+   * Subscribe to the console-side alarm surface (R0 `subscribe-alarms`): one replace
+   * `alarms` snapshot (active list + counts) arrives immediately and again on every
+   * later change. The app shell subscribes on connect (the notifications badge is
+   * global); server-side interest is per-connection, so the shell re-subscribes
+   * whenever the connection comes (back) up — the same reconnect story as the others.
    */
-  subscribeMetrics(): void {
-    this.sendFrame({ type: "subscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  subscribeAlarms(): void {
+    this.sendFrame({ type: "subscribe-alarms", protocolVersion: PROTOCOL_VERSION });
   }
 
-  /** Stop the metric stream. Idempotent. */
-  unsubscribeMetrics(): void {
-    this.sendFrame({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  /** Stop the alarm stream. Idempotent. */
+  unsubscribeAlarms(): void {
+    this.sendFrame({ type: "unsubscribe-alarms", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
+   * Acknowledge an active alarm (R0 `ack-alarm`) — console-side state that does not
+   * clear the alarm. No direct reply: the tracker re-pushes a fresh `alarms` snapshot
+   * (with the alarm now `acked`) to every subscribed client.
+   */
+  ackAlarm(alarmId: string): void {
+    this.sendFrame({ type: "ack-alarm", protocolVersion: PROTOCOL_VERSION, alarmId });
   }
 
   /**
@@ -329,16 +345,17 @@ export class FleetClient {
     const fleet = this.store.view();
     const configs = this.configStore.view();
     const events = this.eventLog.view();
-    const metrics = this.metricSeries.view();
+    const alarms = this.alarmStore.view();
     const commands = this.commandStore.view();
     if (
       this.stateCache === undefined ||
       this.stateCache.fleet !== fleet ||
       this.stateCache.configs !== configs ||
       this.stateCache.events !== events ||
-      this.stateCache.metrics !== metrics ||
+      this.stateCache.alarms !== alarms ||
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
+      this.stateCache.role !== this.role ||
       this.stateCache.fatalError !== this.fatalError
     ) {
       this.stateCache = {
@@ -348,7 +365,8 @@ export class FleetClient {
         fleet,
         configs,
         events,
-        metrics,
+        alarms,
+        ...(this.role !== undefined ? { role: this.role } : {}),
         commands,
         wsUrl: this.url,
       };
@@ -453,13 +471,13 @@ export class FleetClient {
         this.retries = 0;
         this.notify();
         return;
-      case "metrics":
-        this.metricSeries.applySnapshot(msg.series);
+      case "welcome":
+        this.role = msg.role;
         this.retries = 0;
         this.notify();
         return;
-      case "metric":
-        this.metricSeries.applyUpdates(msg.updates);
+      case "alarms":
+        this.alarmStore.applySnapshot(msg.snapshot);
         this.retries = 0;
         this.notify();
         return;

@@ -425,6 +425,7 @@ export class FleetModel {
         at: now,
         key: { ...key },
         path: comp.path,
+        hier: comp.hier.map((e) => ({ ...e })),
       });
     }
     return comp;
