@@ -44,6 +44,7 @@ export function consoleSettings(config: ConsoleConfig, self?: ConsoleSelfInfo): 
       wsPort: config.ws.port,
       wsBindAddress: config.ws.bindAddress,
       heartbeatIntervalMs: config.ws.heartbeatIntervalMs,
+      servesUi: config.ws.webRoot !== undefined,
     },
     staleness: {
       warnMultiplier: config.staleness.warnMultiplier,

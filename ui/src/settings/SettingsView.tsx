@@ -270,6 +270,19 @@ function ConnectionSection({ conn }: { conn: ConsoleSettings["connection"] }): R
         <SRow label="Heartbeat cadence" testId="settings-conn-heartbeat">
           <span className="ec-mono">{formatMs(conn.heartbeatIntervalMs)}</span>
         </SRow>
+        <SRow label="Serves UI" testId="settings-conn-serves-ui">
+          {conn.servesUi === undefined ? (
+            <ValueOrPending value={undefined} pendingTitle="not reported by this gateway" />
+          ) : conn.servesUi ? (
+            <Tag size="sm" type="green" className="ec-tag" title="this gateway also serves the built UI on this same WS origin (console.ws.webRoot) - no separate nginx/Vite needed">
+              yes
+            </Tag>
+          ) : (
+            <Tag size="sm" type="cool-gray" className="ec-tag" title="console.ws.webRoot is not set - the UI must be served separately (e.g. the Vite dev server)">
+              no
+            </Tag>
+          )}
+        </SRow>
       </SList>
     </Section>
   );

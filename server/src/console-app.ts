@@ -218,6 +218,9 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     bindAddress: config.ws.bindAddress,
     // The auth seam (stubbed): every connection gets the configured RBAC default role.
     resolveRole: () => config.rbac.defaultRole,
+    // Opt-in static UI serving (console.ws.webRoot) - absent means WsServer behaves
+    // exactly as before (only /healthz + /ws).
+    ...(config.ws.webRoot !== undefined ? { webRoot: config.ws.webRoot } : {}),
   });
   await wsServer.start();
   const wsTicker = setInterval(() => gateway.tick(), config.ws.heartbeatIntervalMs);

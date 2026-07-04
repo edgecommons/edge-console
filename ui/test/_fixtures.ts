@@ -192,6 +192,7 @@ export function consoleSettings(overrides: Partial<ConsoleSettings> = {}): Conso
       wsPort: 8443,
       wsBindAddress: "0.0.0.0",
       heartbeatIntervalMs: 15000,
+      servesUi: false,
     },
     staleness: {
       warnMultiplier: 2,

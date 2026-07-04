@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/ggcommons";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
@@ -459,5 +462,41 @@ describe("startConsole - the C4 command round-trip", () => {
     expect(bus.requests).toHaveLength(0); // denied before any request
 
     await app.stop();
+  });
+});
+
+describe("startConsole - end-to-end static UI serving (console.ws.webRoot)", () => {
+  // Real timers: this drives the real bound WsServer over an actual loopback socket.
+  it("wires config.ws.webRoot through to the real WsServer AND into the settings projection", async () => {
+    const root = mkdtempSync(join(tmpdir(), "edge-console-app-ui-"));
+    writeFileSync(join(root, "index.html"), "<!doctype html><body>hi</body>", "utf8");
+    try {
+      const bus = new FakeBus();
+      const app = await start(bus, { console: { ws: { webRoot: root } } });
+      expect(app.config.ws.webRoot).toBe(root);
+
+      const addr = app.wsServer.address();
+      expect(addr).not.toBeNull();
+      const res = await fetch(`http://127.0.0.1:${addr!.port}/`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("<!doctype html><body>hi</body>");
+
+      // The R6 Settings projection reflects it honestly.
+      const sent: ServerMessage[] = [];
+      const transport: ClientTransport = {
+        id: "browser-1",
+        send: (data) => sent.push(JSON.parse(data) as ServerMessage),
+        bufferedAmount: () => 0,
+        close: () => undefined,
+      };
+      const session = app.gateway.connect(transport, "operator");
+      session.onMessage(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+      const settingsMsg = sent.find((m) => m.type === "settings");
+      expect(settingsMsg?.type === "settings" && settingsMsg.settings.connection.servesUi).toBe(true);
+
+      await app.stop();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

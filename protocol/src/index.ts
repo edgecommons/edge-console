@@ -586,6 +586,13 @@ export interface ConsoleSettings {
     wsBindAddress: string;
     /** Server→client heartbeat cadence (ms) (`console.ws.heartbeatIntervalMs`). */
     heartbeatIntervalMs: number;
+    /**
+     * Whether the console serves its own built UI (`ui/dist`) on this same WS gateway
+     * origin (`console.ws.webRoot` configured) — a self-contained deployment needing no
+     * separate Vite/nginx front. Optional for wire back-compat with hand-built test
+     * fixtures/older gateways; a running console always populates it honestly.
+     */
+    servesUi?: boolean;
   };
   /** The miss-detection ladder (`console.staleness`, DESIGN §6.2). */
   staleness: {

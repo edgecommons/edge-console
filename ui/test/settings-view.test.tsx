@@ -46,6 +46,8 @@ describe("SettingsView (R6)", () => {
     expect(within(conn).getByText("EMQX @ gateway")).toBeTruthy();
     expect(within(conn).getByText("0.0.0.0:8443/ws")).toBeTruthy();
     expect(within(conn).getByText("15 s")).toBeTruthy();
+    // Serves UI: false in the fixture (no console.ws.webRoot) -> the honest "no" tag.
+    expect(within(screen.getByTestId("settings-conn-serves-ui")).getByText("no")).toBeTruthy();
 
     // Thresholds: the mockup ladder string verbatim.
     expect(screen.getByTestId("settings-staleness").textContent).toContain(
@@ -107,6 +109,15 @@ describe("SettingsView (R6)", () => {
     expect(within(screen.getByTestId("settings-sitemap-gw-01")).getByText("direct under site")).toBeTruthy();
     // Unknown connection identity → "not announced" (not fabricated).
     expect(within(screen.getByTestId("settings-connection")).getAllByText("not announced").length).toBeGreaterThan(0);
+    // servesUi omitted (an older/hand-built settings frame) → honestly shown as unreported, not fabricated.
+    expect(within(screen.getByTestId("settings-conn-serves-ui")).getByText("not announced")).toBeTruthy();
+  });
+
+  it("shows the 'Serves UI: yes' tag when the console's own webRoot is configured", () => {
+    const settings = consoleSettings({ connection: { ...consoleSettings().connection, servesUi: true } });
+    const state = clientState(fleetWithLines(), { settings, role: "viewer" });
+    render(<SettingsView state={state} />);
+    expect(within(screen.getByTestId("settings-conn-serves-ui")).getByText("yes")).toBeTruthy();
   });
 
   it("shows an honest empty state before the settings frame arrives", () => {

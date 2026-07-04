@@ -8,6 +8,7 @@
  * house style (`HeartbeatConfig` et al.): a missing/malformed section or field falls
  * back to its default rather than failing the component.
  */
+import { resolve } from "node:path";
 import { logger } from "@edgecommons/ggcommons";
 import { DEFAULT_RBAC_CONFIG } from "./command/rbac";
 import type { RbacConfig, RolePolicy } from "./command/rbac";
@@ -34,6 +35,14 @@ export interface WsConfig {
   bindAddress: string;
   /** Server->client heartbeat cadence (ms); also the tick granularity for evicting a client that never sends `hello`. Default 15000. */
   heartbeatIntervalMs: number;
+  /**
+   * Absolute filesystem path to the built UI (`ui/dist`) to serve on this same HTTP+WS
+   * origin, resolved against the process cwd when given as a relative path. **Opt-in**:
+   * absent (the default) means the console serves ONLY `/healthz` + the `/ws` upgrade,
+   * exactly as before this option existed — no static serving, `/` still 404s. Set it to
+   * make the console a genuinely self-contained deployment (no nginx/Vite sidecar needed).
+   */
+  webRoot?: string;
 }
 
 /** FleetModel cache bounds. */
@@ -139,6 +148,16 @@ function nonEmptyString(value: unknown, dflt: string): string {
   return typeof value === "string" && value !== "" ? value : dflt;
 }
 
+/**
+ * The static web-root path, resolved against the process cwd (relative) or normalized
+ * (absolute); `undefined` for an absent/malformed value — the opt-in "no static serving"
+ * default (`path.resolve` with a single argument already falls back to `process.cwd()`
+ * for a relative input, and passes an absolute input through normalized).
+ */
+function webRootPath(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? resolve(value) : undefined;
+}
+
 /** The string entries of an array (non-strings dropped), or `[]` for a non-array. */
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
@@ -231,6 +250,8 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
     offlineMultiplier = DEFAULT_STALENESS.offlineMultiplier;
   }
 
+  const webRoot = webRootPath(ws.webRoot);
+
   return {
     ws: {
       port: port(ws.port, DEFAULT_CONSOLE_CONFIG.ws.port),
@@ -242,6 +263,7 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
         ws.heartbeatIntervalMs,
         DEFAULT_CONSOLE_CONFIG.ws.heartbeatIntervalMs,
       ),
+      ...(webRoot !== undefined ? { webRoot } : {}),
     },
     staleness: {
       warnMultiplier,

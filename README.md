@@ -74,9 +74,10 @@ interval, and `cfg` of long-running components is the known gap.
 
 ## The WS gateway (slice C2)
 
-An HTTP + WebSocket server (`ws` + `node:http` — no framework: this slice serves exactly
-`/ws` plus a trivial `/healthz` probe) fans the FleetModel's snapshot + delta stream out to
-browsers, **snapshot-then-deltas**:
+An HTTP + WebSocket server (`ws` + `node:http`/`node:fs` — no framework: this slice serves
+`/ws`, a trivial `/healthz` probe, and — opt-in — the console's own built UI as static files
+on that SAME origin) fans the FleetModel's snapshot + delta stream out to browsers,
+**snapshot-then-deltas**:
 
 - On connect, a client's first frame must be `{"type":"hello","protocolVersion":1}`
   (optionally `resumeSeq`). The gateway replies with one `snapshot` (the current
@@ -100,6 +101,40 @@ browsers, **snapshot-then-deltas**:
   the WS gateway is the sole browser↔bus bridge and today serves the full fleet snapshot +
   live stream to anyone who can reach the bound port. Add a credential check at the WS
   upgrade before exposing this beyond a trusted network.
+
+### Serving the console's own UI (`console.ws.webRoot`)
+
+Set `component.global.console.ws.webRoot` to a filesystem path (the built `ui/dist`,
+relative paths resolve against the process cwd) and the console becomes a genuinely
+**self-contained** deployment: it serves its own UI as static files on the SAME
+port/origin as the WS gateway — no separate nginx front or Vite process needed for a
+built deployment.
+
+- **Opt-in, backward-compatible**: `webRoot` unset (the default) is byte-for-byte the
+  pre-existing behavior — only `/healthz` + the `/ws` upgrade are handled; every other
+  GET (including `/`) 404s.
+- **Routing precedence**: `/healthz` first, then (only when `webRoot` is set) static
+  file serving for every other `GET`; the `/ws` upgrade never competes with either —
+  Node's `http` module hands an `Upgrade: websocket` request straight to the `upgrade`
+  event (owned by `ws`), never to the plain `request` handler these routes live in.
+- **SPA fallback**: a request whose path has no file extension (an app route, not an
+  asset like `/assets/app-<hash>.js`) and doesn't resolve to a real file serves the root
+  `index.html` instead, so deep-linking into the UI's client-side router works. A
+  missing path that DOES look like an asset (has an extension) still 404s for real.
+- **Traversal guard**: the request path is decoded into a whitelist of plain path
+  segments — any `..` (or a decode failure / embedded NUL) is rejected with `403`
+  before touching the filesystem; nothing outside `webRoot` can ever be served.
+- **Caching**: `index.html` is `no-cache` (a redeploy must be picked up immediately);
+  every other file gets a long `immutable` lifetime (Vite content-hashes every
+  non-`index.html` asset, so a changed file is always a new URL).
+- The read-only Settings screen (R6) reflects it — a "Serves UI: yes/no" row under
+  **Connection**, sourced from the same `console.ws.webRoot` knob.
+- **Dev-mode Vite is unaffected**: `npm run dev -w ui` still proxies `/ws` to the
+  server for hot-reload; `webRoot` only matters for a *built* deployment
+  (`npm run build` then point `webRoot` at `ui/dist`).
+- **TLS/HTTPS is a separate, still-open concern** — the server is plain `http` today
+  regardless of `webRoot`; terminate TLS in front of it (reverse proxy/load balancer)
+  until the gateway grows its own HTTPS listener.
 
 ## The edge-health UI (slice C3)
 

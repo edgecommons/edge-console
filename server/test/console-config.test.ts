@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
 import { Config, validate } from "@edgecommons/ggcommons";
 
@@ -101,6 +101,32 @@ describe("consoleConfigFromGlobal", () => {
     expect(parsed.staleness.warnMultiplier).toBe(1.1);
     expect(parsed.staleness.staleMultiplier).toBe(1.2);
     expect(parsed.staleness.offlineMultiplier).toBe(1.3);
+  });
+});
+
+describe("consoleConfigFromGlobal - the static-UI web root (console.ws.webRoot)", () => {
+  it("is absent by default - the opt-in, backward-compatible default (no static serving)", () => {
+    expect(consoleConfigFromGlobal({}).ws.webRoot).toBeUndefined();
+    expect(consoleConfigFromGlobal({ console: { ws: {} } }).ws.webRoot).toBeUndefined();
+  });
+
+  it("resolves a relative path against the process cwd", () => {
+    const parsed = consoleConfigFromGlobal({ console: { ws: { webRoot: "ui/dist" } } });
+    expect(parsed.ws.webRoot).toBe(resolve(process.cwd(), "ui/dist"));
+  });
+
+  it("normalizes (but keeps) an already-absolute path", () => {
+    const abs = resolve(process.cwd(), "some", "..", "other", "dist");
+    const parsed = consoleConfigFromGlobal({ console: { ws: { webRoot: abs } } });
+    expect(parsed.ws.webRoot).toBe(resolve(abs));
+  });
+
+  it("treats an empty string the same as absent", () => {
+    expect(consoleConfigFromGlobal({ console: { ws: { webRoot: "" } } }).ws.webRoot).toBeUndefined();
+  });
+
+  it("ignores a non-string value", () => {
+    expect(consoleConfigFromGlobal({ console: { ws: { webRoot: 42 } } }).ws.webRoot).toBeUndefined();
   });
 });
 

@@ -67,12 +67,32 @@ cd <CONSOLE> && node server/dist/main.js \
   --platform HOST --transport MQTT ./test-configs/config.json \
   -c FILE ./test-configs/config.json -t site-console        # WS gateway on 0.0.0.0:8443/ws
 
-# UI (Vite). IMPORTANT: after any protocol/ version bump, start with --force or the stale
-# dep-prebundle sends an old protocolVersion and the gateway rejects the hello (v-mismatch):
+# UI (Vite dev server, for hot-reload). IMPORTANT: after any protocol/ version bump, start
+# with --force or the stale dep-prebundle sends an old protocolVersion and the gateway
+# rejects the hello (v-mismatch):
 cd <CONSOLE> && npm run dev -w ui -- --force                # http://localhost:5173 (proxies /ws->8443)
 ```
 
-## 6. Verify (headed browser at http://localhost:5173)
+### 5b. Alternative: a BUILT, self-contained deployment (no Vite, no nginx)
+
+Since the static-UI-serving slice, the console server can serve its own built UI on the
+SAME port as the WS gateway — set `component.global.console.ws.webRoot` to the built
+`ui/dist` (relative paths resolve against the server's cwd) and skip step 5's Vite
+process entirely:
+
+```bash
+# test-configs/config.json: add `"webRoot": "../ui/dist"` under component.global.console.ws
+# (relative to <CONSOLE>/server, the server's cwd when launched with `cd <CONSOLE>`) - or
+# point it at an absolute path to a built ui/dist.
+cd <CONSOLE> && node server/dist/main.js \
+  --platform HOST --transport MQTT ./test-configs/config.json \
+  -c FILE ./test-configs/config.json -t site-console
+# Browse straight to http://localhost:8443/ — the console serves index.html + the
+# hashed assets itself; no :5173, no separate front. (TLS/HTTPS termination is still a
+# separate, not-yet-built concern — the server is plain http either way.)
+```
+
+## 6. Verify (headed browser at http://localhost:5173, or http://localhost:8443 for 5b)
 1. Overview: gw-01 shows TsSensor/PyMeter/uns-bridge FRESH; keepalive "5s · cfg".
 2. Configuration → pick TsSensor → Refresh: "received … ago" resets (real republish-cfg round-trip).
 3. Events: alternating TsSensor/PyMeter sample-events, live tail.

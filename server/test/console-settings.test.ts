@@ -28,6 +28,7 @@ describe("consoleSettings projector", () => {
     expect(s.rbac.roles.find((r) => r.name === "viewer")?.isDefault).toBe(false);
 
     // Connection: the self-identity is folded in, plus the WS listener from the config.
+    // servesUi is false: DEFAULT_CONSOLE_CONFIG has no ws.webRoot configured.
     expect(s.connection).toEqual({
       device: "gw-dallas-01",
       component: "edge-console",
@@ -37,6 +38,7 @@ describe("consoleSettings projector", () => {
       wsPort: 8443,
       wsBindAddress: "0.0.0.0",
       heartbeatIntervalMs: 15000,
+      servesUi: false,
     });
 
     // Thresholds / commands / retention mirror the config verbatim.
@@ -70,6 +72,12 @@ describe("consoleSettings projector", () => {
     // The WS listener is always known (it is the console's own config).
     expect(s.connection.wsPort).toBe(8443);
     expect(s.connection.heartbeatIntervalMs).toBe(15000);
+  });
+
+  it("flags servesUi true once console.ws.webRoot is configured", () => {
+    const config = consoleConfigFromGlobal({ console: { ws: { webRoot: "/srv/console/ui-dist" } } });
+    expect(consoleSettings(config).connection.servesUi).toBe(true);
+    expect(consoleSettings(DEFAULT_CONSOLE_CONFIG).connection.servesUi).toBe(false);
   });
 
   it("reflects overridden config (roles sorted, default flagged, verb timeouts sorted)", () => {
