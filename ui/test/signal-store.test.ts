@@ -23,9 +23,9 @@ describe("SignalStore (browser fold)", () => {
     const v = store.view();
     // Sorted: gw-01/opcua/Pressure, gw-01/opcua/Temp, gw-02/modbus/flow.
     expect(v.series.map((s) => `${componentKeyId(s.key)}/${s.signal}`)).toEqual([
-      "gw-01/opcua-adapter/main/Pressure",
-      "gw-01/opcua-adapter/main/Temp",
-      "gw-02/modbus-adapter/main/flow",
+      "gw-01/opcua-adapter/Pressure",
+      "gw-01/opcua-adapter/Temp",
+      "gw-02/modbus-adapter/flow",
     ]);
     expect(store.get(key("gw-01", "opcua-adapter"), "Temp")!.latest).toBe(72.4);
     expect(store.get(key("gw-01", "opcua-adapter"), "missing")).toBeUndefined();
@@ -54,7 +54,7 @@ describe("SignalStore (browser fold)", () => {
 
     const update: SignalSeriesUpdate = {
       key: key("gw-01", "a"),
-      signal: "s",
+      instance: "main", signal: "s",
       point: { at: T0 + 5000, value: 22, quality: "UNCERTAIN" },
       sourceTimestamp: "2026-07-04T00:00:05.000Z",
     };
@@ -73,7 +73,7 @@ describe("SignalStore (browser fold)", () => {
   it("creates a brand-new series from a live update (no prior snapshot entry)", () => {
     const store = new SignalStore();
     store.applyUpdates([
-      { key: key("gw-01", "a"), signal: "fresh", point: { at: T0, value: 7 } },
+      { key: key("gw-01", "a"), instance: "main", signal: "fresh", point: { at: T0, value: 7 } },
     ]);
     const s = store.get(key("gw-01", "a"), "fresh")!;
     expect(s.latest).toBe(7);
@@ -84,10 +84,10 @@ describe("SignalStore (browser fold)", () => {
   it("clears a stale quality/sourceTimestamp when a later point omits it", () => {
     const store = new SignalStore();
     store.applyUpdates([
-      { key: key("gw-01", "a"), signal: "s", point: { at: T0, value: 1, quality: "GOOD" }, sourceTimestamp: "x" },
+      { key: key("gw-01", "a"), instance: "main", signal: "s", point: { at: T0, value: 1, quality: "GOOD" }, sourceTimestamp: "x" },
     ]);
     expect(store.get(key("gw-01", "a"), "s")!.quality).toBe("GOOD");
-    store.applyUpdates([{ key: key("gw-01", "a"), signal: "s", point: { at: T0 + 1, value: 2 } }]);
+    store.applyUpdates([{ key: key("gw-01", "a"), instance: "main", signal: "s", point: { at: T0 + 1, value: 2 } }]);
     const s = store.get(key("gw-01", "a"), "s")!;
     expect(s.quality).toBeUndefined();
     expect(s.sourceTimestamp).toBeUndefined();
@@ -96,7 +96,7 @@ describe("SignalStore (browser fold)", () => {
   it("bounds the recent series drop-oldest at maxSeriesPoints", () => {
     const store = new SignalStore({ maxSeriesPoints: 3 });
     for (let i = 0; i < 6; i++) {
-      store.applyUpdates([{ key: key("gw-01", "a"), signal: "s", point: { at: T0 + i, value: i } }]);
+      store.applyUpdates([{ key: key("gw-01", "a"), instance: "main", signal: "s", point: { at: T0 + i, value: i } }]);
     }
     const s = store.get(key("gw-01", "a"), "s")!;
     expect(s.points.map((p) => p.value)).toEqual([3, 4, 5]); // oldest three dropped
@@ -106,14 +106,14 @@ describe("SignalStore (browser fold)", () => {
   it("caps distinct series and counts the overflow", () => {
     const store = new SignalStore({ maxSeries: 2 });
     store.applyUpdates([
-      { key: key("gw-01", "a"), signal: "s1", point: { at: T0, value: 1 } },
-      { key: key("gw-01", "a"), signal: "s2", point: { at: T0, value: 2 } },
-      { key: key("gw-01", "a"), signal: "s3", point: { at: T0, value: 3 } }, // dropped
+      { key: key("gw-01", "a"), instance: "main", signal: "s1", point: { at: T0, value: 1 } },
+      { key: key("gw-01", "a"), instance: "main", signal: "s2", point: { at: T0, value: 2 } },
+      { key: key("gw-01", "a"), instance: "main", signal: "s3", point: { at: T0, value: 3 } }, // dropped
     ]);
     expect(store.seriesCount()).toBe(2);
     expect(store.droppedSeries()).toBe(1);
     // Existing series keep updating even at the cap.
-    store.applyUpdates([{ key: key("gw-01", "a"), signal: "s1", point: { at: T0 + 1, value: 11 } }]);
+    store.applyUpdates([{ key: key("gw-01", "a"), instance: "main", signal: "s1", point: { at: T0 + 1, value: 11 } }]);
     expect(store.get(key("gw-01", "a"), "s1")!.latest).toBe(11);
   });
 

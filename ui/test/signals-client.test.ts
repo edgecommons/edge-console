@@ -88,13 +88,13 @@ describe("FleetClient — data-plane signals", () => {
       updates: [
         {
           key: key("gw-01", "opcua-adapter"),
-          signal: "Temp",
+          instance: "main", signal: "Temp",
           point: { at: T0 + 1000, value: 73.1, quality: "UNCERTAIN" },
         },
       ],
     });
     series = client.getState().signals.series;
-    const s = series.find((x) => componentKeyId(x.key) === "gw-01/opcua-adapter/main" && x.signal === "Temp")!;
+    const s = series.find((x) => componentKeyId(x.key) === "gw-01/opcua-adapter" && x.signal === "Temp")!;
     expect(s.latest).toBe(73.1);
     expect(s.quality).toBe("UNCERTAIN");
     expect(s.points).toHaveLength(2);

@@ -103,11 +103,6 @@ function PickerRow({
       <span className={`ec-cfg-dot ec-cfg-dot--${DOT_CLASS[comp.liveness]}`} aria-hidden="true" />
       <span className="ec-cfg-pick__name">
         <span className="ec-pri">{comp.key.component}</span>
-        {comp.key.instance !== "main" && (
-          <Tag size="sm" type="outline" className="ec-instance">
-            {comp.key.instance}
-          </Tag>
-        )}
         <span className="ec-dim ec-mono ec-cfg-pick__device">{comp.key.device}</span>
       </span>
       <AvailabilityTag entry={entry} />
@@ -340,9 +335,7 @@ function ConfigDetail({
     <div className="ec-cfg-head">
       <div className="ec-cfg-head__id">
         <b>{selectedKey.component}</b>
-        <span className="ec-dim ec-mono">
-          {selectedKey.device}/{selectedKey.instance}
-        </span>
+        <span className="ec-dim ec-mono">{selectedKey.device}</span>
         {entry?.phase === "loaded" && entry.receivedAt !== undefined && (
           <span className="ec-dim" data-testid="config-received">
             received {formatDurationMs(Math.max(0, nowServerMs - entry.receivedAt))} ago
@@ -462,7 +455,7 @@ export function ConfigReviewView({
   const nowServerMs = now - fleet.clockOffsetMs;
   const components = fleet.devices.flatMap((d) => d.components);
   const selectedId =
-    selected !== undefined ? `${selected.device}/${selected.component}/${selected.instance}` : undefined;
+    selected !== undefined ? `${selected.device}/${selected.component}` : undefined;
   const selectedComp = components.find((c) => c.id === selectedId);
   const selectedEntry = selectedId !== undefined ? state.configs.entriesById[selectedId] : undefined;
 

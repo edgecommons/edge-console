@@ -25,7 +25,7 @@ import {
 function cfgView(entries: Array<[ComponentKey, Record<string, unknown>]>): ConfigView {
   const entriesById: ConfigView["entriesById"] = {};
   for (const [k, config] of entries) {
-    const id = `${k.device}/${k.component}/${k.instance}`;
+    const id = `${k.device}/${k.component}`;
     entriesById[id] = { key: k, id, phase: "loaded", body: { config }, receivedAt: 0, refreshing: false };
   }
   return { entriesById };
@@ -207,7 +207,7 @@ describe("buildTopologyModel — a 3-level hierarchy with endpoints", () => {
   });
 
   it("colors the southbound edge from the live connection state (up but link down)", () => {
-    const modbusEdge = model.edges.find((e) => e.from === `comp:${modbus.device}/${modbus.component}/main`);
+    const modbusEdge = model.edges.find((e) => e.from === `comp:${modbus.device}/${modbus.component}`);
     expect(modbusEdge?.kind).toBe("southbound");
     expect(modbusEdge?.status).toBe("err");
     expect(modbusEdge?.disconnected).toBe(true);
@@ -218,7 +218,7 @@ describe("buildTopologyModel — a 3-level hierarchy with endpoints", () => {
   });
 
   it("keeps a healthy southbound edge green, and its field node neutral", () => {
-    const opcEdge = model.edges.find((e) => e.from === `comp:${opcua.device}/${opcua.component}/main`);
+    const opcEdge = model.edges.find((e) => e.from === `comp:${opcua.device}/${opcua.component}`);
     expect(opcEdge?.status).toBe("ok");
     expect(opcEdge?.disconnected).toBeUndefined();
     const field = model.nodes.find((n) => n.id === opcEdge?.to);
@@ -226,7 +226,7 @@ describe("buildTopologyModel — a 3-level hierarchy with endpoints", () => {
   });
 
   it("relays the processor northbound through the bus to the cloud", () => {
-    const compId = `comp:${proc.device}/${proc.component}/main`;
+    const compId = `comp:${proc.device}/${proc.component}`;
     expect(model.edges.some((e) => e.from === compId && e.to === "bus" && e.kind === "bus")).toBe(true);
     const nb = model.edges.find((e) => e.from === "bus" && e.kind === "northbound");
     expect(nb?.status).toBe("ok");

@@ -171,7 +171,7 @@ export function CommandControls({ comp, commands, onInvoke }: CommandControlsPro
       <div className="ec-cmd__hd">
         <span className="ec-cmd__label">Controls</span>
         <span className="ec-dim">
-          built-in verbs · <span className="ec-mono">{comp.key.component}/{comp.key.instance}</span>
+          built-in verbs · <span className="ec-mono">{comp.key.component}</span>
         </span>
       </div>
       <div className="ec-cmd__row">

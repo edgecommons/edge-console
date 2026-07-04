@@ -107,11 +107,6 @@ function TreeRow({
             node.label
           )}
         </span>
-        {comp !== undefined && comp.key.instance !== "main" && (
-          <Tag size="sm" type="outline" className="ec-instance">
-            {comp.key.instance}
-          </Tag>
-        )}
         {isGroup && (
           node.unreachable ? (
             <Tag size="sm" type="gray" className="ec-tag ec-tag--unreach">
@@ -176,14 +171,7 @@ function Roster({
         {comps.map((comp) => (
           <div className="ec-roster__row" key={comp.id} data-testid={`roster-row-${comp.id}`}>
             <StatusTag liveness={comp.liveness} size="sm" />
-            <span className="ec-pri">
-              {comp.key.component}
-              {comp.key.instance !== "main" && (
-                <Tag size="sm" type="outline" className="ec-instance">
-                  {comp.key.instance}
-                </Tag>
-              )}
-            </span>
+            <span className="ec-pri">{comp.key.component}</span>
             <span className="ec-mono">{comp.key.device}</span>
             <span className="ec-mono ec-tnum">
               {comp.lastStateAt !== undefined

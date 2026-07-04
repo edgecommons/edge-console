@@ -86,32 +86,32 @@ describe("Overview — the faithful line-grouped fleet", () => {
       expect(screen.getByRole("columnheader", { name: col })).toBeTruthy();
     }
     // opcua-adapter: real attributes + a 2s heartbeat.
-    const opcua = screen.getByTestId("component-row-press-gw-01/opcua-adapter/main");
+    const opcua = screen.getByTestId("component-row-press-gw-01/opcua-adapter");
     expect(within(opcua).getByText("12%")).toBeTruthy();
     expect(within(opcua).getByText("210 MB")).toBeTruthy();
     expect(within(opcua).getByText("CONNECTED")).toBeTruthy();
     expect(within(opcua).getByText("2s")).toBeTruthy();
     // modbus-adapter: the RECONNECTING conn state (rounded cpu 18).
-    const modbus = screen.getByTestId("component-row-press-gw-01/modbus-adapter/main");
+    const modbus = screen.getByTestId("component-row-press-gw-01/modbus-adapter");
     expect(within(modbus).getByText("RECONNECTING")).toBeTruthy();
     expect(within(modbus).getByText("18%")).toBeTruthy();
     // telemetry-processor: no attributes ⇒ Conn shows "—" (a non-adapter has no conn state).
-    const telem = screen.getByTestId("component-row-press-gw-01/telemetry-processor/main");
-    expect(within(telem).getByTestId("capabilities-press-gw-01/telemetry-processor/main").textContent).toBe("—");
+    const telem = screen.getByTestId("component-row-press-gw-01/telemetry-processor");
+    expect(within(telem).getByTestId("capabilities-press-gw-01/telemetry-processor").textContent).toBe("—");
   });
 
   it("renders Capabilities as an honest pending placeholder (Phase-2, never fabricated)", () => {
     render(<EdgeHealthView state={state} now={NOW} />);
     // Every row's Capabilities cell is a dash — the describe/panels manifest is deferred.
-    expect(screen.getByTestId("capabilities-press-gw-01/opcua-adapter/main").textContent).toBe("—");
-    expect(screen.getByTestId("capabilities-pack-gw-01/modbus-adapter/main").textContent).toBe("—");
+    expect(screen.getByTestId("capabilities-press-gw-01/opcua-adapter").textContent).toBe("—");
+    expect(screen.getByTestId("capabilities-pack-gw-01/modbus-adapter").textContent).toBe("—");
   });
 
   it("shows the STALE heartbeat overdue and the OFFLINE heartbeat as '—'", () => {
     render(<EdgeHealthView state={state} now={NOW} />);
-    const stale = screen.getByTestId("component-row-pack-gw-01/opcua-adapter/main");
+    const stale = screen.getByTestId("component-row-pack-gw-01/opcua-adapter");
     expect(within(stale).getByText("43s").className).toContain("ec-overdue");
-    const offline = screen.getByTestId("component-row-pack-gw-01/modbus-adapter/main");
+    const offline = screen.getByTestId("component-row-pack-gw-01/modbus-adapter");
     // heartbeat "—" for a component that never reported state.
     expect(within(offline).getByText("Offline")).toBeTruthy();
   });
@@ -125,8 +125,8 @@ describe("Overview — the faithful line-grouped fleet", () => {
 
   it("filters the fleet by the shared search query (empty-search when nothing matches)", () => {
     const { rerender } = render(<EdgeHealthView state={state} now={NOW} query="modbus" />);
-    expect(screen.getByTestId("component-row-press-gw-01/modbus-adapter/main")).toBeTruthy();
-    expect(screen.queryByTestId("component-row-press-gw-01/opcua-adapter/main")).toBeNull();
+    expect(screen.getByTestId("component-row-press-gw-01/modbus-adapter")).toBeTruthy();
+    expect(screen.queryByTestId("component-row-press-gw-01/opcua-adapter")).toBeNull();
     // The header stat stays whole-fleet (context), only the table narrows.
     expect(screen.getByText(/5 components across 2 lines/)).toBeTruthy();
 
@@ -231,7 +231,7 @@ describe("Overview — empty, connecting and degraded-connection states", () => 
     const view = fleetView([deviceView("gw-01", [compView()])]);
     render(<EdgeHealthView state={clientState(view, { status: "reconnecting" })} now={NOW} />);
     expect(screen.getByText("Gateway connection lost — reconnecting")).toBeTruthy();
-    expect(screen.getByTestId("component-row-gw-01/comp-a/main")).toBeTruthy();
+    expect(screen.getByTestId("component-row-gw-01/comp-a")).toBeTruthy();
     expect(screen.getByTestId("ws-status").textContent).toContain("WS Reconnecting");
   });
 
@@ -248,7 +248,7 @@ describe("Overview — empty, connecting and degraded-connection states", () => 
 });
 
 describe("Overview — C4 command controls", () => {
-  const CID = "gw-01/opcua-adapter/main";
+  const CID = "gw-01/opcua-adapter";
   const view = fleetView([deviceView("gw-01", [compView({ key: key("gw-01", "opcua-adapter") })])]);
 
   it("reveals the per-component controls on expand and fires a command", () => {
@@ -343,10 +343,10 @@ describe("Overview — R1: console-self tile, Edge-bus tile, alarm notes, table-
     const onAck = vi.fn();
     const onOpenEvents = vi.fn();
     render(<EdgeHealthView state={state} now={NOW} onAck={onAck} onOpenEvents={onOpenEvents} />);
-    const note = screen.getByTestId("alarm-note-pack-gw-01/opcua-adapter/main::sensor-fault");
+    const note = screen.getByTestId("alarm-note-pack-gw-01/opcua-adapter::sensor-fault");
     expect(within(note).getByText("opcua-adapter — sensor-fault")).toBeTruthy();
     fireEvent.click(within(note).getByText("Ack"));
-    expect(onAck).toHaveBeenCalledWith("pack-gw-01/opcua-adapter/main::sensor-fault");
+    expect(onAck).toHaveBeenCalledWith("pack-gw-01/opcua-adapter::sensor-fault");
     fireEvent.click(within(note).getByText("View"));
     expect(onOpenEvents).toHaveBeenCalled();
   });
@@ -357,13 +357,13 @@ describe("Overview — R1: console-self tile, Edge-bus tile, alarm notes, table-
     expect(screen.getByTestId("fleet-view-tiles").textContent).toContain("Tiles");
     const select = screen.getByTestId("fleet-status-filter") as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "OFFLINE" } });
-    expect(screen.getByTestId("component-row-pack-gw-01/modbus-adapter/main")).toBeTruthy();
-    expect(screen.queryByTestId("component-row-press-gw-01/opcua-adapter/main")).toBeNull();
+    expect(screen.getByTestId("component-row-pack-gw-01/modbus-adapter")).toBeTruthy();
+    expect(screen.queryByTestId("component-row-press-gw-01/opcua-adapter")).toBeNull();
   });
 
   it("renders the CPU sparkline where a series exists + the group-row platform annotation", () => {
     render(<EdgeHealthView state={state} now={NOW} />);
-    const opcua = screen.getByTestId("component-row-press-gw-01/opcua-adapter/main");
+    const opcua = screen.getByTestId("component-row-press-gw-01/opcua-adapter");
     expect(within(opcua).getByTestId("sparkline")).toBeTruthy();
     expect(within(opcua).getByText("12%")).toBeTruthy();
     expect(within(screen.getByTestId("group-line=stamping")).getByText(/press-gw-01 \(Greengrass\)/)).toBeTruthy();
@@ -372,7 +372,7 @@ describe("Overview — R1: console-self tile, Edge-bus tile, alarm notes, table-
 
   it("keeps Capabilities honestly blank (Phase-2) alongside the R1 additions", () => {
     render(<EdgeHealthView state={state} now={NOW} />);
-    expect(screen.getByTestId("capabilities-press-gw-01/opcua-adapter/main").textContent).toBe("—");
+    expect(screen.getByTestId("capabilities-press-gw-01/opcua-adapter").textContent).toBe("—");
   });
 
   it("platformsByDevice maps each device to its first advertised platform", () => {

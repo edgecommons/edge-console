@@ -66,8 +66,8 @@ function twoEvents(): ConsoleEvent[] {
   ];
 }
 
-const ALARM_A = "alarm:gw-01/opcua-adapter/main::connection-lost";
-const ALARM_B_ID = "gw-02/modbus-adapter/main::slave-retry";
+const ALARM_A = "alarm:gw-01/opcua-adapter::connection-lost";
+const ALARM_B_ID = "gw-02/modbus-adapter::slave-retry";
 
 function renderView({
   alarms = twoAlarms(),
@@ -127,9 +127,9 @@ describe("EventsView - the merged alarm+event table", () => {
 
   it("shows an Ack action on the active alarm, and reports the ack via onAck", () => {
     const { onAck } = renderView();
-    const ackBtn = screen.getByTestId(`ack-gw-01/opcua-adapter/main::connection-lost`);
+    const ackBtn = screen.getByTestId(`ack-gw-01/opcua-adapter::connection-lost`);
     fireEvent.click(ackBtn);
-    expect(onAck).toHaveBeenCalledWith("gw-01/opcua-adapter/main::connection-lost");
+    expect(onAck).toHaveBeenCalledWith("gw-01/opcua-adapter::connection-lost");
   });
 
   it("shows Acked (no Ack action) for an already-acked alarm, with the console-side audit", () => {
@@ -184,7 +184,7 @@ describe("EventsView - filters", () => {
   });
 
   it("shows the no-match empty state when the filters exclude everything", () => {
-    renderView({ filters: { componentId: "gw-09/nothing/main" } });
+    renderView({ filters: { componentId: "gw-09/nothing" } });
     expect(screen.getByTestId("events-filtered-empty")).toBeTruthy();
     expect(screen.queryByTestId("events-table")).toBeNull();
   });

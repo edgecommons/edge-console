@@ -283,7 +283,11 @@ export class FleetStore {
   private componentFromSnapshot(comp: ComponentSnapshot): ComponentState {
     const values = new Map<string, CachedValue>();
     for (const v of comp.values) {
-      values.set(v.channel !== undefined ? `${v.cls}/${v.channel}` : v.cls, { ...v });
+      // Keyed by source instance too, so per-instance values (filler1 vs kep2) don't collide.
+      values.set(
+        v.channel !== undefined ? `${v.instance}/${v.cls}/${v.channel}` : `${v.instance}/${v.cls}`,
+        { ...v },
+      );
     }
     return {
       key: { ...comp.key },
@@ -343,7 +347,10 @@ export class FleetStore {
         return;
       case "value-updated": {
         const comp = this.ensureComponent(delta.key);
-        const key = delta.channel !== undefined ? `${delta.cls}/${delta.channel}` : delta.cls;
+        const key =
+          delta.channel !== undefined
+            ? `${delta.instance}/${delta.cls}/${delta.channel}`
+            : `${delta.instance}/${delta.cls}`;
         const existing = comp.values.get(key);
         // Bodies do not travel in deltas — refresh the timestamp, keep the last body.
         comp.values.set(
@@ -351,6 +358,7 @@ export class FleetStore {
           existing !== undefined
             ? { ...existing, receivedAt: delta.at }
             : {
+                instance: delta.instance,
                 cls: delta.cls,
                 ...(delta.channel !== undefined ? { channel: delta.channel } : {}),
                 body: undefined,

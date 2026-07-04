@@ -203,7 +203,7 @@ describe("collectComponents / findNode / findComponent", () => {
   });
 
   it("rosters a single leaf as itself", () => {
-    const leaf = findNode(tree.roots, "press-gw-01/opcua-adapter/main")!;
+    const leaf = findNode(tree.roots, "press-gw-01/opcua-adapter")!;
     expect(leaf.kind).toBe("component");
     expect(collectComponents(leaf)).toHaveLength(1);
   });

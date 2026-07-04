@@ -42,17 +42,6 @@ export function componentDetailPath(comp: ComponentView): string[] {
   return [comp.key.device];
 }
 
-/** Every instance of the same (device, component) across the fleet, sorted by instance token. */
-export function instancesOf(view: FleetView, key: ComponentKey): ComponentView[] {
-  const out: ComponentView[] = [];
-  for (const device of view.devices) {
-    for (const comp of device.components) {
-      if (comp.key.device === key.device && comp.key.component === key.component) out.push(comp);
-    }
-  }
-  return out.sort((a, b) => a.key.instance.localeCompare(b.key.instance));
-}
-
 /** The active (non-resolved) alarms attributed to one component, newest raise first. */
 export function alarmsForComponent(active: ConsoleAlarm[], key: ComponentKey): ConsoleAlarm[] {
   const id = componentKeyId(key);

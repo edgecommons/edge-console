@@ -23,7 +23,7 @@ describe("feedRows - the alarm/event split + merge", () => {
       consoleEvent({ id: 9, key: OPCUA, severity: "info", type: "scan-cycle", receivedAt: T0 - 500 }),
     ];
     const rows = feedRows(alarms, events);
-    expect(rows.map((r) => r.id)).toEqual(["event:9", "alarm:gw-01/opcua-adapter/main::connection-lost"]);
+    expect(rows.map((r) => r.id)).toEqual(["event:9", "alarm:gw-01/opcua-adapter::connection-lost"]);
     const [ev, al] = rows;
     expect(al!.kind).toBe("alarm");
     expect(al!.state).toBe("active");
@@ -74,13 +74,13 @@ describe("feedSourceIds / filterFeed", () => {
 
   it("lists distinct sources across alarms AND events, sorted", () => {
     expect(feedSourceIds(rows)).toEqual([
-      "gw-01/opcua-adapter/main",
-      "gw-02/modbus-adapter/main",
+      "gw-01/opcua-adapter",
+      "gw-02/modbus-adapter",
     ]);
   });
 
   it("filters the merged feed by component and severity (AND)", () => {
-    expect(filterFeed(rows, { componentId: "gw-02/modbus-adapter/main" }).map((r) => r.kind)).toEqual(["event"]);
+    expect(filterFeed(rows, { componentId: "gw-02/modbus-adapter" }).map((r) => r.kind)).toEqual(["event"]);
     expect(filterFeed(rows, { severity: "critical" }).map((r) => r.kind)).toEqual(["alarm"]);
     expect(filterFeed(rows, { severity: "info" }).map((r) => r.kind)).toEqual(["event"]);
     expect(filterFeed(rows, {})).toHaveLength(2);

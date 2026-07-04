@@ -162,7 +162,9 @@ export class CommandGateway {
       const target = new MessageIdentity(
         [{ level: "device", value: req.key.device }],
         req.key.component,
-        req.key.instance,
+        // The command inbox is the component's `main` instance (verbs are registered there and
+        // dispatch per-instance by the request body's selector, not the topic).
+        "main",
       );
       topic = this.deps.uns.topicFor(target, UnsClass.Cmd, req.verb);
       // header.name = verb (the inbox requires header.name === the topic verb); body = args.

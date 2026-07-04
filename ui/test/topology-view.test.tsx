@@ -25,7 +25,7 @@ afterEach(cleanup);
 function cfgView(entries: Array<[ComponentKey, Record<string, unknown>]>): ConfigView {
   const entriesById: ConfigView["entriesById"] = {};
   for (const [k, config] of entries) {
-    const id = `${k.device}/${k.component}/${k.instance}`;
+    const id = `${k.device}/${k.component}`;
     entriesById[id] = { key: k, id, phase: "loaded", body: { config }, receivedAt: 0, refreshing: false };
   }
   return { entriesById };
@@ -77,14 +77,14 @@ describe("TopologyView", () => {
   it("navigates to Detail when a component node is clicked", () => {
     const onOpenDetail = vi.fn();
     render(<TopologyView state={topoState()} onOpenDetail={onOpenDetail} />);
-    fireEvent.click(screen.getByTestId("topo-comp-press-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("topo-comp-press-gw-01/opcua-adapter"));
     expect(onOpenDetail).toHaveBeenCalledWith(opcua);
   });
 
   it("opens Detail on keyboard activation of a component node", () => {
     const onOpenDetail = vi.fn();
     render(<TopologyView state={topoState()} onOpenDetail={onOpenDetail} />);
-    fireEvent.keyDown(screen.getByTestId("topo-comp-press-gw-01/modbus-adapter/main"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByTestId("topo-comp-press-gw-01/modbus-adapter"), { key: "Enter" });
     expect(onOpenDetail).toHaveBeenCalledWith(modbus);
   });
 

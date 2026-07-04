@@ -54,7 +54,6 @@ export class ConfigStore {
     const key: ComponentKey = {
       device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
     const entry: StoredConfig = {
       key,

@@ -68,7 +68,7 @@ describe("FleetModel - discovery + LKV cache", () => {
     const snap = model.snapshot();
     expect(snap.devices).toHaveLength(1);
     const comp = snap.devices[0]!.components[0]!;
-    expect(comp.key).toEqual({ device: "gw-01", component: "press-17", instance: "main" });
+    expect(comp.key).toEqual({ device: "gw-01", component: "press-17" });
     expect(comp.liveness).toBe("FRESH");
     expect(comp.status).toBe("RUNNING");
     expect(comp.uptimeSecs).toBe(5);

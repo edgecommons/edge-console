@@ -76,7 +76,7 @@ describe("signalRow / signalRows", () => {
       }),
     );
     expect(row.id).toBe("gw-01/opcua-adapter/main Temp");
-    expect(row.componentId).toBe("gw-01/opcua-adapter/main");
+    expect(row.componentId).toBe("gw-01/opcua-adapter");
     expect(row.device).toBe("gw-01");
     expect(row.signal).toBe("Temp");
     expect(row.value).toBe("72.4");
@@ -123,14 +123,14 @@ describe("filterSignalRows / signalComponentIds", () => {
 
   it("scopes by component id", () => {
     expect(
-      filterSignalRows(rows, { componentId: "press-gw-01/opcua-adapter/main" }).map((r) => r.signal),
+      filterSignalRows(rows, { componentId: "press-gw-01/opcua-adapter" }).map((r) => r.signal),
     ).toEqual(["Temp_01", "Pressure"]);
   });
 
   it("AND-combines query + scope", () => {
     expect(
       filterSignalRows(rows, {
-        componentId: "press-gw-01/opcua-adapter/main",
+        componentId: "press-gw-01/opcua-adapter",
         query: "pressure",
       }).map((r) => r.signal),
     ).toEqual(["Pressure"]);
@@ -138,8 +138,8 @@ describe("filterSignalRows / signalComponentIds", () => {
 
   it("lists the distinct component ids, sorted", () => {
     expect(signalComponentIds(rows)).toEqual([
-      "pack-gw-01/modbus-adapter/main",
-      "press-gw-01/opcua-adapter/main",
+      "pack-gw-01/modbus-adapter",
+      "press-gw-01/opcua-adapter",
     ]);
   });
 });

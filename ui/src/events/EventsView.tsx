@@ -236,9 +236,9 @@ function FeedRowView({
         </TableCell>
         <TableCell>
           <span className="ec-pri">{row.key.component}</span>
-          {row.key.instance !== "main" && (
+          {row.instance !== undefined && row.instance !== "main" && (
             <Tag size="sm" type="outline" className="ec-instance">
-              {row.key.instance}
+              {row.instance}
             </Tag>
           )}
           <span className="ec-dim ec-mono ec-evt-device">{row.key.device}</span>

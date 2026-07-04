@@ -16,7 +16,7 @@ class TestClock {
   fn = (): number => this.now;
 }
 
-const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
 
 function metricEvent(channel: string, body: unknown, key: ComponentKey = KEY): IngressEvent {
   return {
@@ -30,10 +30,10 @@ function metricEvent(channel: string, body: unknown, key: ComponentKey = KEY): I
       ],
       path: `dallas/${key.device}`,
       component: key.component,
-      instance: key.instance,
+      instance: "main",
     },
     body,
-    topic: `ecv1/${key.device}/${key.component}/${key.instance}/metric/${channel}`,
+    topic: `ecv1/${key.device}/${key.component}/main/metric/${channel}`,
   };
 }
 
@@ -102,11 +102,11 @@ describe("AttributeStore — platform capture + cpu series (R1)", () => {
         ],
         path: `dallas/${key.device}`,
         component: key.component,
-        instance: key.instance,
+        instance: "main",
       },
       tags: { platform },
       body: { status: "RUNNING" },
-      topic: `ecv1/${key.device}/${key.component}/${key.instance}/state`,
+      topic: `ecv1/${key.device}/${key.component}/main/state`,
     };
   }
 

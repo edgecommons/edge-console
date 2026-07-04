@@ -53,7 +53,7 @@ function rig(opts: { refreshTimeoutMs?: number } = {}) {
 }
 
 const KEY = key("gw-01", "modbus-adapter");
-const ID = "gw-01/modbus-adapter/main";
+const ID = "gw-01/modbus-adapter";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -111,7 +111,7 @@ describe("FleetClient - requestConfig", () => {
     const other = key("gw-02", "opcua-adapter");
     client.requestConfig(other);
     sockets[0]!.frame({ type: "config-unavailable", protocolVersion: PROTOCOL_VERSION, key: other });
-    expect(client.getState().configs.entriesById["gw-02/opcua-adapter/main"]).toMatchObject({
+    expect(client.getState().configs.entriesById["gw-02/opcua-adapter"]).toMatchObject({
       phase: "unavailable",
     });
     client.stop();

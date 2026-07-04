@@ -41,7 +41,7 @@ function cfgEvent(
   };
 }
 
-const KEY = { device: "gw-01", component: "modbus-adapter", instance: "main" };
+const KEY = { device: "gw-01", component: "modbus-adapter" };
 
 describe("ConfigStore - cfg retention", () => {
   it("retains a cfg envelope body VERBATIM (redaction pass-through), stamped with the clock", () => {
@@ -78,15 +78,15 @@ describe("ConfigStore - cfg retention", () => {
     expect(store.size()).toBe(1);
   });
 
-  it("keys by (device, component, instance) — instances are distinct entries", () => {
+  it("keys by (device, component) — a component has ONE config (a stray instance-token cfg folds to it)", () => {
     const clock = new TestClock();
     const store = new ConfigStore(clock.fn);
     store.ingest(cfgEvent({ config: { i: "main" } }));
     store.ingest(cfgEvent({ config: { i: "line2" } }, { instance: "line2" }));
 
-    expect(store.size()).toBe(2);
-    expect(store.get(KEY)?.body).toEqual({ config: { i: "main" } });
-    expect(store.get({ ...KEY, instance: "line2" })?.body).toEqual({ config: { i: "line2" } });
+    // Config is per-component (published under `main`); any instance-token cfg folds to the one entry.
+    expect(store.size()).toBe(1);
+    expect(store.get(KEY)?.body).toEqual({ config: { i: "line2" } });
   });
 
   it("omits sourceTimestamp when the publisher sent none", () => {

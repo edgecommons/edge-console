@@ -47,6 +47,7 @@ export type MetricUpdateListener = (updates: MetricSeriesUpdate[]) => void;
 /** Mutable internal series record. */
 interface SeriesState {
   key: ComponentKey;
+  instance: string;
   metric: string;
   measure: string;
   receivedAt: number;
@@ -106,9 +107,10 @@ export class MetricStore {
     const key: ComponentKey = {
       device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
-    const componentId = componentKeyId(key);
+    const instance = event.identity.instance;
+    // Series key includes the source instance so filler1's and kep2's same-named metric don't collide.
+    const componentId = `${componentKeyId(key)}/${instance}`;
     const at = this.clock();
     const updates: MetricSeriesUpdate[] = [];
 
@@ -120,7 +122,7 @@ export class MetricStore {
           this.dropped++;
           continue; // overflow guard — existing series keep updating
         }
-        state = { key, metric: event.channel, measure, receivedAt: at, points: [] };
+        state = { key, instance, metric: event.channel, measure, receivedAt: at, points: [] };
         this.series.set(id, state);
       }
       state.receivedAt = at;
@@ -130,6 +132,7 @@ export class MetricStore {
       if (state.points.length > this.opts.maxSeriesPoints) state.points.shift(); // drop-oldest
       updates.push({
         key,
+        instance,
         metric: event.channel,
         measure,
         point: { at, value },
@@ -149,6 +152,7 @@ export class MetricStore {
     return [...this.series.values()]
       .map((s) => ({
         key: { ...s.key },
+        instance: s.instance,
         metric: s.metric,
         measure: s.measure,
         latest: s.points[s.points.length - 1]!.value,
@@ -159,6 +163,7 @@ export class MetricStore {
       .sort(
         (a, b) =>
           componentKeyId(a.key).localeCompare(componentKeyId(b.key)) ||
+          a.instance.localeCompare(b.instance) ||
           a.metric.localeCompare(b.metric) ||
           a.measure.localeCompare(b.measure),
       );

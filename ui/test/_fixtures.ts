@@ -28,8 +28,8 @@ import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 /** The pinned server-clock base for all fixtures (ms epoch). */
 export const T0 = 1_750_000_000_000;
 
-export function key(device = "gw-01", component = "comp-a", instance = "main"): ComponentKey {
-  return { device, component, instance };
+export function key(device = "gw-01", component = "comp-a", _instance = "main"): ComponentKey {
+  return { device, component };
 }
 
 /** A ComponentSnapshot with sensible defaults (site dallas / device gw-01, FRESH). */
@@ -88,7 +88,7 @@ export function compView(overrides: Partial<ComponentView> = {}): ComponentView 
   const k = overrides.key ?? key();
   return {
     key: k,
-    id: `${k.device}/${k.component}/${k.instance}`,
+    id: `${k.device}/${k.component}`,
     path: `dallas/${k.device}`,
     hier: [
       { level: "site", value: "dallas" },
@@ -152,6 +152,7 @@ export function signalSeries(
   const last = points[points.length - 1];
   return {
     key: k,
+    instance: overrides.instance ?? "main",
     signal,
     latest: overrides.latest ?? last?.value,
     ...(overrides.quality !== undefined ? { quality: overrides.quality } : last?.quality !== undefined ? { quality: last.quality } : {}),
@@ -240,7 +241,7 @@ export function clientState(
 /** A {@link ConsoleAlarm} with sensible defaults (active critical alarm). */
 export function consoleAlarm(overrides: Partial<ConsoleAlarm> = {}): ConsoleAlarm {
   const k = overrides.key ?? key();
-  const componentId = `${k.device}/${k.component}/${k.instance}`;
+  const componentId = `${k.device}/${k.component}`;
   const type = overrides.type ?? "connection-lost";
   return {
     id: `${componentId}::${type}`,
@@ -285,7 +286,7 @@ export function commandEntry(overrides: Partial<CommandEntry> = {}): CommandEntr
     requestId: "cmd-1",
     seq: 1,
     key: k,
-    componentId: `${k.device}/${k.component}/${k.instance}`,
+    componentId: `${k.device}/${k.component}`,
     verb: "ping",
     phase: "ok",
     result: { status: "RUNNING", uptimeSecs: 42 },
@@ -313,6 +314,7 @@ export function consoleEvent(overrides: Partial<ConsoleEvent> = {}): ConsoleEven
   return {
     id: 1,
     key: k,
+    instance: overrides.instance ?? "main",
     severity: "warning",
     type: "overtemp",
     channel: "warning/overtemp",

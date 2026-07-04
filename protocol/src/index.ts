@@ -89,16 +89,22 @@ export interface WireIdentity {
   instance: string;
 }
 
-/** The FleetModel's component key: `(device, component, instance)`. */
+/**
+ * A component's identity: `(device, component)`. The UNS instance token is NOT part of it — a
+ * component is one entity per `(device, component)`, established by its own metadata (`state`/`cfg`
+ * under `main`), never minted from telemetry. Per-connection instances (OPC UA servers, Modbus
+ * slaves, file-replicator source dirs) are reported as `state.instances[]` connectivity (see
+ * {@link InstanceStatus}); the instance a piece of telemetry came from rides ON that telemetry as
+ * its source (e.g. {@link CachedValue.instance}), not on the component identity.
+ */
 export interface ComponentKey {
   device: string;
   component: string;
-  instance: string;
 }
 
 /** Canonical string form of a {@link ComponentKey} (map keys, WS frame targets). */
 export function componentKeyId(key: ComponentKey): string {
-  return `${key.device}/${key.component}/${key.instance}`;
+  return `${key.device}/${key.component}`;
 }
 
 /**
@@ -125,6 +131,13 @@ export type CadenceSource = "default" | "cfg";
  * age. Keyed by `(component key, class[, channel])`.
  */
 export interface CachedValue {
+  /**
+   * The source instance token this value came from — `main` for `state`/`cfg`, the connection id
+   * (OPC UA server / Modbus slave / …) for per-instance `data`/`evt`. Part of the telemetry's own
+   * identity (from the envelope), NOT component metadata — it keeps `filler1`'s and `kep2`'s
+   * same-named values distinct under the one `(device, component)`.
+   */
+  instance: string;
   cls: ConsumerClass;
   /** `/`-joined channel tokens; absent for the leaf classes (`state`, `cfg`). */
   channel?: string;
@@ -231,6 +244,8 @@ export type FleetDelta =
       seq: number;
       at: number;
       key: ComponentKey;
+      /** The source instance whose value updated (`main` for state/cfg; a connection id for data/evt). */
+      instance: string;
       cls: ConsumerClass;
       channel?: string;
     }
@@ -289,6 +304,9 @@ export interface ConsoleEvent {
    */
   id: number;
   key: ComponentKey;
+  /** The source instance that raised this event (`main` or a connection id) — the telemetry's own
+   *  attribution, so per-instance events stay distinguishable under the one component. */
+  instance: string;
   /**
    * The severity token — the first channel token when the channel follows the
    * `evt/{severity}/{type}` convention. Verbatim (the UI classifies it); absent
@@ -382,6 +400,8 @@ export const DEFAULT_METRIC_SERIES_POINTS = 60;
  */
 export interface MetricSeriesSnapshot {
   key: ComponentKey;
+  /** The source instance this metric series came from (`main` or a connection id). */
+  instance: string;
   /** The UNS metric name — the channel under `metric/` (may itself contain `/`). */
   metric: string;
   /** The numeric field within the metric body (`"value"` for bare-number bodies). */
@@ -400,6 +420,7 @@ export interface MetricSeriesSnapshot {
  */
 export interface MetricSeriesUpdate {
   key: ComponentKey;
+  instance: string;
   metric: string;
   measure: string;
   point: MetricPoint;
@@ -440,6 +461,9 @@ export interface SignalPoint {
  */
 export interface SignalSeriesSnapshot {
   key: ComponentKey;
+  /** The source instance this signal came from (`main` or a connection id) — the telemetry's own
+   *  attribution, so `filler1`'s and `kep2`'s same-named signals stay distinct. */
+  instance: string;
   /** The UNS signal name — the channel under `data/` (may itself contain `/`). */
   signal: string;
   latest: unknown;
@@ -454,6 +478,7 @@ export interface SignalSeriesSnapshot {
 /** One fresh sample for a signal series (a live `signal` push): bounded append, latest-wins. */
 export interface SignalSeriesUpdate {
   key: ComponentKey;
+  instance: string;
   signal: string;
   point: SignalPoint;
   sourceTimestamp?: string;
@@ -963,17 +988,16 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 /**
  * Validate a wire {@link ComponentKey}: an object with non-empty string
- * `device`/`component`/`instance`. Returns a fresh, extras-stripped copy (never the
- * caller's object) or `undefined`. Exported for the UI client's own frame checks.
+ * `device`/`component`. Returns a fresh, extras-stripped copy (never the caller's object) or
+ * `undefined`. Exported for the UI client's own frame checks.
  */
 export function parseComponentKey(value: unknown): ComponentKey | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const obj = value as Record<string, unknown>;
-  const { device, component, instance } = obj;
+  const { device, component } = obj;
   if (typeof device !== "string" || device === "") return undefined;
   if (typeof component !== "string" || component === "") return undefined;
-  if (typeof instance !== "string" || instance === "") return undefined;
-  return { device, component, instance };
+  return { device, component };
 }
 
 /**

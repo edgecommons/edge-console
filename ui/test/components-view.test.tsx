@@ -73,31 +73,31 @@ describe("ComponentsView", () => {
     expect(screen.getByTestId("tree-node-site=dallas/line=packaging")).toBeTruthy();
     expect(screen.getByTestId("tree-node-site=dallas/line=stamping")).toBeTruthy();
     expect(screen.getByTestId("tree-node-site=dallas/line=packaging/device=pack-gw-01")).toBeTruthy();
-    expect(within(tree).getByTestId("tree-node-pack-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(within(tree).getByTestId("tree-node-pack-gw-01/opcua-adapter")).toBeTruthy();
   });
 
   it("rosters everything beneath the default (site) selection — the tree doubles as inventory", () => {
     render(<ComponentsView state={stateWith()} now={T0} />);
     const roster = screen.getByTestId("components-roster");
     // All three components are listed beneath the site.
-    expect(within(roster).getByTestId("roster-row-pack-gw-01/opcua-adapter/main")).toBeTruthy();
-    expect(within(roster).getByTestId("roster-row-pack-gw-01/modbus-adapter/main")).toBeTruthy();
-    expect(within(roster).getByTestId("roster-row-press-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(within(roster).getByTestId("roster-row-pack-gw-01/opcua-adapter")).toBeTruthy();
+    expect(within(roster).getByTestId("roster-row-pack-gw-01/modbus-adapter")).toBeTruthy();
+    expect(within(roster).getByTestId("roster-row-press-gw-01/opcua-adapter")).toBeTruthy();
   });
 
   it("scopes the roster to a selected device node", () => {
     render(<ComponentsView state={stateWith()} now={T0} />);
     fireEvent.click(screen.getByTestId("tree-node-site=dallas/line=packaging/device=pack-gw-01"));
     const roster = screen.getByTestId("components-roster");
-    expect(within(roster).getByTestId("roster-row-pack-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(within(roster).getByTestId("roster-row-pack-gw-01/opcua-adapter")).toBeTruthy();
     // press-gw-01's component is NOT under pack-gw-01.
-    expect(within(roster).queryByTestId("roster-row-press-gw-01/opcua-adapter/main")).toBeNull();
+    expect(within(roster).queryByTestId("roster-row-press-gw-01/opcua-adapter")).toBeNull();
   });
 
   it("shows a component summary (+ Open detail) when a leaf is selected", () => {
     const onOpenDetail = vi.fn();
     render(<ComponentsView state={stateWith()} now={T0} onOpenDetail={onOpenDetail} />);
-    fireEvent.click(screen.getByTestId("tree-node-pack-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("tree-node-pack-gw-01/opcua-adapter"));
 
     const summary = screen.getByTestId("component-summary");
     expect(within(summary).getByText("opcua-adapter")).toBeTruthy();
@@ -112,7 +112,7 @@ describe("ComponentsView", () => {
   it("opens detail from a roster row's Open button", () => {
     const onOpenDetail = vi.fn();
     render(<ComponentsView state={stateWith()} now={T0} onOpenDetail={onOpenDetail} />);
-    fireEvent.click(screen.getByTestId("roster-open-press-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("roster-open-press-gw-01/opcua-adapter"));
     // Roster "Open" selects the component (shows its summary); Open detail then hands off.
     fireEvent.click(screen.getByTestId("open-detail"));
     expect(onOpenDetail).toHaveBeenCalledWith(key("press-gw-01", "opcua-adapter"));
@@ -129,8 +129,8 @@ describe("ComponentsView", () => {
     // With the query applied, only the matching branch survives.
     rerender(<ComponentsView state={stateWith()} now={T0} query="modbus" onSearchChange={onSearchChange} />);
     const tree = screen.getByTestId("component-tree");
-    expect(within(tree).getByTestId("tree-node-pack-gw-01/modbus-adapter/main")).toBeTruthy();
-    expect(within(tree).queryByTestId("tree-node-pack-gw-01/opcua-adapter/main")).toBeNull();
+    expect(within(tree).getByTestId("tree-node-pack-gw-01/modbus-adapter")).toBeTruthy();
+    expect(within(tree).queryByTestId("tree-node-pack-gw-01/opcua-adapter")).toBeNull();
     expect(within(tree).queryByTestId("tree-node-site=dallas/line=stamping")).toBeNull();
   });
 
@@ -138,9 +138,9 @@ describe("ComponentsView", () => {
     render(<ComponentsView state={stateWith()} now={T0} />);
     // Collapsing the packaging line hides its device + component nodes.
     fireEvent.click(screen.getByTestId("tree-toggle-site=dallas/line=packaging"));
-    expect(screen.queryByTestId("tree-node-pack-gw-01/opcua-adapter/main")).toBeNull();
+    expect(screen.queryByTestId("tree-node-pack-gw-01/opcua-adapter")).toBeNull();
     fireEvent.click(screen.getByTestId("tree-toggle-site=dallas/line=packaging"));
-    expect(screen.getByTestId("tree-node-pack-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(screen.getByTestId("tree-node-pack-gw-01/opcua-adapter")).toBeTruthy();
   });
 
   it("shows the not-connected empty state before a snapshot", () => {

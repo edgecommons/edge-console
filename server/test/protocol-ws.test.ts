@@ -74,7 +74,7 @@ describe("parseClientMessage", () => {
 });
 
 describe("parseClientMessage - the C5 config family", () => {
-  const KEY = { device: "gw-01", component: "modbus-adapter", instance: "main" };
+  const KEY = { device: "gw-01", component: "modbus-adapter" };
 
   it("accepts get-config with a full component key (extras stripped)", () => {
     const result = parseClientMessage(
@@ -192,7 +192,7 @@ describe("parseClientMessage - the C6 activity family", () => {
 });
 
 describe("parseClientMessage - the C4 command family", () => {
-  const KEY = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+  const KEY = { device: "gw-01", component: "opcua-adapter" };
 
   it("accepts invoke-command without args (key extras stripped)", () => {
     const result = parseClientMessage(
@@ -349,7 +349,7 @@ describe("parseComponentKey", () => {
   it("returns a fresh extras-stripped copy for a valid key", () => {
     const input = { device: "d", component: "c", instance: "i", extra: 1 };
     const key = parseComponentKey(input);
-    expect(key).toEqual({ device: "d", component: "c", instance: "i" });
+    expect(key).toEqual({ device: "d", component: "c" }); // instance is no longer part of the key
     expect(key).not.toBe(input); // never the caller's object
   });
 
@@ -357,7 +357,6 @@ describe("parseComponentKey", () => {
     ["null", null],
     ["a string", "gw-01/comp/main"],
     ["an array", ["d", "c", "i"]],
-    ["empty instance", { device: "d", component: "c", instance: "" }],
     ["missing component", { device: "d", instance: "i" }],
   ])("returns undefined for %s", (_label, value) => {
     expect(parseComponentKey(value)).toBeUndefined();

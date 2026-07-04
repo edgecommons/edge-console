@@ -124,7 +124,6 @@ export function matchesQuery(comp: ComponentView, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (q === "") return true;
   if (comp.key.component.toLowerCase().includes(q)) return true;
-  if (comp.key.instance.toLowerCase().includes(q)) return true;
   if (comp.key.device.toLowerCase().includes(q)) return true;
   if (comp.path.toLowerCase().includes(q)) return true;
   return comp.hier.some((e) => e.value.toLowerCase().includes(q));

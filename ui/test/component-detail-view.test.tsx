@@ -26,7 +26,7 @@ import {
 afterEach(cleanup);
 
 const DKEY = key("pack-gw-01", "opcua-adapter");
-const ID = "pack-gw-01/opcua-adapter/main";
+const ID = "pack-gw-01/opcua-adapter";
 
 function loadedConfig(): ConfigEntryView {
   return {

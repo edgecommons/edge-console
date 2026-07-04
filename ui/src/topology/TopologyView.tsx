@@ -488,7 +488,7 @@ export function ConnectedTopologyView({
     [state.fleet],
   );
   const idsKey = useMemo(
-    () => keys.map((k) => `${k.device}/${k.component}/${k.instance}`).sort().join(","),
+    () => keys.map((k) => `${k.device}/${k.component}`).sort().join(","),
     [keys],
   );
   // `keys` is derived from `idsKey`; keying the effect on `idsKey` (a string) keeps it stable
@@ -507,5 +507,5 @@ function round(n: number): number {
 }
 
 function keyId(k: ComponentKey): string {
-  return `${k.device}/${k.component}/${k.instance}`;
+  return `${k.device}/${k.component}`;
 }

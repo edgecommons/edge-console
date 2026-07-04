@@ -63,7 +63,7 @@ describe("startConsole - the C1 composition", () => {
     const snap = app.model.snapshot();
     expect(snap.devices.map((d) => d.device)).toEqual(["gw-02"]);
     expect(snap.devices[0]!.components[0]!).toMatchObject({
-      key: { device: "gw-02", component: "press-17", instance: "main" },
+      key: { device: "gw-02", component: "press-17" },
       liveness: "FRESH",
       uptimeSecs: 7,
     });
@@ -150,7 +150,7 @@ describe("startConsole - the C1 composition", () => {
   it("serves the C5 get/refresh round-trip: cfg retained from the bus, answered and pushed over the gateway, refresh fires the republish broadcast", async () => {
     const bus = new FakeBus();
     const app = await start(bus);
-    const KEY = { device: "gw-02", component: "modbus-adapter", instance: "main" };
+    const KEY = { device: "gw-02", component: "modbus-adapter" };
     const cfgBody = {
       config: {
         heartbeat: { intervalSecs: 5 },
@@ -217,7 +217,7 @@ describe("startConsole - the C1 composition", () => {
     const bus = new FakeBus();
     const app = await start(bus);
     const identity = makeIdentity("gw-02", "opcua-adapter");
-    const KEY = { device: "gw-02", component: "opcua-adapter", instance: "main" };
+    const KEY = { device: "gw-02", component: "opcua-adapter" };
 
     // Bus -> stores, BEFORE any client: the rolling history / series accumulate.
     await bus.emitWire(
@@ -315,7 +315,7 @@ describe("startConsole - the C1 composition", () => {
     const bus = new FakeBus();
     const app = await start(bus);
     const identity = makeIdentity("gw-03", "opcua-adapter");
-    const KEY = { device: "gw-03", component: "opcua-adapter", instance: "main" };
+    const KEY = { device: "gw-03", component: "opcua-adapter" };
 
     // Bus -> the R0 stores (the same ingress tee that feeds the C1/C6 stores).
     await bus.emitWire(
@@ -386,7 +386,7 @@ describe("startConsole - the C4 command round-trip", () => {
         .withPayload({ ok: true, result: { status: "RUNNING", uptimeSecs: 99 } })
         .build();
     const app = await start(bus);
-    const KEY = { device: "gw-02", component: "opcua-adapter", instance: "main" };
+    const KEY = { device: "gw-02", component: "opcua-adapter" };
 
     const sent: ServerMessage[] = [];
     const transport: ClientTransport = {
@@ -449,7 +449,7 @@ describe("startConsole - the C4 command round-trip", () => {
         type: "invoke-command",
         protocolVersion: PROTOCOL_VERSION,
         requestId: "c2",
-        key: { device: "gw-02", component: "opcua-adapter", instance: "main" },
+        key: { device: "gw-02", component: "opcua-adapter" },
         verb: "reload-config",
       }),
     );

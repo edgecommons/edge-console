@@ -17,7 +17,7 @@ class TestClock {
   fn = (): number => this.now;
 }
 
-const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
 
 function evtEvent(
   channel: string | undefined,
@@ -35,11 +35,11 @@ function evtEvent(
       ],
       path: `dallas/${key.device}`,
       component: key.component,
-      instance: key.instance,
+      instance: "main",
     },
     body,
     sourceTimestamp: "2026-07-03T00:00:00.000Z",
-    topic: `ecv1/${key.device}/${key.component}/${key.instance}/evt${channel !== undefined ? `/${channel}` : ""}`,
+    topic: `ecv1/${key.device}/${key.component}/main/evt${channel !== undefined ? `/${channel}` : ""}`,
   };
 }
 

@@ -69,7 +69,7 @@ export class SignalStore {
   /** Fold a `signals` frame: replaces every known series wholesale (a fresh baseline). */
   applySnapshot(series: SignalSeriesSnapshot[]): void {
     this.series = new Map(
-      series.map((s) => [seriesId(componentKeyId(s.key), s.signal), cloneSeries(s)]),
+      series.map((s) => [seriesId(`${componentKeyId(s.key)}/${s.instance}`, s.signal), cloneSeries(s)]),
     );
     this.dropped = 0;
     this.version++;
@@ -83,7 +83,7 @@ export class SignalStore {
   applyUpdates(updates: SignalSeriesUpdate[]): void {
     if (updates.length === 0) return;
     for (const update of updates) {
-      const componentId = componentKeyId(update.key);
+      const componentId = `${componentKeyId(update.key)}/${update.instance}`;
       const id = seriesId(componentId, update.signal);
       let state = this.series.get(id);
       if (state === undefined) {
@@ -93,6 +93,7 @@ export class SignalStore {
         }
         state = {
           key: { ...update.key },
+          instance: update.instance,
           signal: update.signal,
           latest: update.point.value,
           receivedAt: update.point.at,
@@ -114,8 +115,8 @@ export class SignalStore {
   }
 
   /** The latest record for one series, or `undefined` (nothing reported yet). */
-  get(key: ComponentKey, signal: string): SignalSeriesSnapshot | undefined {
-    return this.series.get(seriesId(componentKeyId(key), signal));
+  get(key: ComponentKey, signal: string, instance = "main"): SignalSeriesSnapshot | undefined {
+    return this.series.get(seriesId(`${componentKeyId(key)}/${instance}`, signal));
   }
 
   /** Distinct series currently tracked (diagnostics/tests). */
@@ -141,6 +142,7 @@ export class SignalStore {
 function cloneSeries(s: SignalSeriesSnapshot): SignalSeriesSnapshot {
   return {
     key: { ...s.key },
+    instance: s.instance,
     signal: s.signal,
     latest: s.latest,
     ...(s.quality !== undefined ? { quality: s.quality } : {}),

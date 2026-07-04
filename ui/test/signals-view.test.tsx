@@ -120,7 +120,7 @@ describe("SignalsView (presentational)", () => {
   });
 
   it("scopes to one component and fires Read for a row", () => {
-    const { onRead } = renderView({ componentScope: "pack-gw-01/modbus-adapter/main" });
+    const { onRead } = renderView({ componentScope: "pack-gw-01/modbus-adapter" });
     const rows = screen.getAllByTestId(/^signal-row-/);
     expect(rows).toHaveLength(1);
     fireEvent.click(within(rows[0]!).getByRole("button", { name: "Read" }));
@@ -256,7 +256,7 @@ describe("App — Signals screen (R5) integration", () => {
 
     // Components → select the leaf → open detail → click the "Signals" deep-link.
     fireEvent.click(screen.getByRole("link", { name: /Components/ }));
-    fireEvent.click(screen.getByTestId("tree-node-press-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("tree-node-press-gw-01/opcua-adapter"));
     fireEvent.click(screen.getByTestId("open-detail"));
     fireEvent.click(screen.getByTestId("detail-open-signals"));
 

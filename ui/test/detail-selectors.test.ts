@@ -6,7 +6,6 @@ import {
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
-  instancesOf,
 } from "../src/components/detail-selectors";
 import { compView, consoleAlarm, deviceView, fleetView, hier, key, runtimeAttrs, T0 } from "./_fixtures";
 
@@ -28,27 +27,6 @@ describe("breadcrumb paths", () => {
     const bare = compView({ key: key("gw-x", "orphan"), hier: [] });
     expect(componentFullPath(bare)).toEqual(["gw-x"]);
     expect(componentDetailPath(bare)).toEqual(["gw-x"]);
-  });
-});
-
-describe("instancesOf", () => {
-  it("returns every instance of the same (device, component), sorted by instance token", () => {
-    const view = fleetView([
-      deviceView("gw-01", [
-        compView({ key: key("gw-01", "opcua-adapter", "kep2") }),
-        compView({ key: key("gw-01", "opcua-adapter", "kep1") }),
-        compView({ key: key("gw-01", "modbus-adapter", "main") }),
-      ]),
-    ]);
-    const instances = instancesOf(view, key("gw-01", "opcua-adapter", "kep1"));
-    expect(instances.map((c) => c.key.instance)).toEqual(["kep1", "kep2"]);
-  });
-
-  it("returns a single 'main' when there is one instance", () => {
-    const view = fleetView([deviceView("gw-01", [compView({ key: key("gw-01", "opcua-adapter") })])]);
-    expect(instancesOf(view, key("gw-01", "opcua-adapter")).map((c) => c.key.instance)).toEqual([
-      "main",
-    ]);
   });
 });
 

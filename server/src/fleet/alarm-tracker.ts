@@ -99,7 +99,6 @@ export class AlarmTracker {
     const key: ComponentKey = {
       device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
     const componentId = componentKeyId(key);
     const id = `${componentId}::${type}`;

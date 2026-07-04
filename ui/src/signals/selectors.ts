@@ -102,12 +102,12 @@ export function signalRow(s: SignalSeriesSnapshot): SignalRow {
   const componentId = componentKeyId(s.key);
   const value = formatSignalValue(s.latest);
   return {
-    id: `${componentId} ${s.signal}`,
+    id: `${componentId}/${s.instance} ${s.signal}`,
     key: s.key,
     componentId,
     device: s.key.device,
     component: s.key.component,
-    instance: s.key.instance,
+    instance: s.instance,
     signal: s.signal,
     latest: s.latest,
     ...(value !== undefined ? { value } : {}),

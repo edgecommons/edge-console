@@ -17,7 +17,7 @@ class TestClock {
   fn = (): number => this.now;
 }
 
-const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
 
 function metricEvent(
   channel: string | undefined,
@@ -32,11 +32,11 @@ function metricEvent(
       hier: [{ level: "device", value: key.device }],
       path: key.device,
       component: key.component,
-      instance: key.instance,
+      instance: "main",
     },
     body,
     sourceTimestamp: "2026-07-03T00:00:00.000Z",
-    topic: `ecv1/${key.device}/${key.component}/${key.instance}/metric${channel !== undefined ? `/${channel}` : ""}`,
+    topic: `ecv1/${key.device}/${key.component}/main/metric${channel !== undefined ? `/${channel}` : ""}`,
   };
 }
 
@@ -136,7 +136,7 @@ describe("MetricStore - folding", () => {
   it("sorts the snapshot by (component id, metric, measure)", () => {
     const clock = new TestClock();
     const store = new MetricStore(clock.fn);
-    const other: ComponentKey = { device: "aa-gw", component: "bridge", instance: "main" };
+    const other: ComponentKey = { device: "aa-gw", component: "bridge" };
     store.ingest(metricEvent("sys", emfBody(1, 2)));
     store.ingest(metricEvent("relay_dropped", 7, other));
 
@@ -175,6 +175,7 @@ describe("MetricStore - update fanout", () => {
     expect(batches[0]).toEqual([
       {
         key: KEY,
+        instance: "main",
         metric: "sys",
         measure: "cpu",
         point: { at: 1_000_000, value: 10 },
@@ -182,6 +183,7 @@ describe("MetricStore - update fanout", () => {
       },
       {
         key: KEY,
+        instance: "main",
         metric: "sys",
         measure: "memory",
         point: { at: 1_000_000, value: 40 },

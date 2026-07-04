@@ -515,7 +515,6 @@ export function buildTopologyModel(inputs: TopologyInputs): TopologyModel {
         title: `${comp.key.component} — ${livenessWord(comp.liveness)}`,
         device: device.device,
         componentKey: comp.key,
-        ...(comp.key.instance !== "main" ? { sublabel: comp.key.instance } : {}),
       };
       componentNodes.push(node);
 

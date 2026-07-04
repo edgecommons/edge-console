@@ -11,7 +11,7 @@ import { commandEntry, commandView, compView, key } from "./_fixtures";
 afterEach(cleanup);
 
 const COMP = compView({ key: key("gw-01", "opcua-adapter") });
-const ID = "gw-01/opcua-adapter/main";
+const ID = "gw-01/opcua-adapter";
 
 /** A command entry already attributed to COMP (so componentId matches the row's id). */
 const entry = (over: Parameters<typeof commandEntry>[0] = {}) => commandEntry({ key: COMP.key, ...over });

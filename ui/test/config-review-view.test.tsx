@@ -14,7 +14,7 @@ import { T0, clientState, compView, deviceView, fleetView, key } from "./_fixtur
 afterEach(cleanup);
 
 const KEY = key("gw-01", "modbus-adapter");
-const ID = "gw-01/modbus-adapter/main";
+const ID = "gw-01/modbus-adapter";
 
 function loadedEntry(overrides: Partial<ConfigEntryView> = {}): ConfigEntryView {
   return {
@@ -73,21 +73,21 @@ describe("ConfigReviewView - picker", () => {
     expect(within(picker).getByText("modbus-adapter")).toBeTruthy();
     expect(within(picker).getByText("opcua-adapter")).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter"));
     expect(onSelect).toHaveBeenCalledWith(key("gw-01", "opcua-adapter"));
   });
 
   it("shows availability chips where known (LIVE for loaded, UNAVAIL for unavailable)", () => {
     const unavailable: ConfigEntryView = {
       key: key("gw-01", "opcua-adapter"),
-      id: "gw-01/opcua-adapter/main",
+      id: "gw-01/opcua-adapter",
       phase: "unavailable",
       refreshing: false,
     };
     renderView({
       state: clientState(fleetWithTwo(), {
         configs: {
-          entriesById: { [ID]: loadedEntry(), "gw-01/opcua-adapter/main": unavailable },
+          entriesById: { [ID]: loadedEntry(), "gw-01/opcua-adapter": unavailable },
         },
       }),
     });

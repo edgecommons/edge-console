@@ -44,11 +44,11 @@ describe("severityBucket / severityCounts", () => {
 describe("filterEvents", () => {
   it("filters by component, severity, and both (AND), preserving order", () => {
     expect(filterEvents(ENTRIES, {}).map((e) => e.id)).toEqual([4, 3, 2, 1]);
-    expect(filterEvents(ENTRIES, { componentId: "gw-01/opcua-adapter/main" }).map((e) => e.id)).toEqual([3, 2, 1]);
+    expect(filterEvents(ENTRIES, { componentId: "gw-01/opcua-adapter" }).map((e) => e.id)).toEqual([3, 2, 1]);
     expect(filterEvents(ENTRIES, { severity: "critical" }).map((e) => e.id)).toEqual([4]);
     expect(filterEvents(ENTRIES, { severity: "other" }).map((e) => e.id)).toEqual([2, 1]);
     expect(
-      filterEvents(ENTRIES, { componentId: "gw-01/opcua-adapter/main", severity: "warning" }).map((e) => e.id),
+      filterEvents(ENTRIES, { componentId: "gw-01/opcua-adapter", severity: "warning" }).map((e) => e.id),
     ).toEqual([3]);
   });
 });
@@ -56,8 +56,8 @@ describe("filterEvents", () => {
 describe("eventSourceIds / noisiestSource", () => {
   it("lists distinct sources sorted", () => {
     expect(eventSourceIds(ENTRIES)).toEqual([
-      "gw-01/opcua-adapter/main",
-      "gw-02/modbus-adapter/main",
+      "gw-01/opcua-adapter",
+      "gw-02/modbus-adapter",
     ]);
     expect(eventSourceIds([])).toEqual([]);
   });
@@ -65,7 +65,7 @@ describe("eventSourceIds / noisiestSource", () => {
   it("finds the noisiest source within the window only", () => {
     // Within 5 min: A has 2 (ids 3, 2 — id 1 is 10 min old), B has 1.
     expect(noisiestSource(ENTRIES, T0)).toEqual({
-      componentId: "gw-01/opcua-adapter/main",
+      componentId: "gw-01/opcua-adapter",
       count: 2,
     });
     expect(noisiestSource([], T0)).toBeUndefined();

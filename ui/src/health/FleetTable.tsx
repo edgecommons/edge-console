@@ -153,11 +153,6 @@ function ComponentRow({
         </TableCell>
         <TableCell>
           <span className="ec-pri">{comp.key.component}</span>
-          {comp.key.instance !== "main" && (
-            <Tag size="sm" type="outline" className="ec-instance">
-              {comp.key.instance}
-            </Tag>
-          )}
         </TableCell>
         <TableCell>
           <span className="ec-mono">{comp.key.device}</span>

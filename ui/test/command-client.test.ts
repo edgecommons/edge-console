@@ -53,7 +53,7 @@ function rig(opts: { start?: boolean } = {}) {
   return { client, sockets, clock };
 }
 
-const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
 
 function result(requestId: string, over: Partial<Extract<ServerMessage, { type: "command-result" }>> = {}): ServerMessage {
   return {

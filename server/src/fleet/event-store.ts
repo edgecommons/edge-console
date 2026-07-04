@@ -63,12 +63,12 @@ export class EventStore {
     const key: ComponentKey = {
       device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
     const { severity, type } = splitEventChannel(event.channel);
     const entry: ConsoleEvent = {
       id: this.nextId++,
       key,
+      instance: event.identity.instance,
       ...(severity !== undefined ? { severity } : {}),
       type,
       ...(event.channel !== undefined ? { channel: event.channel } : {}),

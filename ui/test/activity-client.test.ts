@@ -59,7 +59,7 @@ describe("FleetClient - activity subscriptions", () => {
 
     client.subscribeEvents(50);
     client.subscribeAlarms();
-    client.ackAlarm("gw-01/opcua-adapter/main::connection-lost");
+    client.ackAlarm("gw-01/opcua-adapter::connection-lost");
     client.unsubscribeEvents();
     client.unsubscribeAlarms();
 
@@ -69,7 +69,7 @@ describe("FleetClient - activity subscriptions", () => {
       {
         type: "ack-alarm",
         protocolVersion: PROTOCOL_VERSION,
-        alarmId: "gw-01/opcua-adapter/main::connection-lost",
+        alarmId: "gw-01/opcua-adapter::connection-lost",
       },
       { type: "unsubscribe-events", protocolVersion: PROTOCOL_VERSION },
       { type: "unsubscribe-alarms", protocolVersion: PROTOCOL_VERSION },

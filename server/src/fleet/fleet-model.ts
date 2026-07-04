@@ -282,12 +282,17 @@ export class FleetModel {
     now: number,
     deltas: FleetDelta[],
   ): void {
-    const key = event.channel !== undefined ? `${event.cls}/${event.channel}` : event.cls;
+    const inst = event.identity.instance;
+    // The value-cache key includes the source instance so per-instance data/evt (filler1 vs kep2)
+    // don't collide under the one (device, component) — the instance rides on the value as its source.
+    const key =
+      event.channel !== undefined ? `${inst}/${event.cls}/${event.channel}` : `${inst}/${event.cls}`;
     if (!comp.values.has(key) && comp.values.size >= this.opts.maxChannelsPerComponent) {
       comp.droppedChannels++;
       return;
     }
     comp.values.set(key, {
+      instance: inst,
       cls: event.cls,
       ...(event.channel !== undefined ? { channel: event.channel } : {}),
       body: event.body,
@@ -299,6 +304,7 @@ export class FleetModel {
       type: "value-updated",
       at: now,
       key: comp.key,
+      instance: inst,
       cls: event.cls,
       ...(event.channel !== undefined ? { channel: event.channel } : {}),
     });
@@ -435,7 +441,6 @@ export class FleetModel {
     const key: ComponentKey = {
       device: device.device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
     const id = componentKeyId(key);
     let comp = device.components.get(id);

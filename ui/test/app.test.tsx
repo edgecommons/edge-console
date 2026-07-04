@@ -62,7 +62,7 @@ describe("App shell", () => {
       };
       sockets[0]!.onmessage?.(JSON.stringify(msg));
     });
-    const row = screen.getByTestId("component-row-gw-01/opcua-adapter/main");
+    const row = screen.getByTestId("component-row-gw-01/opcua-adapter");
     expect(within(row).getByText("Healthy")).toBeTruthy();
   });
 
@@ -95,12 +95,12 @@ describe("App shell", () => {
     expect(screen.getByTestId("config-picker")).toBeTruthy();
 
     // Selecting a component issues get-config on the SAME socket (no second dial).
-    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter"));
     expect(sockets).toHaveLength(1);
     const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
     expect(frames.at(-1)).toMatchObject({
       type: "get-config",
-      key: { device: "gw-01", component: "opcua-adapter", instance: "main" },
+      key: { device: "gw-01", component: "opcua-adapter" },
     });
 
     // And back: the health view returns, the socket still lives.
@@ -148,6 +148,7 @@ describe("App shell", () => {
           {
             id: 1,
             key: key("gw-01", "opcua-adapter"),
+            instance: "main",
             severity: "info",
             type: "scan-cycle",
             channel: "info/scan-cycle",
@@ -168,9 +169,9 @@ describe("App shell", () => {
         snapshot: {
           active: [
             {
-              id: "gw-01/opcua-adapter/main::overtemp",
+              id: "gw-01/opcua-adapter::overtemp",
               key: key("gw-01", "opcua-adapter"),
-              componentId: "gw-01/opcua-adapter/main",
+              componentId: "gw-01/opcua-adapter",
               severity: "critical",
               type: "overtemp",
               message: "too hot",
@@ -186,7 +187,7 @@ describe("App shell", () => {
       };
       sockets[0]!.onmessage?.(JSON.stringify(alarmFrame));
     });
-    fireEvent.click(screen.getByTestId("ack-gw-01/opcua-adapter/main::overtemp"));
+    fireEvent.click(screen.getByTestId("ack-gw-01/opcua-adapter::overtemp"));
     expect(frames().some((f) => f.type === "ack-alarm")).toBe(true);
 
     fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
@@ -224,7 +225,7 @@ describe("App shell", () => {
     expect(screen.getByTestId("component-tree")).toBeTruthy();
 
     // Select the component leaf → its summary → Open detail: same shared socket, no second dial.
-    fireEvent.click(screen.getByTestId("tree-node-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("tree-node-gw-01/opcua-adapter"));
     fireEvent.click(screen.getByTestId("open-detail"));
     expect(sockets).toHaveLength(1);
     const crumbs = screen.getByTestId("detail-crumbs");
@@ -272,7 +273,7 @@ describe("App shell", () => {
     expect(sockets).toHaveLength(1);
 
     // Clicking the component node navigates to its Detail (a Topology chip → a component).
-    fireEvent.click(screen.getByTestId("topo-comp-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("topo-comp-gw-01/opcua-adapter"));
     const crumbs = screen.getByTestId("detail-crumbs");
     expect(within(crumbs).getByText("opcua-adapter")).toBeTruthy();
     expect(sockets[0]!.closed).toBe(false);
@@ -383,13 +384,13 @@ describe("App shell", () => {
     });
 
     // Both rows are visible before searching.
-    expect(screen.getByTestId("component-row-gw-01/opcua-adapter/main")).toBeTruthy();
-    expect(screen.getByTestId("component-row-gw-01/modbus-adapter/main")).toBeTruthy();
+    expect(screen.getByTestId("component-row-gw-01/opcua-adapter")).toBeTruthy();
+    expect(screen.getByTestId("component-row-gw-01/modbus-adapter")).toBeTruthy();
 
     // Typing "opcua" in the app-bar search filters the fleet table live.
     fireEvent.change(screen.getByTestId("appbar-search"), { target: { value: "opcua" } });
-    expect(screen.getByTestId("component-row-gw-01/opcua-adapter/main")).toBeTruthy();
-    expect(screen.queryByTestId("component-row-gw-01/modbus-adapter/main")).toBeNull();
+    expect(screen.getByTestId("component-row-gw-01/opcua-adapter")).toBeTruthy();
+    expect(screen.queryByTestId("component-row-gw-01/modbus-adapter")).toBeNull();
   });
 
   it("renders the app-bar chrome: search, theme toggle (g100↔g10), alarm badge, account role", () => {
@@ -425,9 +426,9 @@ describe("App shell", () => {
         snapshot: {
           active: [
             {
-              id: "gw-01/opcua-adapter/main::connection-lost",
+              id: "gw-01/opcua-adapter::connection-lost",
               key: key("gw-01", "opcua-adapter"),
-              componentId: "gw-01/opcua-adapter/main",
+              componentId: "gw-01/opcua-adapter",
               severity: "critical",
               type: "connection-lost",
               raisedAt: T0,

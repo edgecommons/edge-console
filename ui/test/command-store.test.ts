@@ -8,7 +8,7 @@ import { CommandStore, commandSlot } from "../src/fleet/command-store";
 import { key } from "./_fixtures";
 
 const KEY = key("gw-01", "opcua-adapter");
-const ID = "gw-01/opcua-adapter/main";
+const ID = "gw-01/opcua-adapter";
 
 describe("CommandStore", () => {
   it("records a pending command and derives the view surfaces", () => {

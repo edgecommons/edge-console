@@ -146,7 +146,6 @@ export class AttributeStore {
     const key: ComponentKey = {
       device,
       component: event.identity.component,
-      instance: event.identity.instance,
     };
     const id = componentKeyId(key);
     let state = this.byId.get(id);

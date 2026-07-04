@@ -16,8 +16,8 @@ class TestClock {
   fn = (): number => this.now;
 }
 
-const OPCUA: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
-const MODBUS: ComponentKey = { device: "gw-01", component: "modbus-adapter", instance: "main" };
+const OPCUA: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
+const MODBUS: ComponentKey = { device: "gw-01", component: "modbus-adapter" };
 
 function evtEvent(key: ComponentKey, channel: string | undefined, body: unknown = {}): IngressEvent {
   return {
@@ -31,10 +31,10 @@ function evtEvent(key: ComponentKey, channel: string | undefined, body: unknown 
       ],
       path: `dallas/${key.device}`,
       component: key.component,
-      instance: key.instance,
+      instance: "main",
     },
     body,
-    topic: `ecv1/${key.device}/${key.component}/${key.instance}/evt/${channel ?? ""}`,
+    topic: `ecv1/${key.device}/${key.component}/main/evt/${channel ?? ""}`,
   };
 }
 
@@ -49,7 +49,7 @@ describe("AlarmTracker - raise / re-raise / clear", () => {
     let snap = tracker.snapshot();
     expect(snap.active).toHaveLength(1);
     expect(snap.active[0]).toMatchObject({
-      id: "gw-01/opcua-adapter/main::connection-lost",
+      id: "gw-01/opcua-adapter::connection-lost",
       severity: "critical",
       type: "connection-lost",
       message: "session dropped",
@@ -133,7 +133,7 @@ describe("AlarmTracker - ack, ignores, bounds, history", () => {
     const clock = new TestClock();
     const tracker = new AlarmTracker(clock.fn);
     tracker.ingest(evtEvent(OPCUA, "critical/connection-lost"));
-    const id = "gw-01/opcua-adapter/main::connection-lost";
+    const id = "gw-01/opcua-adapter::connection-lost";
     expect(tracker.ack(id)).toBe(true);
     expect(tracker.snapshot().counts).toMatchObject({ active: 1, acked: 1 });
     expect(tracker.ack(id)).toBe(false); // already acked

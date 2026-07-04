@@ -186,7 +186,7 @@ describe("alarmNotes (R1 — the actionable active-alarm notes)", () => {
     const notes = alarmNotes(active, T0);
     expect(notes).toHaveLength(1); // the contained one is rolled into the device note instead
     expect(notes[0]).toMatchObject({
-      id: "pack-gw-01/opcua-adapter/main::connection-lost",
+      id: "pack-gw-01/opcua-adapter::connection-lost",
       severity: "critical",
       title: "opcua-adapter — connection-lost",
       acked: false,

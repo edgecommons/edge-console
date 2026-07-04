@@ -58,7 +58,7 @@ describe("FleetStore - snapshot apply", () => {
     const a = store.view();
     expect(store.view()).toBe(a);
     store.applyDeltas(
-      seqRun(11, [{ type: "value-updated", at: T0 + 100, key: key(), cls: "state" }]),
+      seqRun(11, [{ type: "value-updated", at: T0 + 100, key: key(), instance: "main", cls: "state" }]),
       T0 + 120,
     );
     expect(store.view()).not.toBe(a);
@@ -151,14 +151,14 @@ describe("FleetStore - per-delta semantics", () => {
       snapshot([
         deviceSnap("gw-01", [
           compSnap({
-            values: [{ cls: "state", body: { status: "RUNNING" }, receivedAt: T0 }],
+            values: [{ instance: "main", cls: "state", body: { status: "RUNNING" }, receivedAt: T0 }],
           }),
         ]),
       ]),
       T0,
     );
     store.applyDeltas(
-      seqRun(11, [{ type: "value-updated", at: T0 + 5000, key: key(), cls: "state" }]),
+      seqRun(11, [{ type: "value-updated", at: T0 + 5000, key: key(), instance: "main", cls: "state" }]),
       T0 + 5000,
     );
     const comp = firstComp(store);
@@ -172,7 +172,7 @@ describe("FleetStore - per-delta semantics", () => {
     const store = liveStore();
     store.applyDeltas(
       seqRun(11, [
-        { type: "value-updated", at: T0 + 100, key: key(), cls: "metric", channel: "sys" },
+        { type: "value-updated", at: T0 + 100, key: key(), instance: "main", cls: "metric", channel: "sys" },
       ]),
       T0 + 100,
     );
@@ -353,7 +353,7 @@ describe("FleetStore - per-delta semantics", () => {
     // value-updated, then device-reachability-changed) - "b" gets aged to OFFLINE.
     store.applyDeltas(
       seqRun(11, [
-        { type: "value-updated", at: T0 + 1000, key: key("gw-01", "a"), cls: "state" },
+        { type: "value-updated", at: T0 + 1000, key: key("gw-01", "a"), instance: "main", cls: "state" },
         {
           type: "device-reachability-changed",
           at: T0 + 1000,
@@ -369,7 +369,7 @@ describe("FleetStore - per-delta semantics", () => {
     expect(byName.get("b")!.liveness).toBe("OFFLINE"); // fill-in guess from a stale age
     // "b"'s keepalive arrives with NO liveness delta (the server never left FRESH).
     store.applyDeltas(
-      seqRun(13, [{ type: "value-updated", at: T0 + 2000, key: key("gw-01", "b"), cls: "state" }]),
+      seqRun(13, [{ type: "value-updated", at: T0 + 2000, key: key("gw-01", "b"), instance: "main", cls: "state" }]),
       T0 + 2000,
     );
     byName = new Map(store.view().devices[0]!.components.map((c) => [c.key.component, c]));
@@ -386,14 +386,14 @@ describe("FleetStore - per-delta semantics", () => {
     );
     // A duplicate graceful-stop state (value-updated with no transition) holds STOPPED.
     store.applyDeltas(
-      seqRun(12, [{ type: "value-updated", at: T0 + 2000, key: key(), cls: "state" }]),
+      seqRun(12, [{ type: "value-updated", at: T0 + 2000, key: key(), instance: "main", cls: "state" }]),
       T0 + 2000,
     );
     expect(firstComp(store).liveness).toBe("STOPPED");
     // A real restart carries the explicit STOPPED -> FRESH transition in-batch.
     store.applyDeltas(
       seqRun(13, [
-        { type: "value-updated", at: T0 + 3000, key: key(), cls: "state" },
+        { type: "value-updated", at: T0 + 3000, key: key(), instance: "main", cls: "state" },
         { type: "liveness-changed", at: T0 + 3000, key: key(), from: "STOPPED", to: "FRESH" },
       ]),
       T0 + 3000,

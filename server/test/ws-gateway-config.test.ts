@@ -42,7 +42,7 @@ class FakeTransport implements ClientTransport {
   }
 }
 
-const KEY: ComponentKey = { device: "gw-01", component: "modbus-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "modbus-adapter" };
 
 function cfgEvent(body: unknown, key: ComponentKey = KEY): IngressEvent {
   return {
@@ -52,10 +52,10 @@ function cfgEvent(body: unknown, key: ComponentKey = KEY): IngressEvent {
       hier: [{ level: "device", value: key.device }],
       path: key.device,
       component: key.component,
-      instance: key.instance,
+      instance: "main",
     },
     body,
-    topic: `ecv1/${key.device}/${key.component}/${key.instance}/cfg`,
+    topic: `ecv1/${key.device}/${key.component}/main/cfg`,
   };
 }
 
@@ -122,7 +122,7 @@ describe("FleetWsGateway - get-config", () => {
 
   it("pushes a fresh cfg arrival to clients that requested that key - and only that key", () => {
     const { configs, gateway } = rig();
-    const otherKey: ComponentKey = { device: "gw-02", component: "opcua-adapter", instance: "main" };
+    const otherKey: ComponentKey = { device: "gw-02", component: "opcua-adapter" };
 
     const a = new FakeTransport("a"); // interested in KEY
     const b = new FakeTransport("b"); // interested in a different key
@@ -251,8 +251,8 @@ describe("FleetWsGateway - config-family handshake and validation", () => {
     expect(t.closed).toBeUndefined();
   });
 
-  it("componentKeyId drives interest matching (device/component/instance triplet)", () => {
+  it("componentKeyId drives interest matching (device/component pair)", () => {
     // Guard the id shape the gateway keys interest with.
-    expect(componentKeyId(KEY)).toBe("gw-01/modbus-adapter/main");
+    expect(componentKeyId(KEY)).toBe("gw-01/modbus-adapter");
   });
 });

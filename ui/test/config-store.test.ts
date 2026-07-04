@@ -3,7 +3,7 @@ import { ConfigStore } from "../src/fleet/config-store";
 import { key } from "./_fixtures";
 
 const KEY = key("gw-01", "modbus-adapter");
-const ID = "gw-01/modbus-adapter/main";
+const ID = "gw-01/modbus-adapter";
 
 describe("ConfigStore (client) - entry lifecycle", () => {
   it("noteRequested creates a loading entry once (idempotent)", () => {

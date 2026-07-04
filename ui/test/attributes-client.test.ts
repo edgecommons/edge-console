@@ -73,7 +73,7 @@ describe("FleetClient — runtime attributes", () => {
         runtimeAttrs(key("gw-01", "opcua-adapter"), { cpuPercent: 12, memoryMb: 210, connectionState: "CONNECTED" }),
       ],
     });
-    let attrs = client.getState().attributes.byId["gw-01/opcua-adapter/main"];
+    let attrs = client.getState().attributes.byId["gw-01/opcua-adapter"];
     expect(attrs?.cpuPercent).toBe(12);
     expect(attrs?.connectionState).toBe("CONNECTED");
 
@@ -82,7 +82,7 @@ describe("FleetClient — runtime attributes", () => {
       protocolVersion: PROTOCOL_VERSION,
       updates: [runtimeAttrs(key("gw-01", "opcua-adapter"), { cpuPercent: 33, connectionState: "RECONNECTING" })],
     });
-    attrs = client.getState().attributes.byId["gw-01/opcua-adapter/main"];
+    attrs = client.getState().attributes.byId["gw-01/opcua-adapter"];
     expect(attrs?.cpuPercent).toBe(33);
     expect(attrs?.connectionState).toBe("RECONNECTING");
   });

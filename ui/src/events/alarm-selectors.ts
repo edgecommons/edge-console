@@ -64,6 +64,8 @@ export interface FeedRow {
   alarm?: ConsoleAlarm;
   /** The underlying event (present iff `kind === "event"`). */
   event?: ConsoleEvent;
+  /** The source instance for an event row (the connection that raised it); absent for alarms. */
+  instance?: string;
 }
 
 /**
@@ -99,6 +101,7 @@ export function feedRows(alarms: ConsoleAlarm[], events: ConsoleEvent[]): FeedRo
       severity: severityBucket(e),
       componentId: componentKeyId(e.key),
       key: e.key,
+      instance: e.instance,
       title: e.type,
       summary: summarizeBody(e.body),
       state: "event",

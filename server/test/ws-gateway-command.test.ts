@@ -47,7 +47,7 @@ class FakeTransport implements ClientTransport {
 }
 
 const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "console-dev" }], "edge-console");
-const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter", instance: "main" };
+const KEY: ComponentKey = { device: "gw-01", component: "opcua-adapter" };
 
 function reply(verb: string, body: unknown): Message {
   return MessageBuilder.create(verb, "1.0").withPayload(body).build();
