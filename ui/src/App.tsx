@@ -22,11 +22,14 @@ import {
   SideNavLink,
   Theme,
 } from "@carbon/react";
-import { Activity, Catalog, Dashboard } from "@carbon/react/icons";
+import { Activity, Catalog, Dashboard, TreeView } from "@carbon/react/icons";
+import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { defaultWsUrl } from "./config";
 import { FleetClient } from "./fleet/client";
 import { useFleetLifecycle, useFleetState } from "./fleet/useFleet";
 import { ConnectedEdgeHealthView } from "./health/EdgeHealthView";
+import { ConnectedComponentsView } from "./components/ComponentsView";
+import { ConnectedComponentDetailView } from "./components/ComponentDetailView";
 import { ConnectedConfigReviewView } from "./configreview/ConfigReviewView";
 import { ConnectedEventsView } from "./events/EventsView";
 import { AppBar } from "./shell/AppBar";
@@ -34,8 +37,8 @@ import { SearchContext } from "./shell/search";
 import type { SearchState } from "./shell/search";
 import { useTheme } from "./shell/theme";
 
-/** The shell's view routes (one per shipped screen). */
-type Route = "overview" | "config" | "events";
+/** The shell's view routes (one per shipped screen; `detail` is the Components sub-screen). */
+type Route = "overview" | "components" | "detail" | "config" | "events";
 
 export default function App({ client }: { client?: FleetClient }): React.JSX.Element {
   const fleetClient = useMemo(() => client ?? new FleetClient({ url: defaultWsUrl() }), [client]);
@@ -46,6 +49,19 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const [route, setRoute] = useState<Route>("overview");
   const [query, setQuery] = useState("");
   const [navExpanded, setNavExpanded] = useState(true);
+  // The Component Detail target (set by the Components screen / a detail link), and the
+  // component the Configuration screen should open pre-selected (set by a detail "View config").
+  const [detailKey, setDetailKey] = useState<ComponentKey | undefined>(undefined);
+  const [configInitial, setConfigInitial] = useState<ComponentKey | undefined>(undefined);
+
+  const openDetail = (key: ComponentKey) => {
+    setDetailKey(key);
+    setRoute("detail");
+  };
+  const viewConfig = (key: ComponentKey) => {
+    setConfigInitial(key);
+    setRoute("config");
+  };
 
   // The notifications badge + the Overview columns are global — subscribe the alarm and
   // runtime-attribute surfaces once on connect (server-side interest is per-connection; a
@@ -90,6 +106,14 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               Overview
             </SideNavLink>
             <SideNavLink
+              renderIcon={TreeView}
+              href="#"
+              isActive={route === "components" || route === "detail"}
+              onClick={navigate("components")}
+            >
+              Components
+            </SideNavLink>
+            <SideNavLink
               renderIcon={Catalog}
               href="#"
               isActive={route === "config"}
@@ -110,8 +134,22 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
         <Content id="main-content" className="ec-content">
           {route === "overview" ? (
             <ConnectedEdgeHealthView client={fleetClient} onOpenEvents={() => setRoute("events")} />
+          ) : route === "components" ? (
+            <ConnectedComponentsView client={fleetClient} onOpenDetail={openDetail} />
+          ) : route === "detail" && detailKey !== undefined ? (
+            <ConnectedComponentDetailView
+              client={fleetClient}
+              detailKey={detailKey}
+              onBack={() => setRoute("components")}
+              onOpenOverview={() => setRoute("overview")}
+              onViewConfig={() => viewConfig(detailKey)}
+              onOpenEvents={() => setRoute("events")}
+            />
           ) : route === "config" ? (
-            <ConnectedConfigReviewView client={fleetClient} />
+            <ConnectedConfigReviewView
+              client={fleetClient}
+              {...(configInitial !== undefined ? { initialSelected: configInitial } : {})}
+            />
           ) : (
             <ConnectedEventsView client={fleetClient} />
           )}

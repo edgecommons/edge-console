@@ -858,6 +858,409 @@
   gap: 0.5rem;
 }
 
+/* ============ components screen (R2 — mockup #screen-components) ============ */
+.ec-components__grid {
+  display: grid;
+  grid-template-columns: 20rem 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 60rem) {
+  .ec-components__grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ec-components__pane {
+  min-width: 0;
+}
+
+/* the mockup's "🔍 Filter tree…" input above the tree */
+.ec-tree-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--cds-field);
+  border-bottom: 1px solid var(--cds-border-strong);
+  color: var(--cds-text-helper);
+}
+.ec-tree-filter__input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+}
+.ec-tree-filter__input::placeholder {
+  color: var(--cds-text-placeholder);
+}
+
+/* the navigable tree (mockup .tree / .n) */
+.ec-tree {
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  max-height: 34rem;
+  overflow: auto;
+}
+.ec-tree__n {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.75rem;
+  cursor: pointer;
+  color: var(--cds-text-secondary);
+  white-space: nowrap;
+  border: none;
+  width: 100%;
+  text-align: left;
+
+  &:hover {
+    background: var(--cds-layer-hover);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: -2px;
+  }
+}
+.ec-tree__n--sel {
+  background: var(--cds-layer-selected);
+  color: var(--cds-text-primary);
+  box-shadow: inset 3px 0 0 var(--cds-border-interactive);
+}
+.ec-tree__tw {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--cds-icon-secondary);
+
+  svg {
+    fill: var(--cds-icon-secondary);
+  }
+}
+.ec-tree__tw--leaf {
+  cursor: default;
+}
+.ec-tree__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ec-tree__label--group {
+  color: var(--cds-text-primary);
+  font-weight: 500;
+}
+.ec-tree__count {
+  margin-left: auto;
+}
+
+/* the health dots (mockup .dot.d-ok/…), reused by the tree */
+.ec-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cds-text-placeholder);
+}
+.ec-dot--ok {
+  background: var(--cds-support-success);
+}
+.ec-dot--warn {
+  background: var(--cds-support-warning);
+}
+.ec-dot--err {
+  background: var(--cds-support-error);
+}
+.ec-dot--idle {
+  background: var(--cds-text-placeholder);
+}
+.ec-dot--un {
+  background: transparent;
+  border: 1px dashed var(--cds-border-strong);
+}
+
+/* the roster (site inventory) shown for a group node */
+.ec-roster__hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.ec-roster__title {
+  font-size: 1.25rem;
+}
+.ec-roster__sub {
+  font-size: 0.8125rem;
+  margin-top: 0.125rem;
+}
+.ec-roster {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-roster__row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr 9rem 6rem auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--cds-border-subtle);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+.ec-roster__row--hd {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--cds-border-strong);
+}
+
+/* ============ component detail (R2 — mockup #screen-detail) ============ */
+.ec-crumbs {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin-bottom: 0.375rem;
+
+  a {
+    color: var(--cds-link-primary);
+    cursor: pointer;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+  b {
+    color: var(--cds-text-primary);
+    font-weight: 600;
+  }
+}
+.ec-crumbs__sep {
+  color: var(--cds-text-helper);
+}
+.ec-crumbs__mid {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.ec-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.ec-detail-head__title {
+  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ec-detail-head__sub {
+  font-size: 0.8125rem;
+  margin-top: 0.25rem;
+}
+.ec-detail-head__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ec-detail-head__actions--right {
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.ec-detail-tabs {
+  margin-bottom: 1rem;
+}
+.ec-detail-2col {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+@media (max-width: 60rem) {
+  .ec-detail-2col {
+    grid-template-columns: 1fr;
+  }
+}
+.ec-detail-note {
+  font-size: 0.75rem;
+  margin-top: 0.625rem;
+  max-width: 40rem;
+}
+
+/* structured list (mockup .slist) — health checks / instances / embedded events */
+.ec-slist {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-slist__r {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6875rem 0.75rem;
+  border-bottom: 1px solid var(--cds-border-subtle);
+  font-size: 0.875rem;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+.ec-slist__r--hd {
+  font-weight: 600;
+  background: var(--cds-layer-accent);
+  color: var(--cds-text-primary);
+}
+.ec-slist__k {
+  color: var(--cds-text-secondary);
+}
+.ec-slist__v {
+  text-align: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.ec-instance-status {
+  gap: 0.625rem;
+}
+
+/* the liveness chartbox (mockup .chartbox) */
+.ec-chartbox {
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  padding: 1rem;
+}
+.ec-chartbox__ct {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+  margin-bottom: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ec-liveness-state {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* embedded events rows */
+.ec-evt-embed-row {
+  align-items: center;
+}
+.ec-evt-embed-row__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+}
+.ec-evt-embed-row__body {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ec-evt-embed-row__age {
+  flex: none;
+  font-size: 0.75rem;
+}
+
+/* the mockup .callout (info left-accent panel) */
+.ec-callout {
+  background: var(--cds-highlight, var(--cds-layer-accent));
+  border-inline-start: 3px solid var(--cds-border-interactive);
+  padding: 0.75rem 0.875rem;
+  font-size: 0.8125rem;
+  color: var(--cds-text-primary);
+  margin: 1rem 0;
+
+  b {
+    font-weight: 600;
+  }
+}
+
+/* the honest Phase-2 pending panels (describe/panels, logs) */
+.ec-pending {
+  border: 1px dashed var(--cds-border-strong);
+  background: var(--cds-layer);
+  padding: 1.25rem 1.25rem 1.5rem;
+}
+.ec-pending__badge {
+  display: inline-flex;
+  align-items: center;
+  height: 1.5rem;
+  padding: 0 0.625rem;
+  border-radius: 0.75rem;
+  background: var(--cds-layer-accent);
+  color: var(--cds-text-secondary);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.625rem;
+}
+.ec-pending__title {
+  font-size: 1.125rem;
+  font-weight: 400;
+  margin: 0 0 0.375rem;
+}
+.ec-pending p {
+  max-width: 44rem;
+  font-size: 0.875rem;
+}
+
+/* the inert opcua sub-tabs (mockup .subtabs), rendered pending */
+.ec-subtabs {
+  display: inline-flex;
+  border: 1px solid var(--cds-border-strong);
+  margin: 0.75rem 0;
+
+  span {
+    padding: 0 0.875rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    font-size: 0.8125rem;
+    color: var(--cds-text-secondary);
+    border-right: 1px solid var(--cds-border-subtle);
+
+    &:last-child {
+      border-right: none;
+    }
+  }
+}
+.ec-subtabs--pending {
+  opacity: 0.65;
+
+  span {
+    cursor: not-allowed;
+  }
+}
+
 /* ============ motion ============ */
 // The only animated affordances are Carbon's own (InlineLoading spinner etc.), which
 // respect prefers-reduced-motion. Belt-and-braces: disable any residual transitions.

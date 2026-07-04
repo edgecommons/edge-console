@@ -166,6 +166,50 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
+  it("navigates to Components (R2): the dynamic tree renders, and Open detail shows the detail breadcrumb", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+      const msg: ServerMessage = {
+        type: "snapshot",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: snapshot([deviceSnap("gw-01", [compSnap({ key: key("gw-01", "opcua-adapter") })])]),
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(msg));
+    });
+
+    // The Components nav lands; the tree is built from the identity hierarchy.
+    fireEvent.click(screen.getByRole("link", { name: /Components/ }));
+    expect(screen.getByText("Browse the site inventory and drill into any component.")).toBeTruthy();
+    expect(screen.getByTestId("component-tree")).toBeTruthy();
+
+    // Select the component leaf → its summary → Open detail: same shared socket, no second dial.
+    fireEvent.click(screen.getByTestId("tree-node-gw-01/opcua-adapter/main"));
+    fireEvent.click(screen.getByTestId("open-detail"));
+    expect(sockets).toHaveLength(1);
+    const crumbs = screen.getByTestId("detail-crumbs");
+    expect(within(crumbs).getByText("opcua-adapter")).toBeTruthy();
+    // The detail requested this component's cfg on the SAME socket (embedded Configuration tab).
+    const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
+    expect(frames.some((f) => f.type === "get-config")).toBe(true);
+
+    // Back to Components via the breadcrumb.
+    fireEvent.click(screen.getByTestId("crumb-components"));
+    expect(screen.getByTestId("component-tree")).toBeTruthy();
+    expect(sockets[0]!.closed).toBe(false);
+  });
+
   it("filters the fleet from the app-bar global search (shared SearchContext → Overview)", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({

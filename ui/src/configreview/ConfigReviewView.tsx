@@ -408,10 +408,17 @@ export function ConfigReviewView({
 }
 
 /** The live container: selection state + on-demand `get-config` over the shared client. */
-export function ConnectedConfigReviewView({ client }: { client: FleetClient }): React.JSX.Element {
+export function ConnectedConfigReviewView({
+  client,
+  initialSelected,
+}: {
+  client: FleetClient;
+  /** Pre-select this component on mount (e.g. a Component Detail "View config" hand-off). */
+  initialSelected?: ComponentKey;
+}): React.JSX.Element {
   const state = useFleetState(client);
   const now = useNowTick(1000);
-  const [selected, setSelected] = useState<ComponentKey | undefined>(undefined);
+  const [selected, setSelected] = useState<ComponentKey | undefined>(initialSelected);
   const status = state.status;
 
   // (Re-)request the selection's cfg whenever the selection changes OR the connection
