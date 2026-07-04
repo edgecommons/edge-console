@@ -36,6 +36,17 @@ async function main(): Promise<void> {
     uns: gg.uns(),
     newMessage: (name) => MessageBuilder.create(name, "1.0").withConfig(gg.config()),
     globalConfig: gg.config().global(),
+    // The console's OWN self-identity + messaging transport (R1) — all honestly sourced from the
+    // console's own resolved runtime: identity (device/component) from its config-derived UNS
+    // identity, platform/transport from the resolved CLI axes, and the site-broker host from its
+    // `messaging.local` config. Drives the Overview "Edge node console self" tile + "Edge bus" foot.
+    self: {
+      device: gg.config().componentIdentity.device,
+      component: gg.config().componentIdentity.component,
+      platform: gg.args().platform,
+      transport: gg.args().transport,
+      ...(brokerHost(gg.config().raw) !== undefined ? { broker: brokerHost(gg.config().raw)! } : {}),
+    },
   });
 
   logger.info(`edge-console ingress up (${app.ingress.subscribedFilters().length} filters)`);
@@ -54,6 +65,14 @@ async function main(): Promise<void> {
   // unauthenticated. TODO(prod auth): before exposing beyond a trusted dev network,
   // implement `resolveRole` to verify the upgrade request's principal (headers/mTLS cert)
   // and reject unauthenticated upgrades. Track under the console's RBAC design (DESIGN §6.5).
+}
+
+/** The site-bus broker host from the console's own `messaging.local.host` config, when present. */
+function brokerHost(raw: unknown): string | undefined {
+  const asObj = (v: unknown): Record<string, unknown> =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const host = asObj(asObj(asObj(raw).messaging).local).host;
+  return typeof host === "string" && host !== "" ? host : undefined;
 }
 
 main().catch((err) => {

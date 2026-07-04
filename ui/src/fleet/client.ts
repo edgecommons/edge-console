@@ -27,6 +27,7 @@ import type {
   ClientMessage,
   CommandError,
   ComponentKey,
+  ConsoleSelf,
   ServerMessage,
 } from "@edgecommons/edge-console-protocol";
 import type { LadderOptions } from "./store";
@@ -38,6 +39,8 @@ import { EventLogStore } from "./event-log-store";
 import type { EventsView } from "./event-log-store";
 import { AlarmStore } from "./alarm-store";
 import type { AlarmsView } from "./alarm-store";
+import { AttributeStore } from "./attribute-store";
+import type { AttributesView } from "./attribute-store";
 import { CommandStore } from "./command-store";
 import type { CommandView } from "./command-store";
 
@@ -112,6 +115,14 @@ export interface ClientState {
   events: EventsView;
   /** The R0 console-side alarm surface (active list + counts) — the notifications badge. */
   alarms: AlarmsView;
+  /** The R0 runtime-attribute projection per component (the Overview CPU/Memory/Conn columns). */
+  attributes: AttributesView;
+  /** The console's own bus-ingest throughput (msgs/sec, from the heartbeat) — the Overview "Edge bus" tile. Undefined until a heartbeat carries it. */
+  busMsgsPerSec?: number;
+  /** The console's own recent per-second bus rates (from the heartbeat) — the "Edge bus" tile sparkline. */
+  busRecentRates?: number[];
+  /** The console's own self-identity + process vitals + transport (from the heartbeat) — the "Edge node console self" tile + the "Edge bus" transport foot. */
+  self?: ConsoleSelf;
   /** The connection's resolved RBAC role (from the `welcome` frame) — the account indicator. */
   role?: string;
   /** The C4 command state (per-request phases + per-button latest + the toast feed). */
@@ -127,6 +138,8 @@ export class FleetClient {
   readonly eventLog: EventLogStore;
   /** The R0 alarm fold core (pure; this client is its IO shell). */
   readonly alarmStore: AlarmStore;
+  /** The R0 runtime-attribute fold core (pure; this client is its IO shell). */
+  readonly attributeStore: AttributeStore;
   /** The C4 command fold core (pure; this client is its IO shell). */
   readonly commandStore: CommandStore;
 
@@ -171,8 +184,18 @@ export class FleetClient {
     this.configStore = new ConfigStore();
     this.eventLog = new EventLogStore();
     this.alarmStore = new AlarmStore();
+    this.attributeStore = new AttributeStore();
     this.commandStore = new CommandStore();
   }
+
+  /** The console's own bus-ingest throughput (msgs/sec) from the latest heartbeat. */
+  private busMsgsPerSec: number | undefined;
+
+  /** The console's own recent per-second bus rates (sparkline ring) from the latest heartbeat. */
+  private busRecentRates: number[] | undefined;
+
+  /** The console's own self-identity + process vitals + transport from the latest heartbeat. */
+  private self: ConsoleSelf | undefined;
 
   /** The connection's resolved RBAC role (from the `welcome` frame); undefined until it arrives. */
   private role: string | undefined;
@@ -280,6 +303,23 @@ export class FleetClient {
   }
 
   /**
+   * Subscribe to the runtime-attribute surface (R0 `subscribe-attributes`): one replace
+   * `attributes` snapshot (every known component's latest cpu/mem/threads/fds + conn
+   * state) arrives immediately, then each later change as an `attribute` push. The
+   * Overview subscribes on connect (the CPU/Memory/Conn columns are always shown);
+   * server-side interest is per-connection, so the owning view re-subscribes whenever
+   * the connection comes (back) up — the same reconnect story as the others.
+   */
+  subscribeAttributes(): void {
+    this.sendFrame({ type: "subscribe-attributes", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /** Stop the attribute stream. Idempotent. */
+  unsubscribeAttributes(): void {
+    this.sendFrame({ type: "unsubscribe-attributes", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
    * Acknowledge an active alarm (R0 `ack-alarm`) — console-side state that does not
    * clear the alarm. No direct reply: the tracker re-pushes a fresh `alarms` snapshot
    * (with the alarm now `acked`) to every subscribed client.
@@ -346,6 +386,7 @@ export class FleetClient {
     const configs = this.configStore.view();
     const events = this.eventLog.view();
     const alarms = this.alarmStore.view();
+    const attributes = this.attributeStore.view();
     const commands = this.commandStore.view();
     if (
       this.stateCache === undefined ||
@@ -353,9 +394,13 @@ export class FleetClient {
       this.stateCache.configs !== configs ||
       this.stateCache.events !== events ||
       this.stateCache.alarms !== alarms ||
+      this.stateCache.attributes !== attributes ||
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
       this.stateCache.role !== this.role ||
+      this.stateCache.busMsgsPerSec !== this.busMsgsPerSec ||
+      this.stateCache.busRecentRates !== this.busRecentRates ||
+      this.stateCache.self !== this.self ||
       this.stateCache.fatalError !== this.fatalError
     ) {
       this.stateCache = {
@@ -366,6 +411,10 @@ export class FleetClient {
         configs,
         events,
         alarms,
+        attributes,
+        ...(this.busMsgsPerSec !== undefined ? { busMsgsPerSec: this.busMsgsPerSec } : {}),
+        ...(this.busRecentRates !== undefined ? { busRecentRates: this.busRecentRates } : {}),
+        ...(this.self !== undefined ? { self: this.self } : {}),
         ...(this.role !== undefined ? { role: this.role } : {}),
         commands,
         wsUrl: this.url,
@@ -446,6 +495,12 @@ export class FleetClient {
       }
       case "heartbeat":
         this.store.noteHeartbeat(msg.at, this.now());
+        // The console's own self-surfaces (R1) ride the heartbeat — the Overview "Edge bus" tile
+        // (msgs/s + sparkline) and the "Edge node console self" tile (identity + cpu/mem/uptime +
+        // transport). All optional/additive — undefined until a heartbeat carries them.
+        if (typeof msg.busMsgsPerSec === "number") this.busMsgsPerSec = msg.busMsgsPerSec;
+        if (Array.isArray(msg.busRecentRates)) this.busRecentRates = msg.busRecentRates;
+        if (msg.self !== undefined) this.self = msg.self;
         this.retries = 0;
         this.notify();
         return;
@@ -478,6 +533,16 @@ export class FleetClient {
         return;
       case "alarms":
         this.alarmStore.applySnapshot(msg.snapshot);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "attributes":
+        this.attributeStore.applySnapshot(msg.components);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "attribute":
+        this.attributeStore.applyUpdates(msg.updates);
         this.retries = 0;
         this.notify();
         return;

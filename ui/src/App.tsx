@@ -47,11 +47,15 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const [query, setQuery] = useState("");
   const [navExpanded, setNavExpanded] = useState(true);
 
-  // The notifications badge is global — subscribe the alarm surface once on connect
-  // (server-side interest is per-connection; a fresh snapshot on reconnect self-heals).
+  // The notifications badge + the Overview columns are global — subscribe the alarm and
+  // runtime-attribute surfaces once on connect (server-side interest is per-connection; a
+  // fresh snapshot on reconnect self-heals).
   const status = state.status;
   useEffect(() => {
-    if (status === "connected") fleetClient.subscribeAlarms();
+    if (status === "connected") {
+      fleetClient.subscribeAlarms();
+      fleetClient.subscribeAttributes();
+    }
   }, [fleetClient, status]);
 
   const search = useMemo<SearchState>(() => ({ query, setQuery }), [query]);
@@ -105,7 +109,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
         </SideNav>
         <Content id="main-content" className="ec-content">
           {route === "overview" ? (
-            <ConnectedEdgeHealthView client={fleetClient} />
+            <ConnectedEdgeHealthView client={fleetClient} onOpenEvents={() => setRoute("events")} />
           ) : route === "config" ? (
             <ConnectedConfigReviewView client={fleetClient} />
           ) : (

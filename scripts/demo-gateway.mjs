@@ -35,6 +35,8 @@ import { MetricStore } from "../server/dist/fleet/metric-store.js";
 import { SignalStore } from "../server/dist/fleet/signal-store.js";
 import { AttributeStore } from "../server/dist/fleet/attribute-store.js";
 import { AlarmTracker } from "../server/dist/fleet/alarm-tracker.js";
+import { ThroughputMeter } from "../server/dist/fleet/throughput-meter.js";
+import { ConsoleSelfMonitor } from "../server/dist/fleet/console-self.js";
 import { CommandGateway } from "../server/dist/command/command-gateway.js";
 import { ConfigRbacPolicy } from "../server/dist/command/rbac.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
@@ -52,6 +54,26 @@ const metrics = new MetricStore(clock);
 const signals = new SignalStore(clock);
 const attributes = new AttributeStore(clock);
 const alarms = new AlarmTracker(clock);
+// R1: the console's own bus-ingest throughput (the Overview "Edge bus msgs/s" tile + sparkline).
+const throughput = new ThroughputMeter(clock);
+// R1: the console's own self-identity + process vitals (the "Edge node console self" tile). The
+// identity/platform/transport/broker are the demo's synthetic console self (matching the mockup's
+// gw-dallas-01 / HOST / MQTT / EMQX @ gateway); the cpu/mem/uptime are this REAL node process
+// (the honest half — the same nodeSelfSampler the live console uses).
+const selfMonitor = new ConsoleSelfMonitor({
+  device: "gw-dallas-01",
+  component: "edge-console",
+  platform: "HOST",
+  transport: "MQTT",
+  broker: "EMQX @ gateway",
+});
+// Per-device platform advertised via the state-envelope `tags.platform` (config-driven metadata),
+// so the Overview group rows show the mockup's `press-gw-01 (Greengrass)` / `pack-gw-01 (HOST)`.
+const PLATFORM_OF = {
+  "press-gw-01": "GREENGRASS",
+  "pack-gw-01": "HOST",
+  "asm-gw-01": "HOST",
+};
 
 // R0: device-reachability transitions drive alarm CONTAINMENT (a device going
 // UNREACHABLE suppresses its components' alarms; recovery releases them).
@@ -63,6 +85,7 @@ model.onDelta((deltas) => {
 
 /** The composition root's ingress tee: FleetModel + side stores (console-app.ts shape). */
 function ingest(event) {
+  throughput.mark();
   model.ingest(event);
   configs.ingest(event);
   events.ingest(event);
@@ -100,6 +123,8 @@ function stateEvent(site, device, component, body, instance = "main") {
       component,
       instance,
     },
+    // The device's deployment platform, advertised as config-driven envelope metadata (R1).
+    ...(PLATFORM_OF[device] !== undefined ? { tags: { platform: PLATFORM_OF[device] } } : {}),
     body,
     sourceTimestamp: new Date().toISOString(),
     topic: `ecv1/${device}/${component}/${instance}/state`,
@@ -268,7 +293,12 @@ const commandGateway = new CommandGateway({
 
 const gateway = new FleetWsGateway(
   model,
-  { clock },
+  {
+    clock,
+    busThroughput: () => throughput.ratePerSec(),
+    busRecentRates: () => throughput.recentRates(),
+    consoleSelf: () => selfMonitor.sample(),
+  },
   {
     configs,
     // The demo's stand-in for BusIngress.broadcastRepublish + the device-side S1
@@ -448,7 +478,9 @@ feed();
 
 const feeder = setInterval(feed, 5000); // the 5 s keepalive cadence
 const sweeper = setInterval(() => model.sweep(), 1000); // the C1 staleness sweeper
-const ticker = setInterval(() => gateway.tick(), 15000); // WS heartbeats
+// WS heartbeats: the live gateway ticks at 15 s, but the demo ticks faster so the Overview's
+// Edge-bus sparkline + console-self cpu/mem/uptime visibly move (heartbeat carries them, R1).
+const ticker = setInterval(() => gateway.tick(), 3000);
 
 process.on("SIGINT", async () => {
   clearInterval(feeder);

@@ -3,7 +3,7 @@
  * computes from the store (summary counts, device rollups, the issue list, display
  * uptime/age) lives here so it is unit-testable without React.
  */
-import type { Liveness } from "@edgecommons/edge-console-protocol";
+import type { ConsoleAlarm, EventSeverityLevel, Liveness } from "@edgecommons/edge-console-protocol";
 import type { ComponentView, DeviceView, FleetView } from "./store";
 
 /** Summary counts for the fleet-health header tiles. */
@@ -79,25 +79,21 @@ export interface FleetIssue {
  * OFFLINE components are critical, STALE components warn, and each UNREACHABLE
  * device gets ONE containment note ("the road is down, not the houses") instead of
  * per-component alarms. WARN is shading, not an alarm (D5) — table-only.
+ *
+ * `containedByDevice` (optional) is the count of would-be component alarms the console
+ * SUPPRESSED under each unreachable device (from the AlarmTracker's containment) — the
+ * mockup's "+N would-be alarms suppressed under this one" rollup.
  */
-export function fleetIssues(view: FleetView, nowServerMs: number): FleetIssue[] {
+export function fleetIssues(
+  view: FleetView,
+  nowServerMs: number,
+  containedByDevice: Record<string, number> = {},
+): FleetIssue[] {
   const critical: FleetIssue[] = [];
   const warnings: FleetIssue[] = [];
   for (const device of view.devices) {
     if (device.unreachable) {
-      const frozen = device.components.length;
-      const since =
-        device.unreachableSince !== undefined
-          ? ` for ${formatDurationMs(Math.max(0, nowServerMs - device.unreachableSince))}`
-          : "";
-      warnings.push({
-        id: `unreachable:${device.device}`,
-        severity: "warning",
-        title: `${device.device} — device unreachable${since}`,
-        subtitle:
-          `bridge link down — ${frozen} component${frozen === 1 ? "" : "s"} frozen at ` +
-          `last-known values; component alarms contained`,
-      });
+      warnings.push(unreachableNote(device, nowServerMs, containedByDevice));
       continue; // containment: no per-component issues under an unreachable device
     }
     for (const comp of device.components) {
@@ -116,6 +112,89 @@ export function fleetIssues(view: FleetView, nowServerMs: number): FleetIssue[] 
     }
   }
   return [...critical, ...warnings];
+}
+
+/** The single "the road is down, not the houses" containment note for one UNREACHABLE device. */
+function unreachableNote(
+  device: DeviceView,
+  nowServerMs: number,
+  containedByDevice: Record<string, number>,
+): FleetIssue {
+  const frozen = device.components.length;
+  const since =
+    device.unreachableSince !== undefined
+      ? ` for ${formatDurationMs(Math.max(0, nowServerMs - device.unreachableSince))}`
+      : "";
+  const suppressed = containedByDevice[device.device] ?? 0;
+  const suppressedText =
+    suppressed > 0
+      ? `; +${suppressed} would-be alarm${suppressed === 1 ? "" : "s"} suppressed under this one`
+      : "";
+  return {
+    id: `unreachable:${device.device}`,
+    severity: "warning",
+    title: `${device.device} — device unreachable${since}`,
+    subtitle:
+      `the road is down, not the houses — ${frozen} component${frozen === 1 ? "" : "s"} ` +
+      `frozen at last-known values${suppressedText}`,
+  };
+}
+
+/**
+ * ONLY the device-containment notes (one per UNREACHABLE device) — the Overview's
+ * "unreachable/containment" note that sits alongside the AlarmTracker active-alarm notes
+ * (R1). Distinct from {@link fleetIssues} (which also derives per-component stale/offline
+ * notes) because on the Overview the actionable notes come from the AlarmTracker (they carry
+ * an ack target) while the containment note is a whole-device, non-ackable rollup.
+ */
+export function containmentNotes(
+  view: FleetView,
+  nowServerMs: number,
+  containedByDevice: Record<string, number> = {},
+): FleetIssue[] {
+  const notes: FleetIssue[] = [];
+  for (const device of view.devices) {
+    if (device.unreachable) notes.push(unreachableNote(device, nowServerMs, containedByDevice));
+  }
+  return notes;
+}
+
+/**
+ * One actionable active-alarm note (the Overview's `note err`/`note warn` strip): an
+ * {@link ConsoleAlarm} the AlarmTracker raised, rendered above the fleet table with **View**
+ * (→ Events) and **Ack** (→ `ack-alarm`) actions. Carries the alarm `id` (the ack target) and
+ * its current `acked` state.
+ */
+export interface AlarmNote {
+  /** The {@link ConsoleAlarm.id} — the `ack-alarm` target + React key. */
+  id: string;
+  severity: EventSeverityLevel;
+  title: string;
+  subtitle: string;
+  acked: boolean;
+}
+
+/**
+ * The active-alarm notes (R1): the NON-contained active alarms, newest raise first (the
+ * server's active order), each mapped to an actionable note. Contained alarms are excluded —
+ * they roll up into the device containment note ("the road is down, not the houses") instead.
+ */
+export function alarmNotes(active: ConsoleAlarm[], nowServerMs: number): AlarmNote[] {
+  return active
+    .filter((a) => !a.contained)
+    .map((a) => {
+      const parts = [a.key.device];
+      if (a.message !== undefined && a.message !== "") parts.push(a.message);
+      parts.push(`raised ${formatDurationMs(Math.max(0, nowServerMs - a.raisedAt))} ago`);
+      if (a.count > 1) parts.push(`×${a.count}`);
+      return {
+        id: a.id,
+        severity: a.severity,
+        title: `${a.key.component} — ${a.type}`,
+        subtitle: parts.join(" · "),
+        acked: a.acked,
+      };
+    });
 }
 
 /**
@@ -171,6 +250,20 @@ export function formatDurationMs(ms: number): string {
 /** Duration from seconds (uptime display). */
 export function formatDurationSecs(secs: number): string {
   return formatDurationMs(secs * 1000);
+}
+
+/**
+ * Compact single-unit uptime, mockup-style ("up 6d"): the largest whole unit only —
+ * `43s` / `5m` / `4h` / `6d`. Used where space is tight (the console-self tile foot).
+ */
+export function formatUptimeShort(secs: number): string {
+  const s = Math.max(0, Math.floor(secs));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function pad2(n: number): string {

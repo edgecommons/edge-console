@@ -166,6 +166,44 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
+  it("filters the fleet from the app-bar global search (shared SearchContext → Overview)", () => {
+    const sockets: FakeSocket[] = [];
+    const client = new FleetClient({
+      url: "ws://console.test/ws",
+      socketFactory: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s;
+      },
+      now: () => T0,
+    });
+
+    render(<App client={client} />);
+    act(() => {
+      sockets[0]!.onopen?.();
+      const msg: ServerMessage = {
+        type: "snapshot",
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: snapshot([
+          deviceSnap("gw-01", [
+            compSnap({ key: key("gw-01", "opcua-adapter") }),
+            compSnap({ key: key("gw-01", "modbus-adapter") }),
+          ]),
+        ]),
+      };
+      sockets[0]!.onmessage?.(JSON.stringify(msg));
+    });
+
+    // Both rows are visible before searching.
+    expect(screen.getByTestId("component-row-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(screen.getByTestId("component-row-gw-01/modbus-adapter/main")).toBeTruthy();
+
+    // Typing "opcua" in the app-bar search filters the fleet table live.
+    fireEvent.change(screen.getByTestId("appbar-search"), { target: { value: "opcua" } });
+    expect(screen.getByTestId("component-row-gw-01/opcua-adapter/main")).toBeTruthy();
+    expect(screen.queryByTestId("component-row-gw-01/modbus-adapter/main")).toBeNull();
+  });
+
   it("renders the app-bar chrome: search, theme toggle (g100↔g10), alarm badge, account role", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({

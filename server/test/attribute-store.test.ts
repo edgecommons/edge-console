@@ -88,3 +88,55 @@ describe("AttributeStore", () => {
     expect(store.droppedComponents()).toBe(1);
   });
 });
+
+describe("AttributeStore — platform capture + cpu series (R1)", () => {
+  /** A `state` envelope advertising its platform via `tags.platform` (no metric measure at all). */
+  function stateWithPlatform(platform: string, key: ComponentKey = KEY): IngressEvent {
+    return {
+      kind: "envelope",
+      cls: "state",
+      identity: {
+        hier: [
+          { level: "site", value: "dallas" },
+          { level: "device", value: key.device },
+        ],
+        path: `dallas/${key.device}`,
+        component: key.component,
+        instance: key.instance,
+      },
+      tags: { platform },
+      body: { status: "RUNNING" },
+      topic: `ecv1/${key.device}/${key.component}/${key.instance}/state`,
+    };
+  }
+
+  it("captures the advertised platform from ANY envelope's tags (even without a measure)", () => {
+    const clock = new TestClock();
+    const store = new AttributeStore(clock.fn);
+    store.ingest(stateWithPlatform("GREENGRASS"));
+    const snap = store.snapshot();
+    expect(snap).toHaveLength(1);
+    expect(snap[0]!.platform).toBe("GREENGRASS");
+    // No sys cpu ever arrived → no series.
+    expect(snap[0]!.cpuSeries).toBeUndefined();
+  });
+
+  it("accumulates a bounded recent CPU series from the sys cpu measure (drop-oldest)", () => {
+    const clock = new TestClock();
+    const store = new AttributeStore(clock.fn, { maxCpuSeriesPoints: 3 });
+    for (const cpu of [10, 20, 30, 40]) {
+      store.ingest(metricEvent("sys", { cpu }));
+      clock.tick(1000);
+    }
+    const snap = store.snapshot();
+    expect(snap[0]!.cpuSeries).toEqual([20, 30, 40]); // bound to 3, oldest dropped
+    expect(snap[0]!.cpuPercent).toBe(40);
+  });
+
+  it("does not add a cpu-series point when the sys body carries no numeric cpu", () => {
+    const clock = new TestClock();
+    const store = new AttributeStore(clock.fn);
+    store.ingest(metricEvent("sys", { memory: 100 })); // memory only, no cpu
+    expect(store.snapshot()[0]!.cpuSeries).toBeUndefined();
+  });
+});

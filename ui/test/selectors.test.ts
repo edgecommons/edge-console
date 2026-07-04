@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  alarmNotes,
+  containmentNotes,
   deviceRollup,
   displayUptimeSecs,
   fleetIssues,
   formatDurationMs,
   formatDurationSecs,
+  formatUptimeShort,
   hierPrefix,
   summarize,
 } from "../src/fleet/selectors";
 import { donutShares } from "../src/health/SummaryTiles";
-import { T0, compView, deviceView, fleetView, key } from "./_fixtures";
+import { T0, compView, consoleAlarm, deviceView, fleetView, key } from "./_fixtures";
 
 describe("summarize", () => {
   it("counts components by liveness and devices by reachability", () => {
@@ -156,6 +159,60 @@ describe("duration formatting", () => {
 
   it("formats uptime from seconds", () => {
     expect(formatDurationSecs(100)).toBe("1m 40s");
+  });
+
+  it("formats a compact single-unit uptime (mockup 'up 6d')", () => {
+    expect(formatUptimeShort(43)).toBe("43s");
+    expect(formatUptimeShort(5 * 60)).toBe("5m");
+    expect(formatUptimeShort(4 * 3600)).toBe("4h");
+    expect(formatUptimeShort(6 * 86400)).toBe("6d");
+    expect(formatUptimeShort(-5)).toBe("0s");
+  });
+});
+
+describe("alarmNotes (R1 — the actionable active-alarm notes)", () => {
+  it("maps non-contained active alarms to notes and EXCLUDES contained ones", () => {
+    const active = [
+      consoleAlarm({
+        key: key("pack-gw-01", "opcua-adapter"),
+        type: "connection-lost",
+        severity: "critical",
+        message: "session dropped",
+        raisedAt: T0 - 43_000,
+        count: 3,
+      }),
+      consoleAlarm({ key: key("asm-gw-01", "telemetry-processor"), type: "pipeline-lag", contained: true }),
+    ];
+    const notes = alarmNotes(active, T0);
+    expect(notes).toHaveLength(1); // the contained one is rolled into the device note instead
+    expect(notes[0]).toMatchObject({
+      id: "pack-gw-01/opcua-adapter/main::connection-lost",
+      severity: "critical",
+      title: "opcua-adapter — connection-lost",
+      acked: false,
+    });
+    expect(notes[0]!.subtitle).toBe("pack-gw-01 · session dropped · raised 43s ago · ×3");
+  });
+
+  it("carries the acked flag through (drives the disabled 'Acked' button)", () => {
+    expect(alarmNotes([consoleAlarm({ acked: true })], T0)[0]!.acked).toBe(true);
+  });
+});
+
+describe("containmentNotes (R1 — the whole-device unreachable rollup)", () => {
+  it("returns one note per unreachable device, with the suppressed count", () => {
+    const view = fleetView([
+      deviceView(
+        "asm-gw-01",
+        [compView({ key: key("asm-gw-01", "a"), liveness: "UNREACHABLE" })],
+        { unreachable: true, unreachableSince: T0 - 120_000 },
+      ),
+      deviceView("gw-01", [compView()]), // reachable — no note
+    ]);
+    const notes = containmentNotes(view, T0, { "asm-gw-01": 2 });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.title).toBe("asm-gw-01 — device unreachable for 2m 00s");
+    expect(notes[0]!.subtitle).toContain("+2 would-be alarms suppressed");
   });
 });
 

@@ -474,9 +474,53 @@ export interface RuntimeAttributes {
   readErrors?: number;
   /** Southbound cumulative write errors. */
   writeErrors?: number;
+  /**
+   * The publishing component's deployment platform (`HOST`/`GREENGRASS`/`KUBERNETES`), when the
+   * component ADVERTISES it via the envelope `tags.platform` metadata (config-driven — the library
+   * does not stamp it automatically). Drives the Overview group-row `(HOST)`/`(Greengrass)`
+   * annotation (R1); omitted (and honestly blank) when no component on the device advertised it.
+   */
+  platform?: string;
+  /**
+   * A small bounded recent CPU-percent series (oldest→newest), accumulated from the `sys` cpu
+   * measure — the Overview CPU-cell sparkline (R1). Present only for components that emit `sys`
+   * cpu; absent (no sparkline, bare "—"/latest) otherwise.
+   */
+  cpuSeries?: number[];
   /** Console receipt time of the most recent contributing sample (server-clock ms). */
   receivedAt: number;
   sourceTimestamp?: string;
+}
+
+/* -----------------------------------------------------------------------------
+ * R1 — the console's OWN self-identity + process vitals + messaging transport.
+ *
+ * The console IS a ggcommons component: it knows its own resolved identity (device/component),
+ * its deployment platform + messaging transport + site-broker host (all from its own runtime
+ * config), and can measure its own process (cpu / memory / uptime). This is the honest source
+ * behind the Overview "Edge node — console self" tile and the "Edge bus" tile's transport foot
+ * (rather than a fabricated string). It rides the low-frequency `heartbeat` (optional/additive —
+ * a gateway with no self-monitor simply omits it, and old clients ignore it).
+ * --------------------------------------------------------------------------- */
+
+/** The console's own runtime self-identity + process vitals + messaging transport (R1). */
+export interface ConsoleSelf {
+  /** The console's own node/device name (`identity.device`) — the tile headline (e.g. `gw-dallas-01`). */
+  device: string;
+  /** The console's component token (`edge-console`). */
+  component: string;
+  /** Resolved deployment platform (`HOST`/`GREENGRASS`/`KUBERNETES`), when known. */
+  platform?: string;
+  /** Resolved messaging transport (`MQTT`/`IPC`), when known — the Edge-bus tile foot. */
+  transport?: string;
+  /** The site-bus broker host (`messaging.local.host`), when known — the Edge-bus tile foot `· <broker>`. */
+  broker?: string;
+  /** The console process CPU percent (share of one core over the last sample window); absent on the first sample. */
+  cpuPercent?: number;
+  /** The console process resident memory (MB). */
+  memoryMb?: number;
+  /** The console process uptime (seconds). */
+  uptimeSecs: number;
 }
 
 /* -----------------------------------------------------------------------------
@@ -714,7 +758,22 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "snapshot"; protocolVersion: number; snapshot: FleetSnapshot }
   | { type: "delta"; protocolVersion: number; deltas: FleetDelta[] }
-  | { type: "heartbeat"; protocolVersion: number; at: number }
+  // R1 self-surfaces (all optional + additive — a gateway with no meter/monitor omits them and
+  // old clients ignore them, so no version bump):
+  //  - `busMsgsPerSec`: the console's OWN bus-ingest throughput (rolling msgs/sec) — the "Edge bus"
+  //    tile's headline number;
+  //  - `busRecentRates`: a bounded ring of recent per-second bus rates (oldest→newest) — the
+  //    "Edge bus" tile SPARKLINE;
+  //  - `self`: the console's own identity + process vitals + messaging transport — the "Edge node
+  //    console self" tile AND the "Edge bus" tile's transport/broker foot.
+  | {
+      type: "heartbeat";
+      protocolVersion: number;
+      at: number;
+      busMsgsPerSec?: number;
+      busRecentRates?: number[];
+      self?: ConsoleSelf;
+    }
   // R0 welcome: the connection's resolved RBAC role, sent right after a valid `hello`
   // (before the snapshot) — the app-bar account indicator's data source.
   | { type: "welcome"; protocolVersion: number; role: string }

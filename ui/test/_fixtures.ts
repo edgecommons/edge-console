@@ -12,9 +12,13 @@ import type {
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
+  RuntimeAttributes,
+  WireHierLevel,
 } from "@edgecommons/edge-console-protocol";
+import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState } from "../src/fleet/client";
 import { EMPTY_ALARM_COUNTS } from "../src/fleet/alarm-store";
+import type { AttributesView } from "../src/fleet/attribute-store";
 import type { CommandEntry, CommandView } from "../src/fleet/command-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 
@@ -109,6 +113,26 @@ export function deviceView(
   return { device, unreachable: false, components, ...overrides };
 }
 
+/** A hierarchy `[{level,value}]` from level names + values (last = device). */
+export function hier(...pairs: [string, string][]): WireHierLevel[] {
+  return pairs.map(([level, value]) => ({ level, value }));
+}
+
+/** RuntimeAttributes for one component (all runtime fields optional). */
+export function runtimeAttrs(
+  k: ComponentKey,
+  overrides: Partial<RuntimeAttributes> = {},
+): RuntimeAttributes {
+  return { key: k, receivedAt: T0, ...overrides };
+}
+
+/** An {@link AttributesView} keyed by component id, from a list of attributes. */
+export function attributesView(list: RuntimeAttributes[]): AttributesView {
+  const byId: Record<string, RuntimeAttributes> = {};
+  for (const a of list) byId[componentKeyId(a.key)] = a;
+  return { byId };
+}
+
 export function fleetView(devices: DeviceView[], overrides: Partial<FleetView> = {}): FleetView {
   return { seq: 10, devices, clockOffsetMs: 0, lastUpdatedAt: T0, ...overrides };
 }
@@ -125,6 +149,7 @@ export function clientState(
     configs: { entriesById: {} },
     events: { entries: [] },
     alarms: { active: [], counts: EMPTY_ALARM_COUNTS },
+    attributes: { byId: {} },
     commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,

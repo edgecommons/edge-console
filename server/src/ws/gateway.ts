@@ -33,6 +33,7 @@ import type {
   ClientMessage,
   ComponentKey,
   ConsoleEvent,
+  ConsoleSelf,
   FleetDelta,
   FleetSnapshot,
   MetricSeriesSnapshot,
@@ -168,6 +169,23 @@ export interface ClientSession {
 
 export interface FleetWsGatewayOptions {
   clock: Clock;
+  /**
+   * The console's own bus-ingest throughput source (R1) — read on each `heartbeat` and
+   * stamped as `busMsgsPerSec` (the Overview "Edge bus msgs/s" tile). Optional: without it
+   * the heartbeat omits the field (honest — the console has no meter wired).
+   */
+  busThroughput?: () => number;
+  /**
+   * The console's own recent per-second bus-rate ring (R1) — read on each `heartbeat` and stamped
+   * as `busRecentRates` (the Overview "Edge bus" tile sparkline). Optional/additive.
+   */
+  busRecentRates?: () => number[];
+  /**
+   * The console's own self-identity + process vitals + transport (R1) — sampled on each
+   * `heartbeat` and stamped as `self` (the "Edge node console self" tile + the "Edge bus" tile's
+   * transport foot). Optional: without it the heartbeat omits `self` (honest — no self-monitor).
+   */
+  consoleSelf?: () => ConsoleSelf;
   /** Bounded recent-delta ring backing resume (count of deltas, not bytes). Default 1000. */
   deltaBufferSize: number;
   /** A transport reporting more than this many buffered bytes is considered backpressured for the current push. Default 1 MiB. */
@@ -283,6 +301,10 @@ export class FleetWsGateway {
    */
   tick(): void {
     const now = this.opts.clock();
+    // The console's own self-surfaces (R1) — computed once, stamped on every heartbeat.
+    const busMsgsPerSec = this.opts.busThroughput?.();
+    const busRecentRates = this.opts.busRecentRates?.();
+    const self = this.opts.consoleSelf?.();
     for (const session of [...this.sessions.values()]) {
       if (!session.ready) {
         if (now - session.connectedAt > this.opts.helloTimeoutMs) {
@@ -290,7 +312,14 @@ export class FleetWsGateway {
         }
         continue;
       }
-      this.send(session, { type: "heartbeat", protocolVersion: PROTOCOL_VERSION, at: now });
+      this.send(session, {
+        type: "heartbeat",
+        protocolVersion: PROTOCOL_VERSION,
+        at: now,
+        ...(busMsgsPerSec !== undefined ? { busMsgsPerSec } : {}),
+        ...(busRecentRates !== undefined ? { busRecentRates } : {}),
+        ...(self !== undefined ? { self } : {}),
+      });
     }
   }
 

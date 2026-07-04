@@ -346,6 +346,22 @@ describe("FleetWsGateway - tick(): heartbeats + hello-timeout eviction", () => {
     expect(last).toEqual({ type: "heartbeat", protocolVersion: PROTOCOL_VERSION, at: clock.now });
   });
 
+  it("stamps the console's own bus-ingest throughput on the heartbeat when a meter is wired (R1)", () => {
+    const clock = new TestClock();
+    const model = new FleetModel(clock.fn);
+    const gateway = new FleetWsGateway(model, { clock: clock.fn, busThroughput: () => 4.2 });
+    const t = new FakeTransport("c1");
+    gateway.connect(t).onMessage(hello());
+
+    gateway.tick();
+    expect(t.messages().at(-1)).toEqual({
+      type: "heartbeat",
+      protocolVersion: PROTOCOL_VERSION,
+      at: clock.now,
+      busMsgsPerSec: 4.2,
+    });
+  });
+
   it("evicts a client that never sends hello within helloTimeoutMs", () => {
     const clock = new TestClock();
     const model = new FleetModel(clock.fn);

@@ -1,13 +1,21 @@
 /**
- * The fleet table — the mockup's "Fleet, grouped by …" detail surface: one
- * collapsible group row per DEVICE (the unit of reachability containment; the
- * mockup's line-level grouping arrives with the hierarchy rollup views), then one
- * row per component with the Carbon status treatment, live last-state age, uptime,
- * keepalive cadence and restart count — every cell fed by the folded fleet view.
+ * The fleet table — the Overview's "Fleet, grouped by …" surface, faithful to the
+ * signed-off hi-fi mockup's NINE columns:
  *
- * Composed from Carbon's structural table primitives (no DataTable state machine —
- * grouped rows are hand-rolled, as the mockup dictates). Group toggles are real
- * buttons (keyboard-focusable); the wrapper scrolls horizontally on narrow screens.
+ *   Health · Component · Device · Heartbeat · CPU · Memory · Conn · Capabilities · (controls)
+ *
+ * The group rows are DYNAMIC (built from `hier` — see `fleet/grouping.ts`): one collapsible
+ * header per intermediate level (line, or area→line nested), each carrying the worst-of
+ * rollup tag and a device / containment summary; `[site,device]` fleets degrade to a flat
+ * list of device groups. Component rows carry the Carbon status treatment, the live
+ * heartbeat age, and the runtime-attribute columns (CPU / Memory / Conn from the
+ * AttributeStore — "—" where a component hasn't reported that attribute, e.g. a non-adapter
+ * has no connection state).
+ *
+ * Capabilities depends on the component `describe` / panels manifest, which is DEFERRED to
+ * Phase 2 — so the column is rendered honestly as a pending "—" (no fabricated data), never
+ * silently dropped. Group toggles are real buttons (keyboard-focusable); the wrapper scrolls
+ * horizontally on narrow screens.
  */
 import { useState } from "react";
 import {
@@ -21,16 +29,14 @@ import {
   Tag,
 } from "@carbon/react";
 import { ChevronDown, ChevronRight, Settings } from "@carbon/react/icons";
-import type { ComponentKey } from "@edgecommons/edge-console-protocol";
+import type { ComponentKey, MetricPoint, RuntimeAttributes } from "@edgecommons/edge-console-protocol";
 import type { CommandView } from "../fleet/command-store";
-import type { ComponentView, DeviceView, FleetView } from "../fleet/store";
-import {
-  deviceRollup,
-  displayUptimeSecs,
-  formatDurationMs,
-  formatDurationSecs,
-  hierPrefix,
-} from "../fleet/selectors";
+import type { ComponentView } from "../fleet/store";
+import type { AttributesView } from "../fleet/attribute-store";
+import type { FleetGrouping, GroupNode } from "../fleet/grouping";
+import { connLevel } from "../fleet/grouping";
+import { formatDurationMs } from "../fleet/selectors";
+import { Sparkline } from "../common/Sparkline";
 import { RollupTag, StatusTag } from "./StatusTag";
 import { CommandControls } from "./CommandControls";
 
@@ -40,54 +46,104 @@ export interface FleetTableCommandProps {
   onInvoke: (key: ComponentKey, verb: string, args?: Record<string, unknown>) => void;
 }
 
+/** The nine columns (the last header is the controls / overflow column). */
 const COLUMNS = [
   "Health",
   "Component",
   "Device",
-  "Last state",
-  "Uptime",
-  "Keepalive",
-  "Restarts",
-  "Controls",
+  "Heartbeat",
+  "CPU",
+  "Memory",
+  "Conn",
+  "Capabilities",
+  "",
 ] as const;
+const COLSPAN = COLUMNS.length;
 
-/** The live last-state cell: age since the last keepalive, red once overdue. */
-function LastStateCell({
+/** A dim em-dash placeholder cell. */
+function Dash({ testid }: { testid?: string }): React.JSX.Element {
+  return (
+    <span className="ec-dim" {...(testid !== undefined ? { "data-testid": testid } : {})}>
+      —
+    </span>
+  );
+}
+
+/** The live heartbeat-age cell: bare age since the last keepalive, red once overdue. */
+function HeartbeatCell({
   comp,
   nowServerMs,
 }: {
   comp: ComponentView;
   nowServerMs: number;
 }): React.JSX.Element {
+  if (comp.lastStateAt === undefined) return <Dash />;
+  const age = formatDurationMs(Math.max(0, nowServerMs - comp.lastStateAt));
   if (comp.liveness === "UNREACHABLE") {
-    // Frozen under the device outage — show the frozen age, dimmed.
-    const text =
-      comp.lastStateAt !== undefined
-        ? `${formatDurationMs(Math.max(0, nowServerMs - comp.lastStateAt))} ago`
-        : "—";
-    return <span className="ec-dim ec-mono ec-tnum">{text}</span>;
-  }
-  if (comp.lastStateAt === undefined) {
-    return <span className="ec-dim">never</span>;
+    // Frozen under the device outage — the age is dimmed (last-known).
+    return <span className="ec-dim ec-mono ec-tnum">{age}</span>;
   }
   const overdue = comp.liveness === "STALE" || comp.liveness === "OFFLINE";
+  return <span className={`ec-mono ec-tnum${overdue ? " ec-overdue" : ""}`}>{age}</span>;
+}
+
+/** The Conn cell: the adapter's southbound connection state as a colored chip, or "—". */
+function ConnCell({ attrs }: { attrs?: RuntimeAttributes }): React.JSX.Element {
+  const state = attrs?.connectionState;
+  if (state === undefined) return <Dash />;
+  const level = connLevel(state);
+  const type = level === "ok" ? "green" : level === "err" ? "red" : level === "unknown" ? "gray" : undefined;
+  const className = level === "warn" ? "ec-tag ec-tag--warn" : "ec-tag";
   return (
-    <span className={`ec-mono ec-tnum${overdue ? " ec-overdue" : ""}`}>
-      {formatDurationMs(Math.max(0, nowServerMs - comp.lastStateAt))} ago
+    <Tag size="sm" {...(type !== undefined ? { type } : {})} className={className} title={state}>
+      {state}
+    </Tag>
+  );
+}
+
+/**
+ * The CPU cell: the latest cpu% with a leading recent-trend sparkline (mockup's first-row style)
+ * when the component has reported a CPU series, else the bare "—". The sparkline reuses the shared
+ * {@link Sparkline} mark (the series comes from the runtime `sys` cpu metric, R1).
+ */
+function CpuCell({
+  attrs,
+  component,
+}: {
+  attrs?: RuntimeAttributes;
+  component: string;
+}): React.JSX.Element {
+  if (attrs?.cpuPercent === undefined) return <Dash />;
+  const series = attrs.cpuSeries;
+  const points: MetricPoint[] =
+    series !== undefined ? series.map((value, at) => ({ at, value })) : [];
+  return (
+    <span className="ec-cpu-cell">
+      {points.length > 1 && (
+        <Sparkline
+          points={points}
+          width={52}
+          height={16}
+          ariaLabel={`${component} cpu trend`}
+          formatValue={(v) => `${Math.round(v)}%`}
+        />
+      )}
+      <span className="ec-tnum">{Math.round(attrs.cpuPercent)}%</span>
     </span>
   );
 }
 
 function ComponentRow({
   comp,
+  attrs,
   nowServerMs,
   command,
 }: {
   comp: ComponentView;
+  attrs?: RuntimeAttributes;
   nowServerMs: number;
   command: FleetTableCommandProps;
 }): React.JSX.Element {
-  const uptime = displayUptimeSecs(comp, nowServerMs);
   const [expanded, setExpanded] = useState(false);
   return (
     <>
@@ -107,26 +163,23 @@ function ComponentRow({
           <span className="ec-mono">{comp.key.device}</span>
         </TableCell>
         <TableCell>
-          <LastStateCell comp={comp} nowServerMs={nowServerMs} />
+          <HeartbeatCell comp={comp} nowServerMs={nowServerMs} />
         </TableCell>
         <TableCell>
-          {uptime !== undefined ? (
-            <span className="ec-tnum">
-              {formatDurationSecs(Math.floor(uptime))}
-              {comp.status === "STOPPED" && <span className="ec-dim"> (at stop)</span>}
-            </span>
+          <CpuCell attrs={attrs} component={comp.key.component} />
+        </TableCell>
+        <TableCell>
+          {attrs?.memoryMb !== undefined ? (
+            <span className="ec-tnum">{Math.round(attrs.memoryMb)} MB</span>
           ) : (
-            <span className="ec-dim">—</span>
+            <Dash />
           )}
         </TableCell>
         <TableCell>
-          <span className="ec-tnum">{comp.expectedIntervalSecs}s</span>
-          <span className="ec-dim ec-cadence">
-            {comp.cadenceSource === "cfg" ? " · cfg" : " · default"}
-          </span>
+          <ConnCell attrs={attrs} />
         </TableCell>
         <TableCell>
-          <span className={comp.restarts > 0 ? "ec-tnum" : "ec-dim ec-tnum"}>{comp.restarts}</span>
+          <Dash testid={`capabilities-${comp.id}`} />
         </TableCell>
         <TableCell className="ec-ctrl-cell">
           <button
@@ -144,12 +197,8 @@ function ComponentRow({
       </TableRow>
       {expanded && (
         <TableRow className="ec-ctrl-detail" data-testid={`controls-detail-${comp.id}`}>
-          <TableCell colSpan={COLUMNS.length}>
-            <CommandControls
-              comp={comp}
-              commands={command.commands}
-              onInvoke={command.onInvoke}
-            />
+          <TableCell colSpan={COLSPAN}>
+            <CommandControls comp={comp} commands={command.commands} onInvoke={command.onInvoke} />
           </TableCell>
         </TableRow>
       )}
@@ -157,89 +206,155 @@ function ComponentRow({
   );
 }
 
-function DeviceGroup({
-  device,
+/** Pretty platform label for the group annotation (mockup: `HOST` / `Greengrass`). */
+function platformLabel(platform: string): string {
+  switch (platform.toUpperCase()) {
+    case "HOST":
+      return "HOST";
+    case "GREENGRASS":
+      return "Greengrass";
+    case "KUBERNETES":
+      return "Kubernetes";
+    default:
+      return platform;
+  }
+}
+
+/** The device / containment summary appended to a group header row. */
+function groupSummary(
+  node: GroupNode,
+  nowServerMs: number,
+  contained: number,
+  platformByDevice: Record<string, string>,
+): string {
+  const parts: string[] = [`${node.count} component${node.count === 1 ? "" : "s"}`];
+  // Show which device(s) only for an intermediate tier (a device group already names it),
+  // annotated with the device's platform when advertised (mockup: `press-gw-01 (Greengrass)`).
+  if (node.level !== "device" && node.devices.length > 0) {
+    if (node.devices.length === 1) {
+      const device = node.devices[0]!;
+      const platform = platformByDevice[device];
+      parts.push(platform !== undefined ? `${device} (${platformLabel(platform)})` : device);
+    } else {
+      parts.push(`${node.devices.length} devices`);
+    }
+  }
+  if (node.unreachable) {
+    const since =
+      node.unreachableSince !== undefined
+        ? `bridge offline ${formatDurationMs(Math.max(0, nowServerMs - node.unreachableSince))}`
+        : "bridge offline";
+    parts.push(since);
+    parts.push("frozen at last-known");
+    if (contained > 0) parts.push(`alarms contained (+${contained})`);
+  }
+  return parts.join(" · ");
+}
+
+/** One group header row + its subtree (nested groups then component rows). */
+function GroupRows({
+  node,
+  attributes,
   nowServerMs,
   command,
+  containedByDevice,
+  platformByDevice,
 }: {
-  device: DeviceView;
+  node: GroupNode;
+  attributes: AttributesView;
   nowServerMs: number;
   command: FleetTableCommandProps;
+  containedByDevice: Record<string, number>;
+  platformByDevice: Record<string, string>;
 }): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
-  const level = deviceRollup(device);
-  const prefix = hierPrefix(device);
-  const n = device.components.length;
+  const contained = node.devices.reduce((n, d) => n + (containedByDevice[d] ?? 0), 0);
   return (
     <>
-      <TableRow className="ec-group" data-testid={`device-group-${device.device}`}>
-        <TableCell colSpan={COLUMNS.length}>
+      <TableRow className="ec-group" data-testid={`group-${node.key}`}>
+        <TableCell colSpan={COLSPAN}>
           <button
             type="button"
             className="ec-group__toggle"
+            style={{ paddingInlineStart: `${node.depth * 1.5}rem` }}
             aria-expanded={!collapsed}
-            aria-label={`${collapsed ? "Expand" : "Collapse"} device ${device.device}`}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${node.level} ${node.value}`}
             onClick={() => setCollapsed((c) => !c)}
           >
             {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
             <span className="ec-group__label">
-              DEVICE · <span className="ec-mono">{device.device}</span>
-              {prefix !== "" && <span className="ec-dim"> · {prefix}</span>}
+              {node.level.toUpperCase()} · <span className="ec-mono">{node.value}</span>
             </span>
-            <RollupTag level={level} />
-            <span className="ec-dim">
-              {n} component{n === 1 ? "" : "s"}
-              {device.unreachable &&
-                device.unreachableSince !== undefined &&
-                ` · bridge offline ${formatDurationMs(Math.max(0, nowServerMs - device.unreachableSince))} · frozen at last-known`}
+            <RollupTag level={node.rollup} />
+            <span className="ec-dim ec-group__summary">
+              {groupSummary(node, nowServerMs, contained, platformByDevice)}
             </span>
           </button>
         </TableCell>
       </TableRow>
       {!collapsed &&
-        device.components.map((comp) => (
-          <ComponentRow key={comp.id} comp={comp} nowServerMs={nowServerMs} command={command} />
+        node.children.map((child) => (
+          <GroupRows
+            key={child.key}
+            node={child}
+            attributes={attributes}
+            nowServerMs={nowServerMs}
+            command={command}
+            containedByDevice={containedByDevice}
+            platformByDevice={platformByDevice}
+          />
         ))}
-      {!collapsed && n === 0 && (
-        <TableRow>
-          <TableCell colSpan={COLUMNS.length}>
-            <span className="ec-dim">
-              No components attributed yet — this device has only been seen through its bridge.
-            </span>
-          </TableCell>
-        </TableRow>
-      )}
+      {!collapsed &&
+        node.components.map((comp) => (
+          <ComponentRow
+            key={comp.id}
+            comp={comp}
+            attrs={attributes.byId[comp.id]}
+            nowServerMs={nowServerMs}
+            command={command}
+          />
+        ))}
     </>
   );
 }
 
 export function FleetTable({
-  fleet,
+  grouping,
+  attributes,
   nowServerMs,
   command,
+  containedByDevice = {},
+  platformByDevice = {},
 }: {
-  fleet: FleetView;
+  grouping: FleetGrouping;
+  attributes: AttributesView;
   nowServerMs: number;
   command: FleetTableCommandProps;
+  containedByDevice?: Record<string, number>;
+  /** Device → advertised platform, for the group-row `(HOST)`/`(Greengrass)` annotation. */
+  platformByDevice?: Record<string, string>;
 }): React.JSX.Element {
   return (
     <TableContainer className="ec-fleet">
       <div className="ec-tablewrap">
-        <Table size="lg" aria-label="Fleet components by device">
+        <Table size="lg" aria-label="Fleet components grouped by hierarchy">
           <TableHead>
             <TableRow>
-              {COLUMNS.map((col) => (
-                <TableHeader key={col}>{col}</TableHeader>
+              {COLUMNS.map((col, i) => (
+                <TableHeader key={col === "" ? `col-${i}` : col}>{col}</TableHeader>
               ))}
             </TableRow>
           </TableHead>
           <TableBody>
-            {fleet.devices.map((device) => (
-              <DeviceGroup
-                key={device.device}
-                device={device}
+            {grouping.groups.map((node) => (
+              <GroupRows
+                key={node.key}
+                node={node}
+                attributes={attributes}
                 nowServerMs={nowServerMs}
                 command={command}
+                containedByDevice={containedByDevice}
+                platformByDevice={platformByDevice}
               />
             ))}
           </TableBody>

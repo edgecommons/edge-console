@@ -29,10 +29,13 @@ export const SOUTHBOUND_HEALTH_METRIC = "southbound_health";
 export interface AttributeStoreOptions {
   /** Max distinct components tracked; overflow dropped + counted. Default 5000. */
   maxComponents: number;
+  /** Max points kept in each component's recent CPU sparkline ring (drop-oldest). Default 30. */
+  maxCpuSeriesPoints: number;
 }
 
 export const DEFAULT_ATTRIBUTE_STORE_OPTIONS: AttributeStoreOptions = {
   maxComponents: 5000,
+  maxCpuSeriesPoints: 30,
 };
 
 /** Notified with each ingest's update batch (one bus arrival = one changed component). */
@@ -48,6 +51,10 @@ interface AttrState {
   connectionState?: string;
   readErrors?: number;
   writeErrors?: number;
+  /** Advertised deployment platform (from the envelope `tags.platform`), latest-wins. */
+  platform?: string;
+  /** Bounded recent CPU-percent ring (oldest→newest) — the Overview CPU sparkline. */
+  cpuSeries: number[];
   receivedAt: number;
   sourceTimestamp?: string;
 }
@@ -89,35 +96,52 @@ export class AttributeStore {
   }
 
   /**
-   * Tee one ingress event into the store. Only attributable `metric` envelopes on the
-   * `sys` or `southbound_health` channels contribute; everything else is a no-op.
+   * Tee one ingress event into the store. Two contributions: the runtime-measure PROJECTION over
+   * `metric` envelopes on the `sys` / `southbound_health` channels, and the deployment-PLATFORM
+   * capture from ANY envelope's advertised `tags.platform` (config-driven metadata; the library
+   * does not stamp it automatically) — the latter covers components that never emit `sys` metrics,
+   * so the Overview group-row platform annotation works for the whole fleet. An envelope with no
+   * usable measure AND no platform tag is a no-op (creates no record).
    */
   ingest(event: IngressEvent): void {
-    if (event.kind !== "envelope" || event.cls !== "metric") return;
-    if (event.channel !== SYS_METRIC && event.channel !== SOUTHBOUND_HEALTH_METRIC) return;
+    if (event.kind !== "envelope") return;
     const last = event.identity.hier[event.identity.hier.length - 1];
     const device = last?.value;
     if (device === undefined || device === "") return; // unattributable — defensive (G11)
-    const body = asObject(event.body);
-    if (body === undefined) return;
 
-    // Compute the field patch WITHOUT touching the map — an event with no usable
-    // measure (all non-numeric / wrong shape) contributes nothing and creates no record.
+    // The advertised platform, from ANY envelope's tags (config-driven, latest-wins).
+    const platform =
+      typeof event.tags?.platform === "string" && event.tags.platform !== ""
+        ? event.tags.platform
+        : undefined;
+
+    // The runtime-measure projection (metric sys/southbound only).
+    const isMeasure =
+      event.cls === "metric" &&
+      (event.channel === SYS_METRIC || event.channel === SOUTHBOUND_HEALTH_METRIC);
+    const body = isMeasure ? asObject(event.body) : undefined;
+
+    // Compute the field patch WITHOUT touching the map — an event with no usable measure and no
+    // platform tag contributes nothing and creates no record.
     const patch: Partial<AttrState> = {};
-    if (event.channel === SYS_METRIC) {
-      for (const [measure, field] of SYS_FIELDS) {
-        const n = finiteNumber(body[measure]);
-        if (n !== undefined) patch[field] = n;
+    let cpuSample: number | undefined;
+    if (isMeasure && body !== undefined) {
+      if (event.channel === SYS_METRIC) {
+        for (const [measure, field] of SYS_FIELDS) {
+          const n = finiteNumber(body[measure]);
+          if (n !== undefined) patch[field] = n;
+        }
+        cpuSample = finiteNumber(body.cpu);
+      } else {
+        // southbound_health: a connection-state string + cumulative error counters.
+        if (typeof body.connectionState === "string") patch.connectionState = body.connectionState;
+        const readErrors = finiteNumber(body.readErrors);
+        if (readErrors !== undefined) patch.readErrors = readErrors;
+        const writeErrors = finiteNumber(body.writeErrors);
+        if (writeErrors !== undefined) patch.writeErrors = writeErrors;
       }
-    } else {
-      // southbound_health: a connection-state string + cumulative error counters.
-      if (typeof body.connectionState === "string") patch.connectionState = body.connectionState;
-      const readErrors = finiteNumber(body.readErrors);
-      if (readErrors !== undefined) patch.readErrors = readErrors;
-      const writeErrors = finiteNumber(body.writeErrors);
-      if (writeErrors !== undefined) patch.writeErrors = writeErrors;
     }
-    if (Object.keys(patch).length === 0) return;
+    if (Object.keys(patch).length === 0 && platform === undefined) return;
 
     const key: ComponentKey = {
       device,
@@ -131,10 +155,15 @@ export class AttributeStore {
         this.dropped++;
         return;
       }
-      state = { key, receivedAt: this.clock() };
+      state = { key, cpuSeries: [], receivedAt: this.clock() };
       this.byId.set(id, state);
     }
     Object.assign(state, patch);
+    if (platform !== undefined) state.platform = platform;
+    if (cpuSample !== undefined) {
+      state.cpuSeries.push(cpuSample);
+      if (state.cpuSeries.length > this.opts.maxCpuSeriesPoints) state.cpuSeries.shift();
+    }
     state.receivedAt = this.clock();
     if (event.sourceTimestamp !== undefined) state.sourceTimestamp = event.sourceTimestamp;
     else delete state.sourceTimestamp;
@@ -181,6 +210,8 @@ function attributesOf(s: AttrState): RuntimeAttributes {
     ...(s.connectionState !== undefined ? { connectionState: s.connectionState } : {}),
     ...(s.readErrors !== undefined ? { readErrors: s.readErrors } : {}),
     ...(s.writeErrors !== undefined ? { writeErrors: s.writeErrors } : {}),
+    ...(s.platform !== undefined ? { platform: s.platform } : {}),
+    ...(s.cpuSeries.length > 0 ? { cpuSeries: [...s.cpuSeries] } : {}),
     receivedAt: s.receivedAt,
     ...(s.sourceTimestamp !== undefined ? { sourceTimestamp: s.sourceTimestamp } : {}),
   };

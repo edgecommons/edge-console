@@ -39,6 +39,9 @@ import { MetricStore } from "./fleet/metric-store";
 import { SignalStore } from "./fleet/signal-store";
 import { AttributeStore } from "./fleet/attribute-store";
 import { AlarmTracker } from "./fleet/alarm-tracker";
+import { ThroughputMeter } from "./fleet/throughput-meter";
+import { ConsoleSelfMonitor } from "./fleet/console-self";
+import type { ConsoleSelfInfo } from "./fleet/console-self";
 import { CommandGateway } from "./command/command-gateway";
 import { ConfigRbacPolicy } from "./command/rbac";
 import { FleetWsGateway } from "./ws/gateway";
@@ -54,6 +57,13 @@ export interface ConsoleAppDeps {
   newMessage: (name: string) => MessageBuilder;
   /** The `component.global` config subtree (`gg.config().global()`); the console section lives at `.console`. */
   globalConfig: unknown;
+  /**
+   * The console's OWN static self-identity + messaging transport (R1) — its resolved device/
+   * component name, platform, transport and site-broker host, read off `gg` by `main.ts`. Drives
+   * the Overview "Edge node console self" tile + the "Edge bus" tile's transport foot. Optional:
+   * without it the heartbeat omits `self` (honest — no self-identity wired).
+   */
+  self?: ConsoleSelfInfo;
   /** Injected clock (tests); defaults to `Date.now`. */
   clock?: Clock;
 }
@@ -116,11 +126,18 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   const signals = new SignalStore(clock);
   const attributes = new AttributeStore(clock);
   const alarms = new AlarmTracker(clock);
+  // The console's OWN bus-ingest throughput (R1): marked once per normalized envelope,
+  // read by the WS gateway on each heartbeat (the Overview "Edge bus msgs/s" tile + sparkline).
+  const throughput = new ThroughputMeter(clock);
+  // The console's OWN self-identity + process vitals (R1): sampled on each heartbeat (the
+  // "Edge node console self" tile). Only wired when `main.ts` supplied the static self-identity.
+  const selfMonitor = deps.self !== undefined ? new ConsoleSelfMonitor(deps.self) : undefined;
   const ingress = new BusIngress({
     messaging: deps.messaging,
     uns: deps.uns,
     newMessage: deps.newMessage,
     sink: (event) => {
+      throughput.mark();
       model.ingest(event);
       configs.ingest(event);
       events.ingest(event);
@@ -176,7 +193,12 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   // the device-side ggcommons S1 listener lands).
   const gateway = new FleetWsGateway(
     model,
-    { clock },
+    {
+      clock,
+      busThroughput: () => throughput.ratePerSec(),
+      busRecentRates: () => throughput.recentRates(),
+      ...(selfMonitor !== undefined ? { consoleSelf: () => selfMonitor.sample() } : {}),
+    },
     {
       configs,
       refreshDevice: (device) => void ingress.broadcastRepublish(device),
