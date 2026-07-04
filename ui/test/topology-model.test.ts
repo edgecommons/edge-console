@@ -365,6 +365,26 @@ describe("layoutTopology", () => {
     }
   });
 
+  it("places the edge-console device ABOVE the edge devices it collects from", () => {
+    const consoleKey = key("dallas-console", "edge-console");
+    const opcuaKey = key("gw-fill-01", "opcua-adapter");
+    const m = buildTopologyModel(
+      inputs({
+        fleet: fleetView([
+          deviceView("dallas-console", [compView({ key: consoleKey, hier: hier(["site", "dallas"], ["device", "dallas-console"]) })]),
+          deviceView("gw-fill-01", [compView({ key: opcuaKey, hier: hier(["site", "dallas"], ["device", "gw-fill-01"]) })]),
+        ]),
+      }),
+    );
+    const l = layoutTopology(m);
+    const consoleNode = l.nodes.find((n) => n.componentKey?.component === "edge-console")!;
+    const deviceNode = l.nodes.find((n) => n.componentKey?.component === "opcua-adapter")!;
+    const bus = l.nodes.find((n) => n.kind === "bus")!;
+    expect(consoleNode.y).toBeLessThan(deviceNode.y); // console above the edge device
+    expect(consoleNode.y).toBeLessThan(bus.y); // …and above the bus it observes
+    expect(l.groups).toHaveLength(2); // both device + console groups placed
+  });
+
   it("routes southbound edges downward and the relay edges upward", () => {
     const sb = layout.edges.find((e) => e.kind === "southbound")!;
     expect(sb.y2).toBeGreaterThan(sb.y1);

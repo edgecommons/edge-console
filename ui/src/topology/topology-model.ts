@@ -667,8 +667,9 @@ export const LAYOUT = {
   height: 660,
   marginL: 48,
   marginR: 24,
-  cloudY: 34,
-  busY: 126,
+  consoleY: 28,
+  cloudY: 100,
+  busY: 158,
   compY: 250,
   fieldY: 560,
   comp: { w: 152, h: 46, gap: 24 },
@@ -713,8 +714,15 @@ export function layoutTopology(model: TopologyModel): TopologyLayout {
   }
   const assignedFields = new Set<string>();
 
+  // The edge-console device is the site observer — it sits ABOVE the edge devices it collects
+  // from (its own top band), NOT in the device row. Split it out; place it after the device row.
+  const isConsoleGroup = (g: TopoGroup): boolean =>
+    g.componentIds.some((id) => byId.get(id)?.componentKey?.component === "edge-console");
+  const deviceGroups = model.groups.filter((g) => !isConsoleGroup(g));
+  const consoleGroups = model.groups.filter((g) => isConsoleGroup(g));
+
   let cursor = LAYOUT.marginL;
-  for (const group of model.groups) {
+  for (const group of deviceGroups) {
     const compNodes = group.componentIds.map((id) => byId.get(id)).filter((n): n is TopoNode => n !== undefined);
     const fieldIds: string[] = [];
     for (const cid of group.componentIds) {
@@ -763,8 +771,29 @@ export function layoutTopology(model: TopologyModel): TopologyLayout {
     cursor = groupX0 + groupW + LAYOUT.groupGap;
   }
 
-  const contentRight = model.groups.length > 0 ? cursor - LAYOUT.groupGap : LAYOUT.marginL;
+  const contentRight = deviceGroups.length > 0 ? cursor - LAYOUT.groupGap : LAYOUT.marginL;
   const width = Math.max(LAYOUT.minWidth, contentRight + LAYOUT.marginR);
+
+  // The edge-console (site observer) group: centered in its own top band, above the devices.
+  // It has no field endpoints (not an adapter), so it's a lone component row.
+  for (const group of consoleGroups) {
+    const compNodes = group.componentIds.map((id) => byId.get(id)).filter((n): n is TopoNode => n !== undefined);
+    const compRowW = rowWidth(compNodes.length, LAYOUT.comp.w, LAYOUT.comp.gap);
+    const innerW = Math.max(compRowW, LAYOUT.comp.w);
+    const groupW = innerW + 2 * LAYOUT.groupPadX;
+    const groupX0 = (width - groupW) / 2;
+    const compStart = groupX0 + LAYOUT.groupPadX + (innerW - compRowW) / 2;
+    compNodes.forEach((n, i) => {
+      placed.set(n.id, {
+        ...n,
+        x: compStart + i * (LAYOUT.comp.w + LAYOUT.comp.gap),
+        y: LAYOUT.consoleY,
+        w: LAYOUT.comp.w,
+        h: LAYOUT.comp.h,
+      });
+    });
+    groups.push({ ...group, x: groupX0, y: LAYOUT.consoleY - 24, w: groupW, h: LAYOUT.comp.h + 40 });
+  }
 
   // Cloud nodes: global, centered across the canvas in the northbound band.
   const cloudNodes = model.nodes.filter((n) => n.kind === "cloud");
@@ -817,10 +846,13 @@ export function layoutTopology(model: TopologyModel): TopologyLayout {
     edges.push({ ...e, x1, y1, x2: tx, y2: ty, midX: (x1 + tx) / 2, midY: (y1 + ty) / 2 });
   }
 
+  const hasCloud = model.nodes.some((n) => n.kind === "cloud");
+  const hasField = model.nodes.some((n) => n.kind === "field");
   const captions: LayerCaption[] = [
-    { label: "cloud · northbound", y: LAYOUT.cloudY + 8 },
+    ...(consoleGroups.length > 0 ? [{ label: "site observer", y: LAYOUT.consoleY + 8 }] : []),
+    ...(hasCloud ? [{ label: "cloud · northbound", y: LAYOUT.cloudY + 8 }] : []),
     { label: "site bus", y: LAYOUT.busY + 8 },
-    { label: "field · southbound", y: LAYOUT.fieldY + 8 },
+    ...(hasField ? [{ label: "field · southbound", y: LAYOUT.fieldY + 8 }] : []),
   ];
 
   return {
