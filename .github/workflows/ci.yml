@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"  # global WebSocket (used by the ws round-trip tests) is stable from Node 22
       - name: Install (workspace)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.EDGECOMMONS_READ_TOKEN || secrets.GITHUB_TOKEN }}
