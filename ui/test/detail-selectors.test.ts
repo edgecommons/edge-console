@@ -7,7 +7,7 @@ import {
   detailUptimeSecs,
   healthChecks,
 } from "../src/components/detail-selectors";
-import { compView, consoleAlarm, deviceView, fleetView, hier, key, runtimeAttrs, T0 } from "./_fixtures";
+import { compView, consoleAlarm, hier, key, runtimeAttrs, T0 } from "./_fixtures";
 
 describe("breadcrumb paths", () => {
   const comp = compView({

@@ -17,7 +17,7 @@ import type {
   RuntimeAttributes,
 } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
-import type { ComponentView, FleetView } from "../fleet/store";
+import type { ComponentView } from "../fleet/store";
 import { connLevel } from "../fleet/grouping";
 import type { ConnLevel } from "../fleet/grouping";
 import { displayUptimeSecs, formatDurationMs } from "../fleet/selectors";

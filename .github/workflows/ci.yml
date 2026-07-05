@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+# TypeScript workspace (protocol + server + ui). The server depends on @edgecommons/ggcommons from
+# GitHub Packages npm; auth comes from EDGECOMMONS_READ_TOKEN (org secret, read:packages) with the
+# built-in GITHUB_TOKEN as a fallback. The committed .npmrc scopes @edgecommons to GH Packages and
+# reads the token from NODE_AUTH_TOKEN. package-lock.json is intentionally gitignored (it would record
+# the local/ggcommons dev link, which does not exist in CI), so we `npm install` rather than `npm ci`.
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install (workspace)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.EDGECOMMONS_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: npm install --no-audit --no-fund
+      - name: Build (protocol -> server -> ui)
+        run: npm run build
+      - name: Test (server + ui)
+        run: npm test
+      - name: Lint
+        run: npm run lint

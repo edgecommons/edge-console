@@ -69,7 +69,6 @@ function TreeRow({
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.key);
   const selected = node.key === selectedKey;
-  const comp = node.comp;
   return (
     <>
       <div
