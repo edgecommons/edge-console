@@ -12,7 +12,7 @@ parsing with defaults), so a real config is often much shorter than these annota
 
 ## 1. Minimal HOST (dev rig)
 
-The smallest useful config — this is essentially the shipped `test-configs/config.json`. It points at a
+The smallest useful config — essentially the `test-configs/config.json` in the repo. It points at a
 local site broker and takes every console default. Run it with:
 
 ```bash
@@ -137,10 +137,9 @@ A production-leaning policy: unauthenticated connections default to a **read-onl
 }
 ```
 
-> **Reminder:** RBAC *enforcement* is real, but the identity source is stubbed — until the auth seam
-> resolves a real principal, `defaultRole` applies to **every** connection, and the read surface is
-> unauthenticated. Keep the console on a trusted network. See
-> [explanation → security](explanation.md#a-note-on-security).
+> **Reminder:** RBAC *enforcement* is real, but the console does not resolve a connecting principal —
+> `defaultRole` applies to **every** connection, and the read surface is unauthenticated. Keep the console
+> on a trusted network. See [explanation → security](explanation.md#a-note-on-security).
 
 ---
 
@@ -197,7 +196,7 @@ Note the four-level `hierarchy`/`identity` — that is the *console's own* ident
 On Kubernetes the config comes from a mounted ConfigMap (`-c` defaults to `CONFIGMAP`), identity from the
 Downward API, logging is stdout JSON, and `/healthz` is the probe. The console is a **single replica**
 (long-lived WebSockets + in-memory model). You provide the Service + Ingress that reaches its WebSocket
-port — **no Helm chart ships yet**.
+port — **no Helm chart is included**.
 
 The console config (the ConfigMap payload):
 

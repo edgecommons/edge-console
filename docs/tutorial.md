@@ -81,7 +81,7 @@ component returns **TIMEOUT**.
 - The **app bar**: global search filters the fleet, the theme toggle flips **g10 ↔ g100**, and the bell
   badge tracks the live active-alarm count.
 
-That is the whole console. Everything you just saw is the shipped code path from the fleet model through
+That is the whole console. Everything you just saw runs the real code path from the fleet model through
 the WebSocket wire to the browser — only the broker was simulated.
 
 ---
@@ -93,10 +93,8 @@ relays each device's traffic into) with at least one component publishing.
 
 ### 1. A broker + a component
 
-The simplest live rig is the dev one: an EMQX broker on `:1884` with a `uns-bridge` in front of a device
-bus, and one or two scaffolded ggcommons skeletons publishing (see
-the `docs/design/FULL-SYSTEM-TEST.md` runbook in the repo for the full multi-process rig). Any
-broker the bridge feeds will do.
+The simplest live rig is an EMQX broker on `:1884` with a `uns-bridge` in front of a device bus, and one
+or two scaffolded ggcommons skeletons publishing. Any broker the bridge feeds will do.
 
 ### 2. Point the console at it
 

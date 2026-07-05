@@ -10,7 +10,7 @@ console↔bus UNS side, see [messaging-interface.md](messaging-interface.md).
 - One WebSocket per browser app, at **`/ws`** on the gateway origin (`ws://` or, behind a TLS terminator,
   `wss://`). The UI derives the URL from the page origin, overridable with `VITE_CONSOLE_WS_URL`.
 - Every frame in **both** directions is a JSON object carrying a `protocolVersion` integer.
-- **`PROTOCOL_VERSION = 5`** today. The gateway validates every inbound frame through one pure
+- **`PROTOCOL_VERSION = 5`**. The gateway validates every inbound frame through one pure
   `parseClientMessage()` — nothing lenient is accepted (unlike the config parsers). A version skew is a
   clean rejection, not a misparse.
 
@@ -50,10 +50,10 @@ snapshot/backlog self-heals the client store (no client-side resubscribe bookkee
 | `type` | Payload | When |
 |--------|---------|------|
 | `welcome` | `role` | Right after a valid `hello`. |
-| `settings` | `settings: ConsoleSettings` | After `welcome` (server-initiated; additive — absent from older gateways). |
+| `settings` | `settings: ConsoleSettings` | After `welcome` (server-initiated). |
 | `snapshot` | `snapshot: FleetSnapshot` | On connect without a resumable `resumeSeq`, or as the resume fallback. |
 | `delta` | `deltas: FleetDelta[]` | Change batches, strictly increasing `seq`. |
-| `heartbeat` | `at`, `busMsgsPerSec?`, `busRecentRates?`, `self?` | Periodic keep-alive + the console's own bus rate/sparkline/self vitals (additive). |
+| `heartbeat` | `at`, `busMsgsPerSec?`, `busRecentRates?`, `self?` | Periodic keep-alive + the console's own bus rate/sparkline/self vitals. |
 | `config` / `config-unavailable` | `key`, `cfg`, `receivedAt`, `sourceTimestamp?` | Reply to `get-config` + later pushes / no cfg held. |
 | `events` / `event` | `events: ConsoleEvent[]` / `event: ConsoleEvent` | Backlog (newest-first) / one live arrival. |
 | `metrics` / `metric` | `series: MetricSeriesSnapshot[]` / `updates: MetricSeriesUpdate[]` | Snapshot / live sample batches. |
@@ -87,7 +87,7 @@ identity. Its canonical string form is `componentKeyId(key)` = `"${device}/${com
 ### `Liveness` (the console-computed state)
 
 `"FRESH" | "WARN" | "STALE" | "OFFLINE" | "STOPPED" | "UNREACHABLE"` — see
-[explanation → miss-detection](../explanation.md#console-side-miss-detection--the-platforms-first) for the
+[explanation → miss-detection](../explanation.md#console-side-miss-detection) for the
 transition rules. `CadenceSource` = `"default" | "cfg"` records where the expected interval came from.
 
 ### `CachedValue` (one last-known value)
@@ -219,8 +219,8 @@ console-synthesized `ConsoleCommandErrorCode`:
 | `UNAVAILABLE` | The gateway has no command seam wired. |
 
 The three universal built-in verbs every component answers: **`BUILTIN_COMMAND_VERBS`** =
-`["ping", "reload-config", "get-configuration"]`. Custom-verb discovery awaits the deferred `describe`
-manifest.
+`["ping", "reload-config", "get-configuration"]`. The console does not discover a component's custom
+verbs.
 
 ## Wire error codes
 

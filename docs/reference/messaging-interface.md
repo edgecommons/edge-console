@@ -24,7 +24,7 @@ per-component topic templates.
 | `evt` | `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
 | `metric` | `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
 | `data` | `ecv1/+/+/+/data/#` | The data plane → the Signals screen (latest value + quality + trend). |
-| `log` | `ecv1/+/+/+/log/#` | Subscribed (part of the six); no LogStore/Logs UI ships yet. |
+| `log` | `ecv1/+/+/+/log/#` | Subscribed (part of the six); the console has no Logs UI. |
 
 `cmd` is **published, never subscribed**, and `app` is not consumed.
 
@@ -84,12 +84,12 @@ ecv1/{device}/_bcast/main/cmd/republish-cfg
 ```
 
 These ask already-running components on the device to re-announce `state`+`cfg` (the platform uses no
-broker retain). They are answered **once the device-side ggcommons `_bcast` listener lands** (design item
-G-S1); until then the periodic `state` keepalive reconverges liveness within one interval, and `cfg` of
-long-running components is the known gap. No `reply_to`, no direct reply; a hostile/invalid device token
-or a publish failure is logged and skipped.
+broker retain). They are answered only if the device-side ggcommons runtime handles the `_bcast`
+broadcast; the periodic `state` keepalive reconverges liveness within one interval regardless, while the
+`cfg` of a long-running component may not refresh until it re-announces. No `reply_to`, no direct reply; a
+hostile/invalid device token or a publish failure is logged and skipped.
 
-## The command write path (C4)
+## The command write path
 
 Commanding is the console's only write surface onto components. The browser's `invoke-command`
 ([data-types.md](data-types.md#commands)) becomes a request/reply on the site bus:
@@ -136,8 +136,8 @@ Every ggcommons component answers three universal built-ins, which the console o
 | `get-configuration` | the component's effective configuration |
 | `reload-config` | `{ reloaded: true }` (or a `RELOAD_FAILED`/`NO_CONFIG` error) |
 
-A component's **custom** verbs cannot be enumerated yet (that needs the deferred `describe` manifest), so
-the UI offers the built-ins plus a generic *verb + args* form.
+A component's **custom** verbs cannot be enumerated (the console does not consume a `describe` manifest),
+so the UI offers the built-ins plus a generic *verb + args* form.
 
 ## Reserved classes
 

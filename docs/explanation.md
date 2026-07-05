@@ -74,11 +74,10 @@ current value *immediately* **and** its age — the two things retain would have
 cross-broker fragility. The model has an injected clock and does no IO, so the entire liveness engine is
 unit-tested with no sleeps and no broker.
 
-## Console-side miss-detection — the platform's first
+## Console-side miss-detection
 
 No component reports "I am late." Liveness is therefore **computed by the console** from the `state`
-keepalive backbone. This is the platform's first miss-detector, and it lives here on purpose (a consumer
-is the only party that can notice silence).
+keepalive backbone. It lives in the console because a consumer is the only party that can notice silence.
 
 - **Cadence is derived, not assumed.** The expected keepalive interval comes from each component's own
   `cfg` announcement (`config.heartbeat.intervalSecs`), defaulting to 5 s until that `cfg` arrives.
@@ -159,10 +158,10 @@ The console's write surface is `invoke-command`. The flow is deliberately narrow
 
 Every per-verb deadline is clamped to the `uns-bridge` reply-map TTL (the paired-knob rule — a deadline
 that outlived the reply path would leak). The three universal built-ins — `ping`, `reload-config`,
-`get-configuration` — are offered on every component; discovering a component's *custom* verbs waits for
-the deferred `describe` capability manifest.
+`get-configuration` — are offered on every component; the console does not discover a component's *custom*
+verbs.
 
-## The UI: dynamic, hierarchy-driven, honest
+## The UI: dynamic and hierarchy-driven
 
 The IBM Carbon / React front end renders **whatever the deployment declares** — it never hardcodes a
 tier. The fleet table and the Components tree are grouped dynamically from each component's identity
@@ -170,34 +169,32 @@ tier. The fleet table and the Components tree are grouped dynamically from each 
 render correctly with no code change. The topology graph derives its nodes from identity and its edges
 from each component's `cfg`.
 
-A discipline runs through every screen: **surface what is not yet derivable rather than fake it.** The
-topology's component-to-component dataflow edges (no flow metadata on the wire) are a labelled *pending*
-layer; a component's custom command surface, the Component-Detail *Panel*/*Logs* tabs, and per-signal
-engineering units/limits (all needing `describe`) are shown *present-but-pending*; the Settings screen
-marks its staged/pending sections explicitly. Nothing is invented.
+A discipline runs through every screen: **surface what is not derivable rather than fake it.** The
+topology's component-to-component dataflow edges are not drawn (there is no flow metadata on the wire); a
+component's custom command surface, the Component-Detail *Panel*/*Logs* tabs, and per-signal engineering
+units/limits are not populated (they require a `describe` capability the console does not consume). The UI
+marks these as unavailable rather than inventing values.
 
-> **On the missing Metrics screen.** An early standalone Metrics page was removed as off-contract. The
-> UNS `metric` class is still consumed and streamable over the WebSocket, but the UI surfaces metrics
-> *in context* — the Overview CPU sparkline and connection-state columns (a projection over the metric
-> class) and the Signals trends — rather than as its own page.
+> **On the missing Metrics screen.** There is no standalone Metrics page. The UNS `metric` class is
+> consumed and streamable over the WebSocket, and the UI surfaces metrics *in context* — the Overview CPU
+> sparkline and connection-state columns (a projection over the metric class) and the Signals trends —
+> rather than as its own page.
 
 ## A note on security
 
-Two honest boundaries, both stubbed-but-real seams rather than pretend features:
+Two current boundaries:
 
-- **Transport is plain HTTP + WebSocket.** There is no built-in TLS listener yet. The "HTTPS front" in
-  the design is achieved by **terminating TLS in front** (reverse proxy / load balancer / Ingress). The
-  UI derives `wss://…/ws` from an `https://` page origin automatically, so no UI change is needed once TLS
-  terminates ahead of the console.
-- **Authentication is not wired.** RBAC *enforcement* on the command path is real (a config-driven
-  allow/deny per verb, fail-closed), but the identity→role decision — the `resolveRole` seam at the
-  WebSocket upgrade — is stubbed to assign every connection the configured `defaultRole`. And the *read*
-  surface (snapshot + streams) is unauthenticated. **Keep the console on a trusted network** until the
-  auth seam is implemented (verify a bearer/mTLS/OIDC principal at the upgrade and reject unauthenticated
-  connections).
+- **Transport is plain HTTP + WebSocket.** There is no built-in TLS listener. Serve browsers over
+  HTTPS/WSS by **terminating TLS in front** (reverse proxy / load balancer / Ingress). The UI derives
+  `wss://…/ws` from an `https://` page origin automatically, so no UI change is needed once TLS terminates
+  ahead of the console.
+- **Connections are not authenticated.** RBAC *enforcement* on the command path is real (a config-driven
+  allow/deny per verb, fail-closed), but the console does not resolve the identity of a connection: every
+  connection is assigned the configured `defaultRole`. And the *read* surface (snapshot + streams) is
+  unauthenticated. **Keep the console on a trusted network.**
 
-These are called out in the product (the Settings screen, the server startup log) and here so nobody
-mistakes the seam for a finished control.
+These boundaries are surfaced in the product (the Settings screen, the server startup log) as well as
+here.
 
 ## Deployment shape
 
@@ -208,6 +205,5 @@ Two console-specific constraints follow from its nature:
 - **One replica per site broker.** It holds long-lived WebSockets and an in-memory model; it is not
   horizontally scalable.
 - **Browser reachability is the console's own concern, not the bus's** — a bound port on HOST/Greengrass,
-  a Service + Ingress on Kubernetes (a packaged chart is not shipped yet). The `webRoot` option lets one
-  process serve both the WebSocket and the built UI, so a self-contained deployment needs no separate
-  front.
+  a Service + Ingress on Kubernetes (no packaged chart is included). The `webRoot` option lets one process
+  serve both the WebSocket and the built UI, so a self-contained deployment needs no separate front.

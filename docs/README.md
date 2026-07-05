@@ -33,11 +33,11 @@ shutdown. The console adds the fleet model, the WebSocket gateway, the command g
 - **"Which UNS topics does it subscribe, and how does a command reach a component?"** → [Reference — Messaging interface](reference/messaging-interface.md).
 - **"Why is the console the *only* thing that talks to the bus?"** → [Explanation](explanation.md).
 
-## What ships today
+## What the console provides
 
 Priority **#1 is edge health** (fleet liveness, per-value freshness, whole-device reachability); priority
-**#2 is config review** (every component's effective, redacted config). The UI ships these screens, all
-fed live from one WebSocket connection:
+**#2 is config review** (every component's effective, redacted config). The console provides these
+screens, all fed live from one WebSocket connection:
 
 | Screen | What it shows |
 |---|---|
@@ -49,29 +49,23 @@ fed live from one WebSocket connection:
 | **Signals** | a data-plane browser over the UNS `data` class — latest value, quality, trend sparkline, age, on-demand Read |
 | **Settings** | the console's own effective policy (RBAC, connection, staleness ladder, command deadlines, retention caps), read-only |
 
-### Honest boundaries (verify against code, not the design doc)
+### Current limitations
 
-These are deliberately deferred and are surfaced *as* pending in the product — the docs flag them too:
+The console surfaces each of these in the product as well as here:
 
-- **Transport is plain HTTP + WebSocket today.** The "HTTPS front" is achieved by **terminating TLS in
-  front** of the console (reverse proxy / load balancer / Ingress); a native HTTPS listener is not yet
-  built.
+- **Transport is plain HTTP + WebSocket.** The console has no built-in HTTPS listener; serve browsers over
+  HTTPS by **terminating TLS in front** of the console (reverse proxy / load balancer / Ingress).
 - **The read surface (snapshot + live streams) is unauthenticated.** RBAC on the command *write* path is
-  really enforced, but the identity→role decision is a **stubbed seam** (every connection is assigned the
-  configured default role). Do not expose the console beyond a trusted network yet. See
+  enforced, but the console does not resolve who is connecting: every connection is assigned the
+  configured default role. Keep the console on a trusted network. See
   [Explanation → Security](explanation.md#a-note-on-security).
-- **No Kubernetes chart ships yet.** The server runs fine under the library's `KUBERNETES` platform, but
-  you provide the Service + Ingress that reaches its WebSocket port.
-- **The `describe` / panels capability manifest is a later phase**, so a component's custom-verb surface,
-  the Component-Detail *Panel* / *Logs* tabs, and per-signal engineering units/limits are shown as
-  present-but-pending, never fabricated.
-- **There is no standalone Metrics page.** The UNS `metric` class is still consumed and streamable over
-  the WebSocket, but the UI surfaces metrics through the Overview columns (CPU sparkline, connection
-  state) and the Signals trends rather than a dedicated screen.
-
-The **design source of truth** lives in the repo under `docs/design/` (the v0.3 DESIGN, the UNS
-reconciliation + Phase-1 plan, the full-system-test runbook, and the signed-off mockups). Those are
-planning artifacts — this Diátaxis set is the code-grounded user documentation.
+- **No Kubernetes chart is included.** The server runs under the library's `KUBERNETES` platform, but you
+  provide the Service + Ingress that reaches its WebSocket port.
+- **The console does not consume a `describe` capability manifest**, so it does not populate a component's
+  custom-verb surface, the Component-Detail *Panel* / *Logs* tabs, or per-signal engineering units/limits.
+- **There is no standalone Metrics page.** The UNS `metric` class is consumed and streamable over the
+  WebSocket; the UI surfaces metrics through the Overview columns (CPU sparkline, connection state) and the
+  Signals trends rather than a dedicated screen.
 
 ## Audience
 

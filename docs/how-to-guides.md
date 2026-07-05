@@ -103,8 +103,8 @@ node dist/main.js --platform KUBERNETES        # -c defaults to CONFIGMAP on thi
 Two console-specific rules:
 
 1. **Reaching the browser is your concern, not the bus's.** Expose the WebSocket port
-   (`console.ws.port`) with a **Service + Ingress**. A packaged Helm chart is **not shipped yet** (design
-   item M13) — you provide the Service/Ingress today.
+   (`console.ws.port`) with a **Service + Ingress**. No packaged Helm chart is included — you provide the
+   Service/Ingress.
 2. **Single replica.** The console holds long-lived WebSocket connections and an in-memory fleet model;
    run **one** replica per site broker (do not horizontally scale it).
 
@@ -114,8 +114,8 @@ Terminate TLS at the Ingress (see the next recipe).
 
 ## Put HTTPS in front of it
 
-The server speaks **plain HTTP + WebSocket** — there is no built-in TLS listener yet. To serve browsers
-over HTTPS/WSS, terminate TLS in front:
+The server speaks **plain HTTP + WebSocket** — there is no built-in TLS listener. To serve browsers over
+HTTPS/WSS, terminate TLS in front:
 
 - **HOST / Greengrass** — a reverse proxy (nginx, Caddy) or load balancer terminating TLS and proxying
   `/` and the `/ws` upgrade to the console port.
@@ -147,11 +147,10 @@ nothing (fail-closed):
 
 A denied verb returns a console-synthesized `FORBIDDEN` and **never reaches the bus**.
 
-> **Important — the identity source is stubbed.** RBAC *enforcement* is real, but the console does not yet
-> verify who is connecting: every connection is assigned `defaultRole`. So `defaultRole` is effectively
-> the posture for **everyone** until the auth seam (`resolveRole` at the WebSocket upgrade) is
-> implemented. Also, the *read* surface (snapshot + live streams) is unauthenticated. Keep the console on
-> a trusted network. See [explanation → security](explanation.md#a-note-on-security).
+> **Important — connections are not authenticated.** RBAC *enforcement* is real, but the console does not
+> verify who is connecting: every connection is assigned `defaultRole`. So `defaultRole` is the posture
+> for **everyone**. The *read* surface (snapshot + live streams) is unauthenticated too. Keep the console
+> on a trusted network. See [explanation → security](explanation.md#a-note-on-security).
 
 ---
 
@@ -214,11 +213,11 @@ indicator** shows the connection's resolved RBAC role.
 
 Open **Overview** (or **Component Detail**) and expand a component's controls. The three universal
 built-in verbs — **ping**, **get-configuration**, **reload-config** — are offered on every component; a
-generic *verb + args* form covers anything else the component answers (custom-verb *discovery* waits for
-the deferred `describe` manifest). The result (or a coded error / timeout / `FORBIDDEN`) surfaces in a
+generic *verb + args* form covers anything else the component answers (the console does not discover a
+component's custom verbs). The result (or a coded error / timeout / `FORBIDDEN`) surfaces in a
 toast. Under the hood the gateway issues one `messaging.request()` to the component's `cmd` inbox and the
 `uns-bridge` rewrites `reply_to` so the site→device round-trip is transparent — see
-[reference — messaging interface](reference/messaging-interface.md#the-command-write-path-c4).
+[reference — messaging interface](reference/messaging-interface.md#the-command-write-path).
 
 ---
 
@@ -227,9 +226,9 @@ toast. Under the hood the gateway issues one `messaging.request()` to the compon
 A component that started **before** the console cannot be asked for its current `cfg`/`state` through
 retain (the platform uses no broker retain). On **Configuration**, **Refresh** fires a per-device
 `republish-cfg` broadcast on the bus asking every component on that device to re-push. It is
-fire-and-forget: components answer **once the device-side ggcommons `_bcast` listener lands** (design item
-G-S1). Until then the periodic `state` keepalive still reconverges liveness within one interval; only
-`cfg` of already-running components is the known gap.
+fire-and-forget: a component re-pushes only if its device-side ggcommons runtime handles the `_bcast`
+broadcast. The periodic `state` keepalive reconverges liveness within one interval regardless; the `cfg`
+of an already-running component may not refresh until that component re-announces.
 
 ---
 

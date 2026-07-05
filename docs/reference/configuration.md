@@ -10,8 +10,8 @@ see the [how-to guides](../how-to-guides.md); for the wire protocols, see
 The console is a standard ggcommons TypeScript component (`com.edgecommons.edge-console`; UNS component
 token `edge-console`). It reads one JSON document from `-c/--config`, defaulting by platform:
 `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG`, `KUBERNETES` → `CONFIGMAP`. The console's own knobs live
-under **`component.global.console`** (a permissive subtree — no canonical-schema change, the `uns-bridge`
-precedent); the sibling sections (`messaging`, `hierarchy`, `identity`, `logging`, `heartbeat`,
+under **`component.global.console`** (a permissive subtree); the sibling sections (`messaging`,
+`hierarchy`, `identity`, `logging`, `heartbeat`,
 `metricEmission`, `tags`, `topic`) are standard ggcommons sections the library parses.
 
 **Every `console` field is optional** — parsing is deliberately lenient: a missing or malformed
@@ -79,7 +79,7 @@ library's own `HeartbeatConfig` parsing), else `defaultIntervalSecs`.
 
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
-| `defaultRole` | string | `"operator"` | Role assigned to a connection with no resolved principal (the auth seam's fallback — today **every** connection). Must name a declared role, else the whole policy falls back to the default. |
+| `defaultRole` | string | `"operator"` | Role assigned to a connection with no resolved principal (the console resolves none, so this applies to **every** connection). Must name a declared role, else the whole policy falls back to the default. |
 | `roles` | object | *(below)* | `roleName → { allow: string[], deny: string[] }`. `"*"` = every verb; `deny` wins over `allow`; an unknown role can do nothing (fail-closed). |
 
 Default policy:
@@ -94,8 +94,8 @@ Default policy:
 }
 ```
 
-> RBAC **enforcement** is real; the **identity source is stubbed** (`resolveRole` assigns `defaultRole`
-> to all). See [explanation → security](../explanation.md#a-note-on-security).
+> RBAC **enforcement** is real; the console resolves no connecting principal, so `defaultRole` applies to
+> every connection. See [explanation → security](../explanation.md#a-note-on-security).
 
 ## `component.global.console.commands` — command deadlines
 
