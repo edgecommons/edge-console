@@ -240,6 +240,15 @@ export type FleetDelta =
       hier: WireHierLevel[];
     }
   | {
+      /** The component's per-instance connectivity changed (#1c) — carries the full new set so the
+       *  client replaces `instances[]` wholesale (no per-instance diffing). */
+      type: "instances-changed";
+      seq: number;
+      at: number;
+      key: ComponentKey;
+      instances: InstanceStatus[];
+    }
+  | {
       type: "value-updated";
       seq: number;
       at: number;

@@ -395,6 +395,11 @@ export class FleetStore {
         comp.status = "RUNNING"; // a restart is proven by a RUNNING keepalive
         return;
       }
+      case "instances-changed": {
+        // #1c: live per-instance connectivity change — replace the set wholesale.
+        this.ensureComponent(delta.key).instances = delta.instances.map((i) => ({ ...i }));
+        return;
+      }
       case "device-reachability-changed": {
         const device = this.ensureDevice(delta.device);
         device.unreachable = delta.unreachable;

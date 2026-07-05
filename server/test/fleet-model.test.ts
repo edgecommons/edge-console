@@ -418,4 +418,24 @@ describe("FleetModel - #1c per-instance connectivity (state.instances[])", () =>
       { instance: "ok", connected: true },
     ]);
   });
+
+  it("emits an instances-changed delta on a connectivity change, but not on an unchanged repeat", () => {
+    const model = new FleetModel(new TestClock().fn);
+    const withInstances = (conns: unknown) =>
+      env({ cls: "state", body: { status: "RUNNING", uptimeSecs: 5, instances: conns } });
+
+    // undefined -> a set: emits the delta.
+    let deltas = model.ingest(withInstances([{ instance: "s1", connected: true }]));
+    expect(types(deltas)).toContain("instances-changed");
+
+    // identical repeat: NO instances-changed delta (the change guard).
+    deltas = model.ingest(withInstances([{ instance: "s1", connected: true }]));
+    expect(types(deltas)).not.toContain("instances-changed");
+
+    // a flip to disconnected: emits again, carrying the new set.
+    deltas = model.ingest(withInstances([{ instance: "s1", connected: false }]));
+    const d = deltas.find((x) => x.type === "instances-changed");
+    expect(d).toBeDefined();
+    expect((d as { instances: unknown }).instances).toEqual([{ instance: "s1", connected: false }]);
+  });
 });

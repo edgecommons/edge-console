@@ -63,6 +63,28 @@ describe("FleetStore - snapshot apply", () => {
     );
     expect(store.view()).not.toBe(a);
   });
+
+  it("applies an instances-changed delta live (the #1c fix — no reload needed)", () => {
+    const store = liveStore();
+    store.applyDeltas(
+      seqRun(11, [
+        {
+          type: "instances-changed",
+          at: T0 + 100,
+          key: key(),
+          instances: [
+            { instance: "filler1", connected: true, detail: "opc.tcp://x" },
+            { instance: "kep2", connected: false },
+          ],
+        },
+      ]),
+      T0 + 120,
+    );
+    expect(firstComp(store)!.instances).toEqual([
+      { instance: "filler1", connected: true, detail: "opc.tcp://x" },
+      { instance: "kep2", connected: false },
+    ]);
+  });
 });
 
 describe("FleetStore - delta fold (seq order)", () => {

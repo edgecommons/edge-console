@@ -60,6 +60,17 @@ function parseInstanceStatuses(raw: unknown): InstanceStatus[] | undefined {
   return out;
 }
 
+/** Structural equality of two `instances[]` sets (order-sensitive; the library provider is order-stable). */
+function sameInstances(a: InstanceStatus[] | undefined, b: InstanceStatus[]): boolean {
+  if (a === undefined || a.length !== b.length) return false;
+  for (let i = 0; i < b.length; i++) {
+    if (a[i]!.instance !== b[i]!.instance || a[i]!.connected !== b[i]!.connected || a[i]!.detail !== b[i]!.detail) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Milliseconds since the epoch, injectable for tests (DESIGN's "no sleeps" rule). */
 export type Clock = () => number;
 
@@ -342,9 +353,19 @@ export class FleetModel {
     if (status !== undefined) comp.status = status;
 
     // #1c per-instance connectivity: when the state carries `instances[]` (a multi-instance
-    // component's RUNNING keepalive), refresh it; a state without the section leaves it untouched.
+    // component's RUNNING keepalive), refresh it and — on a CHANGE — push an instances-changed delta
+    // so the client updates LIVE (not only at the next snapshot). A state without the section leaves
+    // the last-known set untouched.
     const instances = parseInstanceStatuses(body.instances);
-    if (instances !== undefined) comp.instances = instances;
+    if (instances !== undefined && !sameInstances(comp.instances, instances)) {
+      comp.instances = instances;
+      this.push(deltas, {
+        type: "instances-changed",
+        at: now,
+        key: comp.key,
+        instances: instances.map((i) => ({ ...i })),
+      });
+    }
 
     if (status === "STOPPED") {
       // Graceful stop is an explicit truth: hold STOPPED, no staleness decay.
