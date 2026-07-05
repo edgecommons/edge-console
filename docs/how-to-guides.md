@@ -1,0 +1,242 @@
+# How-to Guides
+
+Recipes for specific tasks. Each assumes the console builds and runs (see the [tutorial](tutorial.md)).
+For concepts see [explanation.md](explanation.md); for exhaustive options see [reference/](reference/).
+
+---
+
+## Build the workspace
+
+The repo is an npm workspace of three packages — `protocol` (the shared WS types),
+`server` (the Node backend), and `ui` (the Carbon/React front end):
+
+```bash
+npm run link:lib     # dev only: satisfy @edgecommons/ggcommons from the sibling ../ggcommons/libs/ts
+npm install
+npm run build        # protocol -> server -> ui (order matters; server + ui import protocol)
+npm test             # server + ui unit suites (fake bus/socket, injected clock — no live IO)
+npm run coverage     # vitest v8 coverage, thresholds 90/90/85/80 (the ecosystem gate)
+npm run lint         # eslint (flat config) over the whole workspace
+```
+
+`npm run link:lib` generates the **gitignored** `local/ggcommons` stub — the npm analog of the bridge's
+`.cargo/config.toml` paths override. CI skips it and resolves the published `@edgecommons/ggcommons` from
+GitHub Packages instead (via the committed `.npmrc`).
+
+---
+
+## Point the console at your site broker
+
+The console has **one** connection — the *site broker*, the aggregation point every device's `uns-bridge`
+relays into. It is an ordinary ggcommons `messaging.local` block:
+
+```jsonc
+"messaging": {
+  "local": { "host": "site-broker.internal", "port": 1883, "clientId": "edge-console" },
+  "requestTimeoutSeconds": 30
+}
+```
+
+- On a **single-device** deployment, `messaging.local` is that device's local bus.
+- On **Kubernetes**, it is the in-cluster broker Service.
+- Give the console its **own thing name** (`-t site-console`) so it doesn't self-appear as a device under
+  the fleet it watches.
+
+See [reference — configuration](reference/configuration.md#config-source) for the `--transport MQTT
+<file>` alternative.
+
+---
+
+## Deploy on HOST (a plain process)
+
+```bash
+node server/dist/main.js \
+  --platform HOST --transport MQTT ./messaging.json \
+  -c FILE ./config.json \
+  -t site-console
+```
+
+- `--transport MQTT <file>` supplies the broker connection; the same file can carry the whole config
+  (its `messaging.local` is the site broker), which is why the tutorial passes `config.json` twice.
+- The WebSocket gateway binds `console.ws.bindAddress:console.ws.port` (default `0.0.0.0:8443`). Reach the
+  UI over that port (behind a TLS terminator — see below).
+
+---
+
+## Deploy self-contained (serve the built UI from the server — no Vite, no nginx)
+
+Set `component.global.console.ws.webRoot` to the built `ui/dist` and the server serves its own UI as
+static files on the **same** origin as the WebSocket — one process, no sidecar:
+
+```jsonc
+"component": { "global": { "console": {
+  "ws": { "port": 8443, "bindAddress": "0.0.0.0", "webRoot": "../ui/dist" }
+} } }
+```
+
+```bash
+npm run build                         # produces ui/dist
+node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
+# Browse straight to http://<host>:8443/ — index.html + hashed assets served by the console itself.
+```
+
+- **Opt-in**: with `webRoot` unset (the default) the server handles only `/healthz` and the `/ws`
+  upgrade; every other GET 404s exactly as before.
+- Relative paths resolve against the **server process cwd**; an absolute path is used as-is.
+- Deep links work (SPA fallback serves `index.html` for extension-less routes); `..`, embedded NULs and
+  decode failures are rejected with `403` before touching the filesystem; `index.html` is `no-cache`,
+  every hashed asset is `immutable`.
+
+---
+
+## Deploy on Kubernetes
+
+The console is a standard ggcommons component, so it runs under the library's `KUBERNETES` platform —
+config from a mounted **ConfigMap**, identity from the **Downward API**, stdout JSON logging, an HTTP
+health probe, `SIGTERM` graceful shutdown, and a pull `/metrics`:
+
+```bash
+# build + push the server image, then apply your manifests
+node dist/main.js --platform KUBERNETES        # -c defaults to CONFIGMAP on this platform
+```
+
+Two console-specific rules:
+
+1. **Reaching the browser is your concern, not the bus's.** Expose the WebSocket port
+   (`console.ws.port`) with a **Service + Ingress**. A packaged Helm chart is **not shipped yet** (design
+   item M13) — you provide the Service/Ingress today.
+2. **Single replica.** The console holds long-lived WebSocket connections and an in-memory fleet model;
+   run **one** replica per site broker (do not horizontally scale it).
+
+Terminate TLS at the Ingress (see the next recipe).
+
+---
+
+## Put HTTPS in front of it
+
+The server speaks **plain HTTP + WebSocket** — there is no built-in TLS listener yet. To serve browsers
+over HTTPS/WSS, terminate TLS in front:
+
+- **HOST / Greengrass** — a reverse proxy (nginx, Caddy) or load balancer terminating TLS and proxying
+  `/` and the `/ws` upgrade to the console port.
+- **Kubernetes** — an Ingress with a TLS secret, routing to the console Service.
+
+The UI derives its WebSocket URL from the page origin (`wss://…/ws` when the page is `https://`), so once
+TLS terminates in front, no UI config change is needed. Override with `VITE_CONSOLE_WS_URL` only for
+unusual split-origin setups.
+
+---
+
+## Lock down the command (write) surface with RBAC
+
+Command invocation is gated by a config-driven RBAC policy under `component.global.console.rbac`. Roles
+carry `allow`/`deny` verb lists (`"*"` = every verb; `deny` wins over `allow`); an unknown role can do
+nothing (fail-closed):
+
+```jsonc
+"console": {
+  "rbac": {
+    "defaultRole": "viewer",
+    "roles": {
+      "operator": { "allow": ["*"], "deny": ["reboot"] },     // everything except reboot
+      "viewer":   { "allow": ["ping", "get-configuration"] }  // read-only verbs
+    }
+  }
+}
+```
+
+A denied verb returns a console-synthesized `FORBIDDEN` and **never reaches the bus**.
+
+> **Important — the identity source is stubbed.** RBAC *enforcement* is real, but the console does not yet
+> verify who is connecting: every connection is assigned `defaultRole`. So `defaultRole` is effectively
+> the posture for **everyone** until the auth seam (`resolveRole` at the WebSocket upgrade) is
+> implemented. Also, the *read* surface (snapshot + live streams) is unauthenticated. Keep the console on
+> a trusted network. See [explanation → security](explanation.md#a-note-on-security).
+
+---
+
+## Tune miss-detection (the staleness ladder)
+
+The console — not the components — decides when a component is late. Tune the ladder under
+`component.global.console.staleness`:
+
+| You want… | Set |
+|-----------|-----|
+| More/less tolerant "warn" shading | `warnMultiplier` (default 2 × the expected interval) |
+| When a value is considered STALE | `staleMultiplier` (default 2.5×) |
+| When a component is considered OFFLINE | `offlineMultiplier` (default 5×) |
+| The cadence assumed before a component's `cfg` arrives | `defaultIntervalSecs` (default 5) |
+| How often the ladder is recomputed | `sweepIntervalMs` (default 1000) |
+
+The multipliers must be **strictly increasing** (`warn < stale < offline`) or the whole trio falls back
+to defaults with a warning. The expected interval itself is taken from each component's advertised
+`cfg.config.heartbeat.intervalSecs` once its `cfg` arrives; until then `defaultIntervalSecs` applies.
+
+---
+
+## Bound the caches (memory guards)
+
+Every store is bounded and drop-oldest, so a noisy fleet can't grow the console without limit:
+
+```jsonc
+"console": {
+  "cache":   { "maxChannelsPerComponent": 1024 },   // distinct (class, channel) values per component
+  "events":  { "maxEvents": 1000, "maxPerComponent": 100 },  // fleet-wide ring + per-component ring
+  "metrics": { "maxSeriesPoints": 60, "maxSeries": 2000 }    // points per series; distinct series
+}
+```
+
+Overflow is dropped and counted (the Overview surfaces `droppedChannels`), never allowed to evict another
+component's history. See [reference — configuration](reference/configuration.md).
+
+---
+
+## Use each screen
+
+| To… | Go to |
+|-----|-------|
+| See fleet health at a glance (liveness, alarms, the console's own bus rate) | **Overview** |
+| Browse the site as a tree and drill into one component | **Components** → a leaf → **Open detail** |
+| See a component's Health / Instances / effective Config / Events | **Component Detail** tabs |
+| See the connectivity graph (who talks to what) | **Site Topology** |
+| Read a component's effective, redacted running config | **Configuration** (pick + Structured/Raw JSON + Refresh) |
+| Triage alarms with a real Ack lifecycle | **Events & Alarms** (Ack an active alarm) |
+| Browse live telemetry values + trends | **Signals** (filter, Read on demand) |
+| See the console's own policy | **Settings** (read-only) |
+
+The **app-bar search** filters the fleet across the Overview, Components tree, and Signals; the **theme
+toggle** flips g10 ↔ g100; the **bell badge** tracks the live active-alarm count; the **account
+indicator** shows the connection's resolved RBAC role.
+
+---
+
+## Command a component from the UI
+
+Open **Overview** (or **Component Detail**) and expand a component's controls. The three universal
+built-in verbs — **ping**, **get-configuration**, **reload-config** — are offered on every component; a
+generic *verb + args* form covers anything else the component answers (custom-verb *discovery* waits for
+the deferred `describe` manifest). The result (or a coded error / timeout / `FORBIDDEN`) surfaces in a
+toast. Under the hood the gateway issues one `messaging.request()` to the component's `cmd` inbox and the
+`uns-bridge` rewrites `reply_to` so the site→device round-trip is transparent — see
+[reference — messaging interface](reference/messaging-interface.md#the-command-write-path-c4).
+
+---
+
+## Trigger a config re-announce (late join)
+
+A component that started **before** the console cannot be asked for its current `cfg`/`state` through
+retain (the platform uses no broker retain). On **Configuration**, **Refresh** fires a per-device
+`republish-cfg` broadcast on the bus asking every component on that device to re-push. It is
+fire-and-forget: components answer **once the device-side ggcommons `_bcast` listener lands** (design item
+G-S1). Until then the periodic `state` keepalive still reconverges liveness within one interval; only
+`cfg` of already-running components is the known gap.
+
+---
+
+## Observe the console itself
+
+- **Health probe**: `GET /healthz` returns `200 ok` — wire it to your liveness/readiness check.
+- **Its own metrics/logs/state**: the console is a ggcommons component, so it emits the standard `state`
+  keepalive, `metric` health, and logging like any other — visible in *another* console, or on the bus.
+- **In-product**: the Overview "Edge bus msgs/s" tile is the console's own ingest throughput; the "Edge
+  node — console self" tile is its own CPU/memory/uptime; **Settings** shows its resolved policy.
