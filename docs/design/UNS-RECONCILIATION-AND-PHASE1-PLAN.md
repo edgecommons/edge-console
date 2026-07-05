@@ -1,9 +1,9 @@
 # Edge Console — UNS reconciliation & Phase-1 build plan
 
-**Status: RECONCILIATION (design-to-shipped-reality pass) · 2026-07-03**
+**Status: reconciliation pass 2026-07-03; Phase-1 build (C0–C7 + the G-S1 library slice) COMPLETE as of 2026-07-05 — the full-system gate ran and passed (HOST → kind), GREENGRASS leg pending the uns-bridge IPC variant.**
 
 > Reconciles `DESIGN.md` v0.3 (2026-07-02) against what has **actually shipped** since:
-> the UNS core in all four ggcommons libraries (branch `feat/unified-namespace` — grammar,
+> the UNS core in all four ggcommons libraries (shipped to `main` at v0.2.0, rev b1d8d85 — grammar,
 > top-level `identity`, `gg.uns()`, reserved-class guard, `request()` deadline, MQTT LWT,
 > the library-owned `state`/`metric`/`cfg` publishers, `uns-test-vectors/`), the finalized
 > decision registers (D‑U1…D‑U27 in `UNS-CANONICAL-DESIGN.md`, D‑B1…D‑B15 in
@@ -14,11 +14,12 @@
 >
 > Bottom line up front: **the console's design survives almost intact — and most of its
 > "mandates" are now free.** Priority #1 (edge-health) needs **zero** new ggcommons work.
-> Priority #2 (config-review) needs exactly **one small 4-language ggcommons slice** — the
-> device-side `republish-state`/`republish-cfg` `_bcast` listener (the same deferred item
-> the bridge already broadcasts into, today "answered by nobody"). Everything else the
-> console still wants from the library (describe/panels/southbound family) gates only
-> Tier-2 screens and stays parked at Phase 5.
+> Priority #2 (config-review) needed exactly **one small 4-language ggcommons slice** — the
+> device-side `republish-state`/`republish-cfg` `_bcast` listener — and it has **shipped**
+> (`RepublishListener` in Java/Python/TS, `uns.rs` in Rust; the same item the bridge
+> broadcasts into, now answered rather than inert). Everything else the console still wants
+> from the library (describe/panels/southbound family) gates only Tier-2 screens and stays
+> parked at Phase 5.
 
 ---
 
@@ -73,7 +74,7 @@ Two housekeeping notes first:
 
 | Item | What it was | Verdict | By what / what remains |
 |---|---|---|---|
-| **M1** `uns-bridge` | envelope-aware per-device relay | **✅ ALREADY SATISFIED (built)** | Sibling repo, P3‑2…P3‑6 done: relay matrix, hop tag, reply rewrite, per-class policy + rate caps + `evt` replay buffer, LWT UNREACHABLE, own observability (counters as `metric`s), dual-EMQX e2e 9/9. *(Held for release: GitHub remote + rev-pin bump; GREENGRASS/IPC-primary variant; standard CLI contract — none block the console's HOST-first Phase 1.)* |
+| **M1** `uns-bridge` | envelope-aware per-device relay | **✅ ALREADY SATISFIED (built)** | Sibling repo, P3‑2…P3‑6 done: relay matrix, hop tag, reply rewrite, per-class policy + rate caps + `evt` replay buffer, LWT UNREACHABLE, own observability (counters as `metric`s), dual-EMQX e2e 9/9. *(Shipped since: GitHub remote + rev-pin bump — the repo is published and pins ggcommons rev b1d8d85. Still deferred: GREENGRASS/IPC-primary variant; standard CLI contract — neither blocks the console's HOST-first Phase 1.)* |
 | **M2** site-broker recipes | EMQX deploy + ACL | **✅ ALREADY SATISFIED (built)** | `uns-bridge/deploy/site-broker/`: HOST compose (+ dual-EMQX dev rig), GG DockerApplicationManager recipe, k8s manifests, per-device **ACL** file. One console-driven delta remains — see §4 (ACL principal for the console). |
 | **M3** UNS grammar | topic grammar + classes | **✅ ALREADY SATISFIED** | All four libs; vectors; interop suite. |
 | **M4** messaging model | `messaging()` + `uns()` + guard + facades | **✅ SATISFIED for what the console needs in Phase 1** — `messaging()` (hardened), `uns()` builder/validator, reserved guard + privileged seams, library publishers. **Deferred sub-part:** the opt-in facades (`telemetry/status/events/commands/discovery`) — see S2/S3 below. |
@@ -91,11 +92,11 @@ Two housekeeping notes first:
 | Capability (old A-item) | Verdict | Detail |
 |---|---|---|
 | **Announce / liveness** | **✅ SATISFIED** | = the `state` keepalive (on by default, 5 s, `RUNNING`/`STOPPED`) + bridge LWT `UNREACHABLE`. Announce *is* the first state (D11 → shipped D6). Nothing to build in ggcommons. |
-| **GetEffectiveConfiguration** | **◐ MOSTLY SATISFIED / one small slice remains (S1)** | The **`cfg` push publisher** (startup + on-change, redacted) is the config-review backbone and is shipped. Remaining: the **device-side `republish-state`/`republish-cfg` `_bcast` listener** so a late-joining console (or a reconnecting bridge — it already broadcasts this) can pull current state+cfg from already-running components. All 4 languages; small (a topic-selective subscription + re-invoking two existing publishers). The Flow-B `get-configuration` *request* verb is a nice-to-have on top (per-component pull with a reply), not required once `republish-cfg` exists. |
+| **GetEffectiveConfiguration** | **✅ SATISFIED (S1 shipped)** | The **`cfg` push publisher** (startup + on-change, redacted) is the config-review backbone. The **device-side `republish-state`/`republish-cfg` `_bcast` listener** — so a late-joining console (or a reconnecting bridge) can pull current state+cfg from already-running components — **shipped** in all 4 languages (`RepublishListener` in Java/Python/TS, `uns.rs` in Rust; jittered + coalesced, on by default). The Flow-B `get-configuration` *request* verb remains a nice-to-have on top (per-component pull with a reply), not required now that `republish-cfg` exists. |
 | **Describe / capability manifest** | **⏳ STILL NEEDED — deferred (Phase 3/5 "components phase")** | `describe` verb + manifest + `describe_digest`. Gates capability-driven UI + panels (Tier 2). 4 languages. Not needed for priorities #1/#2. |
 | **status() / health checks** | **⏳ STILL NEEDED — deferred** | `state.checks[]` / DEGRADED nuance = the `status()` facade. Until it lands the console's state machine simply has no DEGRADED inputs (renders from keepalive freshness alone). 4 languages, Tier-2 opt-in. |
 | **events()** | **⏳ STILL NEEDED (facade) / class usable NOW** | The `evt` **class** is open (any component may publish `evt/{sev}/{type}` via `messaging()`+`uns()` today, and the bridge buffers it across WAN blips). The convenience facade + raise/clear alarm semantics are deferred. Console consumes whatever appears — the Events screen works day one, populated as components adopt. |
-| **commands() + built-in verbs** (`ping`, `reload-config`, `set-log-level`, Flow-B `get-configuration`) | **⏳ STILL NEEDED — the "Phase-3 leftovers" slice (S2)** | Deferred with the facades. The console can *issue* requests today (G2) but no component *answers* any verb yet. Minimal useful subset for the console: the `_bcast` listener (S1) ⊂ this slice; then `ping` + `reload-config` + Flow-B `get-configuration`. 4 languages. |
+| **commands() + built-in verbs** (`ping`, `reload-config`, `set-log-level`, Flow-B `get-configuration`) | **⏳ STILL NEEDED — the "Phase-3 leftovers" slice (S2)** | Deferred with the facades. The console can *issue* requests today (G2) and its own C4 CommandGateway is built (RBAC-gated `request()`), but no component *answers* a business verb yet. The `_bcast` listener (S1, once part of this slice) has **shipped**; still deferred: `ping` + `reload-config` + Flow-B `get-configuration`. 4 languages. |
 | **Panels (get-panel-asset, descriptor)** | **🖥 CONSOLE-SIDE + deferred lib part** | Descriptor renderer, `treeBrowser`/`signalGrid`, fallback ladder, content-addressed cache = console code (M10, parked). The lib part (`get-panel-asset` verb, manifest in `describe`) rides the Phase-5 describe slice. |
 | **FleetModel + miss-detection** | **🖥 CONSOLE-SIDE (by design — the platform's first)** | Timestamped LKV cache = the retain substitute (confirmed: retain stayed out, D9/M7). Cadence from `cfg` (G4), restart from `uptimeSecs` reset, UNREACHABLE from the bridge LWT (G5). |
 | **WsFanout / snapshot-then-deltas / CommandGateway / RBAC / audit / redaction-at-ingest** | **🖥 CONSOLE-SIDE** | As designed (§6). Lib-side redaction v1 already applied before the console ever sees `cfg` — console redaction is the second, console-owned layer. |
@@ -105,15 +106,14 @@ Two housekeeping notes first:
 
 ### 2.3 Headline: how much ggcommons work remains for the console
 
-**Required for console Phase 1 (priorities #1+#2): ONE small 4-language slice —**
+**Required for console Phase 1 (priorities #1+#2): ZERO — the one slice it needed has shipped.**
 
-- **S1 — the `_bcast` `republish-state`/`republish-cfg` listener** (device side). Already
-  specified (UNS-CANONICAL §4.3, deferred list; bridge P3‑4 explicitly calls it the missing
-  half — "published but answered by nobody"). Each library subscribes
-  `ecv1/{device}/_bcast/main/cmd/#` and, on `republish-state`/`republish-cfg` (with 0–2 s
-  jitter), re-fires the existing state keepalive / cfg publisher. Small, pure-logic,
-  gate-friendly. **This one slice simultaneously un-inerts the bridge's reconnect
-  rehydration** — one stone, two birds.
+- **S1 — the `_bcast` `republish-state`/`republish-cfg` listener** (device side) **— SHIPPED.**
+  Specified in UNS-CANONICAL §4.3, it landed in all four libraries (`RepublishListener` in
+  Java/Python/TS, `uns.rs` in Rust): each subscribes `ecv1/{device}/_bcast/main/cmd/#` and, on
+  `republish-state`/`republish-cfg` (0–2 s jitter, coalesced), re-fires the existing state
+  keepalive / cfg publisher. **This also un-inerted the bridge's reconnect rehydration** — the
+  broadcast the bridge fires on every site-reconnect rising edge is now answered.
 
 **Wanted soon after (Phase-1.5/2, still small): S2 — minimal Flow-B verb scaffolding**
 (`ping`, `reload-config`, Flow-B `get-configuration`) — the first `commands()` slice.
@@ -164,9 +164,10 @@ as the retain substitute — retain stayed deferred):
    known (G4). Thresholds stay D5: warn 2×, STALE 2.5×, OFFLINE 5×, tunable. Restart vs
    gap: `uptimeSecs` decrease ⇒ restart.
 3. **Late-join snapshot** — on console start (and per new device), publish
-   `republish-state` + `republish-cfg` per device; components answer with jitter **once S1
-   lands**. Until S1: convergence still happens via layer 1 within ~1 keepalive interval
-   for `state`; `cfg` of long-running components is the visible gap (G3).
+   `republish-state` + `republish-cfg` per device; components answer with jitter via the S1
+   `_bcast` listener (**now shipped in all four libs**). A rev-bumped fleet therefore
+   rehydrates `state`+`cfg` on demand; pre-rev-bump components still converge via layer 1
+   within ~1 keepalive interval for `state`, with `cfg` the visible gap (G3).
 4. **Whole-device UNREACHABLE** — the bridge's LWT raw `{"status":"UNREACHABLE"}` on
    `ecv1/{device}/uns-bridge/main/state` (fires on ungraceful *and* graceful bridge stop —
    render as truth). Freeze the device subtree, alarm containment (+N suppressed), as
@@ -193,26 +194,28 @@ Discipline mirrors the bridge: **every slice builds green + is tested before the
 the ggcommons TS lib (D6), Carbon/React frontend, shared `protocol` package as a hard
 contract. Local dev builds against the **sibling** `../ggcommons/libs/ts` (`file:` dep /
 workspace link — the `.cargo`-override precedent); switch to the pinned published package
-when `feat/unified-namespace` lands on `main` (same release-train posture as the bridge's
-held rev-pin bump).
+now that the UNS core is on `main` (v0.2.0) — the same release-train posture as the bridge,
+whose rev-pin is now `b1d8d85`.
 
 | Slice | Contents | Depends on | Test proof |
 |---|---|---|---|
-| **C0 — repo scaffold** | `edge-console` repo (currently a plain folder): npm workspace `server/` + `ui/` + `protocol/`; server scaffolded as a ggcommons TS component (config under `component.global.console`, G12); CI per `component-ci.yml`; gitignored sibling-lib link | org action: repo + registry entry (Q1) | builds green; lib link resolves; `GGCommons` boots against local EMQX |
-| **C1 — BusIngress + FleetModel core** ⟵ **THE FIRST BUILDABLE SLICE** | One `MessagingClient`; six `uns().filter()` subscriptions; normalizer (envelope + **raw/LWT path**, `identity`-keyed, `_relay`-aware); the hierarchical FleetModel (generic N-level tree from `identity.hier`, timestamped LKV per node); the staleness engine (injected clock: cfg-derived cadence, 2×/2.5×/5×, `uptimeSecs`-reset, UNREACHABLE from bridge state, 1 s sweeper); per-device `republish-*` broadcast on start | **sibling TS lib only — zero ggcommons changes** | unit: pure FleetModel/staleness over a fake messaging service (the lib's fake pattern), no sleeps; integration: against the bridge's **dual-EMQX rig** (`uns-bridge/tests/e2e` compose) + a scaffolded TS skeleton publishing real keepalives; kill the bridge → assert UNREACHABLE via LWT |
-| **C2 — WS gateway + protocol** | HTTP+WS server (`component.global.console`: port/bind/tls); scope subscribe → **snapshot-then-deltas** with sequence numbers; coalescing ≤ 4 Hz; per-socket backpressure; reconnect resync | C1 | protocol-level tests (mock socket): snapshot/delta ordering, coalesce, forced resync |
-| **C3 — Edge-health UI (priority #1)** | Carbon/React shell + Overview grouped by hierarchy level (rollups, containment), Components tree, Component detail (state, freshness, `metric/sys` charts, bridge drop-counter charts); UNS-shaped routes | C2 | vitest component tests + a live demo against the C1 rig; **this closes priority #1 with zero new ggcommons code** |
-| **G-S1 (ggcommons, parallel from C1 onward) — the `_bcast` republish listener** | 4-language: subscribe own `_bcast` inbox, jittered re-fire of state keepalive + cfg publisher; vectors/interop touch-up | ggcommons `feat/unified-namespace` | per-lang units under the 90 % gate; bridge e2e "disconnect/rehydrate" assertion flips from inert to green |
-| **C4 — CommandGateway** | WS command frames → RBAC (3 roles) → append-audit-before-dispatch → `uns().topicFor` + `request()` (per-verb timeouts ≤ 30 s) → Events mirror; per-device broadcast button ("refresh fleet") | C1; useful against real verbs once S2 lands (`ping` first) | unit: gateway state machine vs fake bus; e2e: round-trip through the real bridge reply-rewrite (the P3‑6 D-assertion pattern) |
-| **C5 — Config-review UI (priority #2)** | `cfg` cache + console-side redaction-at-ingest (second layer) + hash-based drift compare + schema-annotated view; "Refetch" = `republish-cfg` (per-device broadcast) | C2 + **G-S1** (for already-running components); Flow-B `get-configuration` (S2) upgrades per-component refetch later | e2e: change a skeleton's config → cfg re-announce → UI diff |
-| **C6 — Events & metrics screens** | `evt` feed (containment, ack), generic metrics tables/charts | C2 | rig e2e incl. bridge `evt` replay after `docker pause` (bridge D-B10 pattern) |
-| **C7 — FULL-SYSTEM TEST + deployment-validation gate** | The ecosystem proof the bridge README names as its own held item: CLI-scaffolded skeletons (all 4 languages, UNS rev) on a device broker + `uns-bridge` + site broker (ACL on, incl. the Q4 console stanza) + console; assert: fleet appears, staleness/UNREACHABLE transitions, config-review, command round-trip. Then the deployment matrix: HOST (dev box) → KUBERNETES (kind, single-replica + Ingress, M13) → GREENGRASS (lab-5950x; blocked on the bridge's IPC-primary follow-up — HOST-mode console against the lab's site broker in the interim) | C1–C6, G-S1 | scripted rig (bridge `run.sh` precedent), one command, printed per-assertion PASS/FAIL |
-| *(Phase 2)* | Descriptor-panel renderer + PanelRegistry (needs S3 describe/get-panel-asset), sb/* screens (needs M9), Site Topology view, OIDC, config push (D7 flag) | S2/S3/M9 | — |
+| ✅ **C0 — repo scaffold** | `edge-console` repo (currently a plain folder): npm workspace `server/` + `ui/` + `protocol/`; server scaffolded as a ggcommons TS component (config under `component.global.console`, G12); CI per `component-ci.yml`; gitignored sibling-lib link | org action: repo + registry entry (Q1) | builds green; lib link resolves; `GGCommons` boots against local EMQX |
+| ✅ **C1 — BusIngress + FleetModel core** | One `MessagingClient`; six `uns().filter()` subscriptions; normalizer (envelope + **raw/LWT path**, `identity`-keyed, `_relay`-aware); the hierarchical FleetModel (generic N-level tree from `identity.hier`, timestamped LKV per node); the staleness engine (injected clock: cfg-derived cadence, 2×/2.5×/5×, `uptimeSecs`-reset, UNREACHABLE from bridge state, 1 s sweeper); per-device `republish-*` broadcast on start | **sibling TS lib only — zero ggcommons changes** | unit: pure FleetModel/staleness over a fake messaging service (the lib's fake pattern), no sleeps; integration: against the bridge's **dual-EMQX rig** (`uns-bridge/tests/e2e` compose) + a scaffolded TS skeleton publishing real keepalives; kill the bridge → assert UNREACHABLE via LWT |
+| ✅ **C2 — WS gateway + protocol** | HTTP+WS server (`component.global.console`: port/bind/tls); scope subscribe → **snapshot-then-deltas** with sequence numbers; coalescing ≤ 4 Hz; per-socket backpressure; reconnect resync | C1 | protocol-level tests (mock socket): snapshot/delta ordering, coalesce, forced resync |
+| ✅ **C3 — Edge-health UI (priority #1)** | Carbon/React shell + Overview grouped by hierarchy level (rollups, containment), Components tree, Component detail (state, freshness, `metric/sys` charts, bridge drop-counter charts); UNS-shaped routes | C2 | vitest component tests + a live demo against the C1 rig; **this closes priority #1 with zero new ggcommons code** |
+| ✅ **G-S1 (ggcommons) — the `_bcast` republish listener — SHIPPED** | 4-language: subscribe own `_bcast` inbox, jittered re-fire of state keepalive + cfg publisher; vectors/interop touch-up | ggcommons `main` (v0.2.0, rev b1d8d85) | per-lang units under the 90 % gate; bridge e2e "disconnect/rehydrate" assertion no longer inert |
+| ✅ **C4 — CommandGateway** (built; audit log + IdP auth-seam deferred) | WS command frames → RBAC (config-driven allow/deny per verb, role resolved at the WS edge) → `uns().topicFor` + `request()` (per-verb timeouts ≤ 30 s) → `command-result`; per-device broadcast button ("refresh fleet"). **Shipped:** `server/src/command/{command-gateway,rbac}.ts`, RBAC enforced. **Deferred:** append-before-dispatch audit log; real IdP/identity wiring at the auth seam. | C1; useful against real verbs once S2 lands (`ping` first) | unit: gateway state machine vs fake bus; e2e: round-trip through the real bridge reply-rewrite (the P3‑6 D-assertion pattern) |
+| ✅ **C5 — Config-review UI (priority #2)** | `cfg` cache + console-side redaction-at-ingest (second layer) + hash-based drift compare + schema-annotated view; "Refetch" = `republish-cfg` (per-device broadcast) | C2 + **G-S1** (for already-running components); Flow-B `get-configuration` (S2) upgrades per-component refetch later | e2e: change a skeleton's config → cfg re-announce → UI diff |
+| ✅ **C6 — Events & metrics screens** | `evt` feed (containment, ack), generic metrics tables/charts | C2 | rig e2e incl. bridge `evt` replay after `docker pause` (bridge D-B10 pattern) |
+| ✅ **C7 — FULL-SYSTEM TEST + deployment-validation gate** (run + passed HOST → kind; GREENGRASS leg pending the bridge IPC variant) | The ecosystem proof the bridge README names as its own held item: CLI-scaffolded skeletons (all 4 languages, UNS rev) on a device broker + `uns-bridge` + site broker (ACL on, incl. the Q4 console stanza) + console; assert: fleet appears, staleness/UNREACHABLE transitions, config-review, command round-trip. Then the deployment matrix: HOST (dev box) → KUBERNETES (kind, single-replica + Ingress, M13) → GREENGRASS (lab-5950x; blocked on the bridge's IPC-primary follow-up — HOST-mode console against the lab's site broker in the interim) | C1–C6, G-S1 | scripted rig (bridge `run.sh` precedent), one command, printed per-assertion PASS/FAIL |
+| ⏳ *(Phase 2 — deferred)* | Descriptor-panel renderer + PanelRegistry (needs S3 describe/get-panel-asset), sb/* screens (needs M9), Site Topology view, OIDC, config push (D7 flag) | S2/S3/M9 | — |
 
-**First buildable slice: C1.** Its only dependency is the sibling TS lib as already shipped
-on `feat/unified-namespace` — **nothing must land in ggcommons first.** G-S1 is the single
-ggcommons work item to schedule in parallel (needed by C5 for full config-review value and
-by the bridge to make its rehydration real; C1–C4 don't wait on it).
+**Phase-1 status: C0–C7 are complete** (the full-system gate ran and passed HOST → kind; the
+GREENGRASS leg of the deployment matrix rides the uns-bridge's IPC-primary variant). The one
+ggcommons prerequisite, **G-S1, has shipped** (`RepublishListener` in all four libs, on ggcommons
+`main` at v0.2.0) — which both gives C5 its full config-review value for already-running
+components and makes the bridge's reconnect rehydration real. Phase 2 (descriptor panels, sb/*
+screens, Site Topology, OIDC, config push) remains deferred behind S2/S3/M9.
 
 ---
 
@@ -220,12 +223,12 @@ by the bridge to make its rehydration real; C1–C4 don't wait on it).
 
 | # | Question | Why it can't be resolved from docs+code |
 |---|---|---|
-| **Q1** | **Create `edgecommons/edge-console`** (git init the plain folder, GitHub repo, registry entry — `category: "console"`? platforms?) — the same org-action set as bridge D‑B6. Also: single repo with `server/`+`ui/`+`protocol/` workspaces (recommended, matches D6's shared-protocol note), or split repos? | Org/repo creation is a user action; the registry category is a naming call. |
-| **Q2** | **Schedule G-S1** (the 4-language `_bcast` republish listener) now, as the console's one library prerequisite — and decide whether **S2** (minimal Flow-B verbs: `ping`, `reload-config`, Flow-B `get-configuration`) rides the same train or waits. The canonical plan defers both to "Phase 3 leftovers / components phase"; the console (and the bridge's inert rehydration) make S1 concretely urgent. | Sequencing/priority call across two workstreams (library vs console), and it re-opens a deliberately-deferred item. |
+| **Q1** *(resolved)* | **`edgecommons/edge-console` created** — a single repo with `server/`+`ui/`+`protocol/` workspaces (the recommended shape, matching D6's shared-protocol note) and a `registry` entry. | — |
+| **Q2** *(resolved)* | **G-S1 shipped** — the 4-language `_bcast` republish listener landed on ggcommons `main` (v0.2.0), so the console's one library prerequisite is met and the bridge's rehydration is no longer inert. **S2** (minimal Flow-B verbs: `ping`, `reload-config`, Flow-B `get-configuration`) stays deferred to the "Phase-3 leftovers / components phase". | — |
 | **Q3** | **In-band cadence:** accept the console-side derivation (cadence from `cfg.heartbeat.intervalSecs`, restart from `uptimeSecs` reset — zero library change, recommended) or add `keepaliveSecs` (± `bootId`/`seq`) to the shipped `state` body (small 4-language change + golden-envelope vector regen)? | Changes a shipped, vector-pinned wire body; explicitly a user call per the no-divergence rule. |
 | **Q4** | **Site-broker ACL principal for the console** (§3): add the hybrid stanza (consumer grants + publish under its own `ecv1/{device}/#`) to `deploy/site-broker/acl.conf`? Alternative (suppress the console's own observability) contradicts "the console is a standard component". | Security-posture change to a shipped deploy artifact. |
 | **Q5** | **Tier 0 removal** (G9): confirm dropping the legacy-topic parser + the Tier-0 compliance tier from the console scope (pre-UNS components are invisible at the site broker anyway; rev-bump ⇒ Tier 1 free). | Removes a designed-in feature; cheap to keep only in the single-device edge case, but recommend deletion. |
-| **Q6** | **Release-train sequencing:** console Phase 1 builds against the sibling `feat/unified-namespace` lib. When does the UNS core merge to `main` (unblocking the bridge's rev-pin + the console's pinned dep + component adoption/rev-bumps that make a real fleet visible)? C7's full-system test can run entirely on sibling/local pins before that, but the *deployment-validation gate* (GG lab, k8s with published images) wants published artifacts. | Merge timing is the user's call (Actions budget, review). |
+| **Q6** *(resolved)* | **UNS core merged to `main`** (v0.2.0, rev b1d8d85) — unblocking the bridge's rev-pin (now `b1d8d85`), the console's pinned dep, and component rev-bumps that make a real fleet visible. The C7 full-system gate ran against that release. | — |
 | **Q7** | **GREENGRASS reach for Phase 1:** the bridge's IPC-primary variant is a held follow-up, so a GG device's traffic can't reach the site broker yet. Accept HOST+K8s as the Phase-1 console validation matrix (GG when the bridge variant lands), or pull the bridge's GG variant into scope alongside the console? | Scope/priority trade across repos. |
 
 ---
@@ -243,7 +246,8 @@ by the bridge to make its rehydration real; C1–C4 don't wait on it).
   bridge + late-join, §11 mandates), `DESIGN-uns-bridge.md` (D‑B1…D‑B15; §2.2 relay matrix;
   §4.4 ACL).
 - Bridge as-built: `uns-bridge/README.md` (three connections; relay/policy/reply/LWT
-  behavior; P3-status table; "Remaining release-time items" incl. the inert
-  `republish-*` broadcast and "edge-console as the first site-side client").
+  behavior; P3-status table; the "Release state & remaining follow-ups" section — GitHub
+  remote + rev-pin bump + the `republish-*` listener now shipped and the full-system test
+  run/passed; GREENGRASS/IPC-primary variant still deferred).
 - Console design under reconciliation: `edge-console/docs/DESIGN.md` v0.3 (+
   `mockups-hifi.html` for G8).

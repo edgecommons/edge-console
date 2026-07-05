@@ -14,9 +14,12 @@ from its `cfg` announcements). Design source of truth: `docs/DESIGN.md` (v0.3) r
 against the shipped UNS core in `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md`.
 
 **Status: slices C0 (scaffold) + C1 (BusIngress + FleetModel) + C2 (WS gateway) + C3
-(the edge-health UI — priority #1 closed, zero new ggcommons code) + C5 (config-review —
-priority #2 closed) + C6 (events & metrics screens).** CommandGateway (C4) and the
-full-system gate (C7) follow per the Phase-1 plan.
+(the edge-health UI — priority #1 closed, zero new ggcommons code) + C4 (CommandGateway —
+RBAC-gated `invoke-command` → request/reply) + C5 (config-review — priority #2 closed) +
+C6 (events & metrics screens) + C7 (the full-system UNS e2e — run and passed, HOST → kind).**
+The RBAC command core is built and enforced; the remaining Phase-1 auth work — the
+identity-provider wiring at the WS connect edge, plus the C4 append-before-dispatch audit
+log — is deferred by decision (see "The WS gateway").
 
 ## Workspace layout
 
@@ -97,10 +100,14 @@ on that SAME origin) fans the FleetModel's snapshot + delta stream out to browse
 - The fanout/resume/backpressure core (`server/src/ws/gateway.ts`) is pure and injects the
   client transport — the real `ws` sockets are a thin IO edge (`server/src/ws/ws-server.ts`),
   mirroring the BusIngress/FleetModel split.
-- **No auth in this slice** (the seam is marked with a `TODO` in `main.ts`/`ws-server.ts`):
-  the WS gateway is the sole browser↔bus bridge and today serves the full fleet snapshot +
-  live stream to anyone who can reach the bound port. Add a credential check at the WS
-  upgrade before exposing this beyond a trusted network.
+- **RBAC integrated; IdP/auth-seam wiring deferred.** The C4 command write path is
+  RBAC-gated: a config-driven `console.rbac` policy (allow/deny per verb, per role) is
+  **enforced** in the CommandGateway (`server/src/command/`), and `resolveRole` at the WS
+  upgrade edge assigns each connection a role. What remains — **deferred by decision** — is
+  real identity: wiring an identity provider (bearer/mTLS/OIDC) into that seam so `resolveRole`
+  maps a *verified* principal instead of the configured permissive default. Until then every
+  connection is the default role, and the read path (fleet snapshot + live stream) is
+  unauthenticated — so keep the bound port on a trusted network / terminate auth in front.
 
 ### Serving the console's own UI (`console.ws.webRoot`)
 
@@ -294,7 +301,7 @@ console pins a published `@edgecommons/ggcommons` release.
 | ~~C1~~ | ~~BusIngress + FleetModel core~~ |
 | ~~C2~~ | ~~HTTP+WS gateway: snapshot-then-deltas, resume-from-seq, per-client backpressure isolation~~ |
 | ~~C3~~ | ~~Edge-health UI (Carbon): the Overview screen — fleet health rollups, liveness/reachability live from the gateway (this slice; **closes priority #1**). Components tree + Component detail ride the C5/C6 screens.~~ |
-| C4 | CommandGateway: RBAC → audit → `uns().topicFor()` + `request()` (timeouts ≤ 30 s) |
-| ~~C5~~ | ~~Config-review UI (needs ggcommons G-S1 for already-running components) — **closes priority #2**~~ |
+| ~~C4~~ | ~~CommandGateway: RBAC (config-driven allow/deny per verb) → `uns().topicFor()` + `request()` (timeouts ≤ 30 s), RBAC-gated at the WS gateway~~ — **built**; the append-before-dispatch **audit log** and real IdP auth-seam wiring are still to come (deferred) |
+| ~~C5~~ | ~~Config-review UI (needs ggcommons G-S1 for already-running components — now shipped) — **closes priority #2**~~ |
 | ~~C6~~ | ~~Events & metrics screens: the `evt` rolling log (subscribe/stream) + generic metric latest-value/sparkline table~~ |
-| C7 | Full-system test + deployment-validation gate (HOST → kind; GG when the bridge's IPC variant lands) |
+| ~~C7~~ | ~~Full-system test~~ — **run and passed (HOST → kind)**; the GREENGRASS leg of the deployment-validation gate rides the uns-bridge's IPC-primary variant |
