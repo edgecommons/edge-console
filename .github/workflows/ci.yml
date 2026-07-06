@@ -30,10 +30,21 @@ jobs:
         with:
           node-version: "22"  # global WebSocket (used by the ws round-trip tests) is stable from Node 22
       - name: Build core TypeScript library
-        working-directory: .edgecommons-core
         run: |
-          npm install --no-audit --no-fund
-          npm run build -w @edgecommons/edgecommons
+          node - <<'NODE'
+          const fs = require("fs");
+          const pkgPath = ".edgecommons-core/libs/ts/package.json";
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          if (pkg.optionalDependencies) {
+            delete pkg.optionalDependencies["@edgecommons/streamlog-node"];
+            if (Object.keys(pkg.optionalDependencies).length === 0) {
+              delete pkg.optionalDependencies;
+            }
+          }
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+          NODE
+          npm install --no-audit --no-fund --omit=optional --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
+          npm run build --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
       - name: Link checked-out core TypeScript library
         env:
           EDGECOMMONS_TS_LIB: ${{ github.workspace }}/.edgecommons-core/libs/ts
