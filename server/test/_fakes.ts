@@ -40,27 +40,27 @@ export class FakeBus implements IMessagingService {
   async publish(topic: string, msg: Message): Promise<void> {
     this.published.push({ topic, message: msg });
   }
-  async publishToIoTCore(topic: string, msg: Message, _qos?: Qos): Promise<void> {
+  async publishNorthbound(topic: string, msg: Message, _qos?: Qos): Promise<void> {
     this.published.push({ topic, message: msg });
   }
   async publishRaw(topic: string, payload: unknown): Promise<void> {
     this.published.push({ topic, message: Message.raw(payload) });
   }
-  async publishToIoTCoreRaw(topic: string, payload: unknown, _qos?: Qos): Promise<void> {
+  async publishNorthboundRaw(topic: string, payload: unknown, _qos?: Qos): Promise<void> {
     this.published.push({ topic, message: Message.raw(payload) });
   }
 
   async subscribe(filter: string, handler: MessageHandler): Promise<void> {
     this.subscriptions.set(filter, handler);
   }
-  async subscribeToIoTCore(filter: string, handler: MessageHandler): Promise<void> {
+  async subscribeNorthbound(filter: string, handler: MessageHandler): Promise<void> {
     this.subscriptions.set(filter, handler);
   }
   async unsubscribe(filter: string): Promise<void> {
     this.unsubscribed.push(filter);
     this.subscriptions.delete(filter);
   }
-  async unsubscribeFromIoTCore(filter: string): Promise<void> {
+  async unsubscribeNorthbound(filter: string): Promise<void> {
     this.unsubscribed.push(filter);
     this.subscriptions.delete(filter);
   }
@@ -74,15 +74,15 @@ export class FakeBus implements IMessagingService {
     const promise = Promise.resolve().then(() => handler(topic, msg, timeoutMs));
     return new ReplyFuture(promise, () => undefined);
   }
-  requestFromIoTCore(topic: string, msg: Message, timeoutMs?: number): ReplyFuture {
+  requestNorthbound(topic: string, msg: Message, timeoutMs?: number): ReplyFuture {
     return this.request(topic, msg, timeoutMs);
   }
   async reply(): Promise<void> {}
-  async replyToIoTCore(): Promise<void> {}
+  async replyNorthbound(): Promise<void> {}
   cancelRequest(reply: ReplyFuture): void {
     reply.cancel();
   }
-  cancelRequestFromIoTCore(reply: ReplyFuture): void {
+  cancelRequestNorthbound(reply: ReplyFuture): void {
     reply.cancel();
   }
   connected(): boolean {
