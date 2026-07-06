@@ -163,6 +163,83 @@ function SignalRowView({
   );
 }
 
+function SignalCardView({
+  row,
+  nowServerMs,
+  onRead,
+}: {
+  row: SignalRow;
+  nowServerMs: number;
+  onRead: (key: ComponentKey, signal: string) => void;
+}): React.JSX.Element {
+  const ageMs = Math.max(0, nowServerMs - row.receivedAt);
+  return (
+    <article className="ec-card ec-signal-card" data-testid={`signal-card-${row.id}`}>
+      <div className="ec-card__head">
+        <div className="ec-card__title">
+          <span className="ec-pri">
+            {row.device} / {row.signal}
+          </span>
+          <span className="ec-dim ec-mono">
+            {row.component}
+            {row.instance !== "main" ? ` · ${row.instance}` : ""}
+          </span>
+        </div>
+        <QualityCell row={row} />
+      </div>
+      <dl className="ec-card__metrics">
+        <div className="ec-kv">
+          <dt>Latest</dt>
+          <dd className="ec-signal-latest">
+            {row.value !== undefined ? (
+              <span className="ec-tnum">{row.value}</span>
+            ) : (
+              <span className="ec-dim" title="no displayable value on the latest sample">
+                —
+              </span>
+            )}
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>Age</dt>
+          <dd>
+            <span className="ec-mono ec-tnum ec-dim" data-testid={`signal-card-age-${row.id}`}>
+              {formatUptimeShort(ageMs / 1000)}
+            </span>
+          </dd>
+        </div>
+        <div className="ec-kv ec-kv--wide">
+          <dt>Trend</dt>
+          <dd className="ec-signal-trend">
+            {row.series.length > 0 ? (
+              <Sparkline
+                points={row.series}
+                width={180}
+                height={36}
+                ariaLabel={`${row.signal} trend`}
+              />
+            ) : (
+              <span className="ec-dim" title="no numeric samples to plot">
+                —
+              </span>
+            )}
+          </dd>
+        </div>
+      </dl>
+      <div className="ec-card__actions">
+        <Button
+          kind="ghost"
+          size="sm"
+          data-testid={`signal-card-read-${row.id}`}
+          onClick={() => onRead(row.key, row.signal)}
+        >
+          Read
+        </Button>
+      </div>
+    </article>
+  );
+}
+
 export interface SignalsViewProps {
   state: ClientState;
   /** Client-clock ms (the 1 Hz tick) — drives the ticking Age cells. */
@@ -302,6 +379,16 @@ export function SignalsView({
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="ec-tablecards" data-testid="signals-card-list">
+                {filtered.map((row) => (
+                  <SignalCardView
+                    key={row.id}
+                    row={row}
+                    nowServerMs={nowServerMs}
+                    onRead={onRead}
+                  />
+                ))}
               </div>
             </TableContainer>
           )}

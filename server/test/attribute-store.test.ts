@@ -1,7 +1,7 @@
 /**
  * AttributeStore (R0): the runtime-attribute projection over the `metric` class — `sys`
- * cpu/memory/threads/fds and `southbound_health` connectionState/readErrors/writeErrors,
- * latest-wins per field, snapshot + live update fanout.
+ * CPU/memory/disk/threads/files/fds and `southbound_health`
+ * connectionState/readErrors/writeErrors, latest-wins per field, snapshot + live update fanout.
  */
 import { describe, expect, it } from "vitest";
 import type { ComponentKey, RuntimeAttributes } from "@edgecommons/edge-console-protocol";
@@ -44,12 +44,25 @@ describe("AttributeStore", () => {
     const updates: RuntimeAttributes[][] = [];
     store.onUpdate((u) => updates.push(u));
 
-    store.ingest(metricEvent("sys", { cpu: 22.5, memory: 180, threads: 12, fds: 40, coreName: "x", _aws: {} }));
+    store.ingest(
+      metricEvent("sys", {
+        cpu_usage: 22.5,
+        memory_usage: 180,
+        disk_total: 100,
+        disk_used: 40,
+        disk_free: 60,
+        threads: 12,
+        files: 8,
+        fds: 40,
+        coreName: "x",
+        _aws: {},
+      }),
+    );
     store.ingest(
       metricEvent("southbound_health", { connectionState: "CONNECTED", readErrors: 3, writeErrors: 0 }),
     );
     clock.tick(1000);
-    store.ingest(metricEvent("sys", { cpu: 41.1 })); // partial — only cpu updates
+    store.ingest(metricEvent("sys", { cpu_usage: 41.1 })); // partial — only cpu updates
 
     const snap = store.snapshot();
     expect(snap).toHaveLength(1);
@@ -57,7 +70,11 @@ describe("AttributeStore", () => {
       key: KEY,
       cpuPercent: 41.1, // latest-wins
       memoryMb: 180, // untouched by the partial update
+      diskTotalGb: 100,
+      diskUsedGb: 40,
+      diskFreeGb: 60,
       threads: 12,
+      openFiles: 8,
       fds: 40,
       connectionState: "CONNECTED",
       readErrors: 3,
@@ -72,8 +89,8 @@ describe("AttributeStore", () => {
     const clock = new TestClock();
     const store = new AttributeStore(clock.fn);
     store.ingest(metricEvent("relay_dropped_data", { dropped: 5 })); // not sys/southbound_health
-    store.ingest({ ...metricEvent("sys", { cpu: 1 }), cls: "data" }); // wrong class
-    store.ingest(metricEvent("sys", { cpu: "hot" })); // non-numeric → no change, no record
+    store.ingest({ ...metricEvent("sys", { cpu_usage: 1 }), cls: "data" }); // wrong class
+    store.ingest(metricEvent("sys", { cpu_usage: "hot" })); // non-numeric → no change, no record
     store.ingest(metricEvent("southbound_health", { connectionState: 5 })); // non-string → skipped
     expect(store.snapshot()).toHaveLength(0);
     expect(store.componentCount()).toBe(0);
@@ -82,8 +99,8 @@ describe("AttributeStore", () => {
   it("tracks multiple components and caps the total, counting overflow", () => {
     const clock = new TestClock();
     const store = new AttributeStore(clock.fn, { maxComponents: 1 });
-    store.ingest(metricEvent("sys", { cpu: 1 }, KEY));
-    store.ingest(metricEvent("sys", { cpu: 2 }, { device: "gw-02", component: "c", instance: "main" }));
+    store.ingest(metricEvent("sys", { cpu_usage: 1 }, KEY));
+    store.ingest(metricEvent("sys", { cpu_usage: 2 }, { device: "gw-02", component: "c", instance: "main" }));
     expect(store.componentCount()).toBe(1);
     expect(store.droppedComponents()).toBe(1);
   });
@@ -125,7 +142,7 @@ describe("AttributeStore — platform capture + cpu series (R1)", () => {
     const clock = new TestClock();
     const store = new AttributeStore(clock.fn, { maxCpuSeriesPoints: 3 });
     for (const cpu of [10, 20, 30, 40]) {
-      store.ingest(metricEvent("sys", { cpu }));
+      store.ingest(metricEvent("sys", { cpu_usage: cpu }));
       clock.tick(1000);
     }
     const snap = store.snapshot();
@@ -136,7 +153,7 @@ describe("AttributeStore — platform capture + cpu series (R1)", () => {
   it("does not add a cpu-series point when the sys body carries no numeric cpu", () => {
     const clock = new TestClock();
     const store = new AttributeStore(clock.fn);
-    store.ingest(metricEvent("sys", { memory: 100 })); // memory only, no cpu
+    store.ingest(metricEvent("sys", { memory_usage: 100 })); // memory only, no cpu
     expect(store.snapshot()[0]!.cpuSeries).toBeUndefined();
   });
 });

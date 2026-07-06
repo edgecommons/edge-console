@@ -201,6 +201,83 @@ function ComponentRow({
   );
 }
 
+function ComponentCard({
+  comp,
+  attrs,
+  nowServerMs,
+  command,
+}: {
+  comp: ComponentView;
+  attrs?: RuntimeAttributes;
+  nowServerMs: number;
+  command: FleetTableCommandProps;
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <article className="ec-card ec-fleet-card" data-testid={`component-card-${comp.id}`}>
+      <div className="ec-card__head">
+        <StatusTag liveness={comp.liveness} />
+        <div className="ec-card__title">
+          <span className="ec-pri">{comp.key.component}</span>
+          <span className="ec-dim ec-mono">{comp.key.device}</span>
+        </div>
+        <button
+          type="button"
+          className="ec-ctrl-toggle ec-card__action"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Hide" : "Show"} controls for ${comp.key.component}`}
+          data-testid={`controls-card-toggle-${comp.id}`}
+          onClick={() => setExpanded((e) => !e)}
+        >
+          <Settings size={16} />
+          <span className="ec-ctrl-toggle__label">Controls</span>
+        </button>
+      </div>
+      <dl className="ec-card__metrics">
+        <div className="ec-kv">
+          <dt>Heartbeat</dt>
+          <dd>
+            <HeartbeatCell comp={comp} nowServerMs={nowServerMs} />
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>CPU</dt>
+          <dd>
+            <CpuCell attrs={attrs} component={comp.key.component} />
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>Memory</dt>
+          <dd>
+            {attrs?.memoryMb !== undefined ? (
+              <span className="ec-tnum">{Math.round(attrs.memoryMb)} MB</span>
+            ) : (
+              <Dash />
+            )}
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>Conn</dt>
+          <dd>
+            <ConnCell attrs={attrs} />
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>Capabilities</dt>
+          <dd>
+            <Dash testid={`capabilities-card-${comp.id}`} />
+          </dd>
+        </div>
+      </dl>
+      {expanded && (
+        <div className="ec-card__detail" data-testid={`controls-card-detail-${comp.id}`}>
+          <CommandControls comp={comp} commands={command.commands} onInvoke={command.onInvoke} />
+        </div>
+      )}
+    </article>
+  );
+}
+
 /** Pretty platform label for the group annotation (mockup: `HOST` / `Greengrass`). */
 function platformLabel(platform: string): string {
   switch (platform.toUpperCase()) {
@@ -313,6 +390,69 @@ function GroupRows({
   );
 }
 
+function GroupCards({
+  node,
+  attributes,
+  nowServerMs,
+  command,
+  containedByDevice,
+  platformByDevice,
+}: {
+  node: GroupNode;
+  attributes: AttributesView;
+  nowServerMs: number;
+  command: FleetTableCommandProps;
+  containedByDevice: Record<string, number>;
+  platformByDevice: Record<string, string>;
+}): React.JSX.Element {
+  const [collapsed, setCollapsed] = useState(false);
+  const contained = node.devices.reduce((n, d) => n + (containedByDevice[d] ?? 0), 0);
+  return (
+    <section className="ec-card-group" data-testid={`card-group-${node.key}`}>
+      <button
+        type="button"
+        className="ec-card-group__toggle"
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${node.level} ${node.value}`}
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        <span className="ec-card-group__label">
+          {node.level.toUpperCase()} · <span className="ec-mono">{node.value}</span>
+        </span>
+        <RollupTag level={node.rollup} />
+        <span className="ec-dim ec-card-group__summary">
+          {groupSummary(node, nowServerMs, contained, platformByDevice)}
+        </span>
+      </button>
+      {!collapsed && (
+        <div className="ec-card-group__body">
+          {node.children.map((child) => (
+            <GroupCards
+              key={child.key}
+              node={child}
+              attributes={attributes}
+              nowServerMs={nowServerMs}
+              command={command}
+              containedByDevice={containedByDevice}
+              platformByDevice={platformByDevice}
+            />
+          ))}
+          {node.components.map((comp) => (
+            <ComponentCard
+              key={comp.id}
+              comp={comp}
+              attrs={attributes.byId[comp.id]}
+              nowServerMs={nowServerMs}
+              command={command}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function FleetTable({
   grouping,
   attributes,
@@ -354,6 +494,19 @@ export function FleetTable({
             ))}
           </TableBody>
         </Table>
+      </div>
+      <div className="ec-tablecards" data-testid="fleet-card-list">
+        {grouping.groups.map((node) => (
+          <GroupCards
+            key={node.key}
+            node={node}
+            attributes={attributes}
+            nowServerMs={nowServerMs}
+            command={command}
+            containedByDevice={containedByDevice}
+            platformByDevice={platformByDevice}
+          />
+        ))}
       </div>
     </TableContainer>
   );

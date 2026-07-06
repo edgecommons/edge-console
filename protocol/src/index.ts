@@ -36,8 +36,9 @@
  *  - the DATA-plane `signals` family — client `subscribe-signals`/`unsubscribe-signals`,
  *    server `signals`/`signal` (the UNS `data` class, which was ingested then discarded);
  *  - the management-plane runtime `attributes` family — client `subscribe-attributes`/
- *    `unsubscribe-attributes`, server `attributes`/`attribute` (latest `sys.*` cpu/mem/
- *    threads + adapter `southbound_health` connection state, projected off the metric class);
+ *    `unsubscribe-attributes`, server `attributes`/`attribute` (latest `sys.*` CPU/memory/
+ *    disk/threads/files/fds + adapter `southbound_health` connection state, projected off
+ *    the metric class);
  *  - the console-side `alarms` family — client `subscribe-alarms`/`unsubscribe-alarms`/
  *    `ack-alarm`, server `alarms` (an `evt`-driven raise/clear alarm state machine with
  *    device-UNREACHABLE containment and console-side ack);
@@ -513,23 +514,31 @@ export function extractSignalSample(body: unknown): { value: unknown; quality?: 
  * R0 — runtime ATTRIBUTES (management plane): the latest per-component operational
  * facts the Overview columns (R1) and the Component Detail Health tab (R2) render.
  *
- * These are the `sys.*` heartbeat measures (cpu / memory / threads / fds) plus the
- * adapter `southbound_health` connection state (`connectionState` + `readErrors` /
- * `writeErrors`) — a PROJECTION over the same `metric`-class ingest that feeds the
- * MetricStore (repurposed, not a new emission). Every field is optional: a component
- * that never published a given measure simply omits it (the UI shows "—").
+ * These are the `sys` heartbeat measures (cpu_usage / memory_usage / disk_* / threads /
+ * files / fds) plus the adapter `southbound_health` connection state (`connectionState` +
+ * `readErrors` / `writeErrors`) — a PROJECTION over the same `metric`-class ingest that
+ * feeds the MetricStore (repurposed, not a new emission). Every field is optional: a
+ * component that never published a given measure simply omits it (the UI shows "—").
  * --------------------------------------------------------------------------- */
 
 /** The latest runtime attributes for one component (all fields optional; latest-wins per field). */
 export interface RuntimeAttributes {
   key: ComponentKey;
-  /** `sys` cpu measure (percent). */
+  /** `sys.cpu_usage` measure (percent). */
   cpuPercent?: number;
-  /** `sys` memory measure (whatever unit the component emits — MB by convention). */
+  /** `sys.memory_usage` measure (MB). */
   memoryMb?: number;
-  /** `sys` threads measure. */
+  /** `sys.disk_total` measure (GB). */
+  diskTotalGb?: number;
+  /** `sys.disk_used` measure (GB). */
+  diskUsedGb?: number;
+  /** `sys.disk_free` measure (GB). */
+  diskFreeGb?: number;
+  /** `sys.threads` measure. */
   threads?: number;
-  /** `sys` open file descriptors measure. */
+  /** `sys.files` measure (open files). */
+  openFiles?: number;
+  /** `sys.fds` measure (open file descriptors/handles). */
   fds?: number;
   /** Southbound connection state string (`southbound_health` body `connectionState`). */
   connectionState?: string;

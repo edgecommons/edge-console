@@ -4,6 +4,7 @@ dist/
 coverage/
 logs/
 *.log
+test-artifacts/
 
 # The local sibling-library link (the npm analog of the bridge's gitignored
 # .cargo/config.toml paths override): `npm run link:lib` generates local/edgecommons,

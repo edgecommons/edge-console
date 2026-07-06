@@ -14,12 +14,22 @@ describe("AttributeStore (browser fold)", () => {
   it("replaces the whole surface on a snapshot", () => {
     const store = new AttributeStore();
     store.applySnapshot([
-      runtimeAttrs(key("gw-01", "opcua-adapter"), { cpuPercent: 12, memoryMb: 210, connectionState: "CONNECTED" }),
+      runtimeAttrs(key("gw-01", "opcua-adapter"), {
+        cpuPercent: 12,
+        memoryMb: 210,
+        diskTotalGb: 100,
+        diskUsedGb: 40,
+        diskFreeGb: 60,
+        openFiles: 8,
+        connectionState: "CONNECTED",
+      }),
       runtimeAttrs(key("gw-01", "modbus-adapter"), { cpuPercent: 18 }),
     ]);
     const v = store.view();
     expect(Object.keys(v.byId)).toHaveLength(2);
     expect(v.byId[componentKeyId(key("gw-01", "opcua-adapter"))]!.cpuPercent).toBe(12);
+    expect(v.byId[componentKeyId(key("gw-01", "opcua-adapter"))]!.diskFreeGb).toBe(60);
+    expect(v.byId[componentKeyId(key("gw-01", "opcua-adapter"))]!.openFiles).toBe(8);
     expect(store.get(key("gw-01", "modbus-adapter"))!.cpuPercent).toBe(18);
     expect(store.get(key("gw-01", "missing"))).toBeUndefined();
 

@@ -46,8 +46,8 @@ function emfBody(cpu: number, memory: number): Record<string, unknown> {
     coreName: "gw-01",
     category: "sys",
     component: "opcua-adapter",
-    cpu,
-    memory,
+    cpu_usage: cpu,
+    memory_usage: memory,
     _aws: { Timestamp: 1, CloudWatchMetrics: [] }, // metadata — never a measure
   };
 }
@@ -55,8 +55,8 @@ function emfBody(cpu: number, memory: number): Record<string, unknown> {
 describe("extractMeasures", () => {
   it("folds top-level finite numbers, skipping strings and _-prefixed keys", () => {
     expect(extractMeasures(emfBody(12.5, 41))).toEqual([
-      ["cpu", 12.5],
-      ["memory", 41],
+      ["cpu_usage", 12.5],
+      ["memory_usage", 41],
     ]);
   });
 
@@ -93,11 +93,11 @@ describe("MetricStore - folding", () => {
     store.ingest(metricEvent("sys", emfBody(20, 41)));
 
     const snap = store.snapshot();
-    expect(snap).toHaveLength(2); // cpu + memory
+    expect(snap).toHaveLength(2); // cpu_usage + memory_usage
     expect(snap[0]).toMatchObject({
       key: KEY,
       metric: "sys",
-      measure: "cpu",
+      measure: "cpu_usage",
       latest: 20,
       receivedAt: 1_005_000,
       sourceTimestamp: "2026-07-03T00:00:00.000Z",
@@ -106,7 +106,7 @@ describe("MetricStore - folding", () => {
       { at: 1_000_000, value: 10 },
       { at: 1_005_000, value: 20 },
     ]);
-    expect(snap[1]).toMatchObject({ measure: "memory", latest: 41 });
+    expect(snap[1]).toMatchObject({ measure: "memory_usage", latest: 41 });
   });
 
   it("bounds each series to maxSeriesPoints, dropping the oldest", () => {
@@ -124,7 +124,7 @@ describe("MetricStore - folding", () => {
   it("caps distinct series (drop + count new ones; existing keep updating)", () => {
     const clock = new TestClock();
     const store = new MetricStore(clock.fn, { maxSeries: 2 });
-    store.ingest(metricEvent("sys", emfBody(1, 2))); // cpu + memory = the 2 slots
+    store.ingest(metricEvent("sys", emfBody(1, 2))); // cpu_usage + memory_usage = the 2 slots
     store.ingest(metricEvent("extra", 1)); // over the cap — dropped
     store.ingest(metricEvent("sys", emfBody(3, 4))); // existing series still update
 
@@ -142,8 +142,8 @@ describe("MetricStore - folding", () => {
 
     expect(store.snapshot().map((s) => `${s.key.device}/${s.metric}/${s.measure}`)).toEqual([
       "aa-gw/relay_dropped/value",
-      "gw-01/sys/cpu",
-      "gw-01/sys/memory",
+      "gw-01/sys/cpu_usage",
+      "gw-01/sys/memory_usage",
     ]);
   });
 
@@ -177,7 +177,7 @@ describe("MetricStore - update fanout", () => {
         key: KEY,
         instance: "main",
         metric: "sys",
-        measure: "cpu",
+        measure: "cpu_usage",
         point: { at: 1_000_000, value: 10 },
         sourceTimestamp: "2026-07-03T00:00:00.000Z",
       },
@@ -185,7 +185,7 @@ describe("MetricStore - update fanout", () => {
         key: KEY,
         instance: "main",
         metric: "sys",
-        measure: "memory",
+        measure: "memory_usage",
         point: { at: 1_000_000, value: 40 },
         sourceTimestamp: "2026-07-03T00:00:00.000Z",
       },

@@ -156,7 +156,7 @@ describe("FleetWsGateway - subscribe-events", () => {
 describe("FleetWsGateway - subscribe-metrics", () => {
   it("answers the latest+series snapshot and streams later sample batches", () => {
     const { clock, metrics, gateway } = rig();
-    metrics.ingest(metricEvent("sys", { cpu: 10, memory: 40 }));
+    metrics.ingest(metricEvent("sys", { cpu_usage: 10, memory_usage: 40 }));
     clock.tick(5000);
 
     const { t, session } = connectReady(gateway, "c1");
@@ -165,16 +165,16 @@ describe("FleetWsGateway - subscribe-metrics", () => {
     const snap = t.messages().at(-1)!;
     expect(snap.type).toBe("metrics");
     if (snap.type !== "metrics") throw new Error("unreachable");
-    expect(snap.series.map((s) => s.measure)).toEqual(["cpu", "memory"]);
+    expect(snap.series.map((s) => s.measure)).toEqual(["cpu_usage", "memory_usage"]);
     expect(snap.series[0]).toMatchObject({ metric: "sys", latest: 10 });
 
-    metrics.ingest(metricEvent("sys", { cpu: 22, memory: 41 }));
+    metrics.ingest(metricEvent("sys", { cpu_usage: 22, memory_usage: 41 }));
     const push = t.messages().at(-1)!;
     expect(push).toMatchObject({
       type: "metric",
       updates: [
-        { metric: "sys", measure: "cpu", point: { at: 1_005_000, value: 22 } },
-        { metric: "sys", measure: "memory", point: { at: 1_005_000, value: 41 } },
+        { metric: "sys", measure: "cpu_usage", point: { at: 1_005_000, value: 22 } },
+        { metric: "sys", measure: "memory_usage", point: { at: 1_005_000, value: 41 } },
       ],
     });
   });
@@ -186,13 +186,13 @@ describe("FleetWsGateway - subscribe-metrics", () => {
     a.session.onMessage(frame({ type: "subscribe-metrics" }));
 
     const bBefore = b.t.sent.length;
-    metrics.ingest(metricEvent("sys", { cpu: 1 }));
+    metrics.ingest(metricEvent("sys", { cpu_usage: 1 }));
     expect(a.t.messages().at(-1)!.type).toBe("metric");
     expect(b.t.sent.length).toBe(bBefore);
 
     a.session.onMessage(frame({ type: "unsubscribe-metrics" }));
     const aAfter = a.t.sent.length;
-    metrics.ingest(metricEvent("sys", { cpu: 2 }));
+    metrics.ingest(metricEvent("sys", { cpu_usage: 2 }));
     expect(a.t.sent.length).toBe(aAfter);
   });
 });

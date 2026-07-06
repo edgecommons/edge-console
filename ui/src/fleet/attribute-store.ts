@@ -1,8 +1,9 @@
 /**
  * AttributeStore (browser) — the pure fold core for the R0 `attributes`/`attribute`
  * frames, the client-side mirror of the server AttributeStore: the latest per-component
- * runtime facts (cpu / memory / threads / fds + the adapter southbound connection state)
- * that the Overview columns (R1) and the Component Detail Health tab (R2) render.
+ * runtime facts (cpu / memory / disk / threads / files / fds + the adapter southbound
+ * connection state) that the Overview columns (R1) and the Component Detail Health tab
+ * (R2) render.
  *
  * No IO, no clock reads; the {@link FleetClient} feeds it the `attributes` snapshot (a
  * full replace of every known component) and each `attribute` push (a latest-wins per

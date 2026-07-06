@@ -1,8 +1,8 @@
 /**
  * AttributeStore — the console's runtime-ATTRIBUTES surface (slice R0): the latest
  * per-component operational facts the Overview columns (R1) and the Component Detail
- * Health tab (R2) render — CPU / memory / threads / fds and the adapter southbound
- * connection state.
+ * Health tab (R2) render — CPU / memory / disk / threads / files / fds and the adapter
+ * southbound connection state.
  *
  * This is a PROJECTION over the same `metric`-class ingest that feeds the MetricStore
  * (the metric data path repurposed, not a new emission): the library's `sys` heartbeat
@@ -46,7 +46,11 @@ interface AttrState {
   key: ComponentKey;
   cpuPercent?: number;
   memoryMb?: number;
+  diskTotalGb?: number;
+  diskUsedGb?: number;
+  diskFreeGb?: number;
   threads?: number;
+  openFiles?: number;
   fds?: number;
   connectionState?: string;
   readErrors?: number;
@@ -73,13 +77,28 @@ function asObject(body: unknown): Record<string, unknown> | undefined {
  * The `sys` measure fields we project as process attributes (measure name → attribute
  * field). Any not present in the body is left untouched (latest-wins per field).
  */
-const SYS_FIELDS: Array<[string, keyof Pick<AttrState, "cpuPercent" | "memoryMb" | "threads" | "fds">]> =
-  [
-    ["cpu", "cpuPercent"],
-    ["memory", "memoryMb"],
-    ["threads", "threads"],
-    ["fds", "fds"],
-  ];
+type SysAttrField = keyof Pick<
+  AttrState,
+  | "cpuPercent"
+  | "memoryMb"
+  | "diskTotalGb"
+  | "diskUsedGb"
+  | "diskFreeGb"
+  | "threads"
+  | "openFiles"
+  | "fds"
+>;
+
+const SYS_FIELDS: Array<[string, SysAttrField]> = [
+  ["cpu_usage", "cpuPercent"],
+  ["memory_usage", "memoryMb"],
+  ["disk_total", "diskTotalGb"],
+  ["disk_used", "diskUsedGb"],
+  ["disk_free", "diskFreeGb"],
+  ["threads", "threads"],
+  ["files", "openFiles"],
+  ["fds", "fds"],
+];
 
 /** The runtime-attributes projection: `metric` ingest tee + latest-wins + snapshot/update fanout. */
 export class AttributeStore {
@@ -131,7 +150,7 @@ export class AttributeStore {
           const n = finiteNumber(body[measure]);
           if (n !== undefined) patch[field] = n;
         }
-        cpuSample = finiteNumber(body.cpu);
+        cpuSample = finiteNumber(body.cpu_usage);
       } else {
         // southbound_health: a connection-state string + cumulative error counters.
         if (typeof body.connectionState === "string") patch.connectionState = body.connectionState;
@@ -204,7 +223,11 @@ function attributesOf(s: AttrState): RuntimeAttributes {
     key: { ...s.key },
     ...(s.cpuPercent !== undefined ? { cpuPercent: s.cpuPercent } : {}),
     ...(s.memoryMb !== undefined ? { memoryMb: s.memoryMb } : {}),
+    ...(s.diskTotalGb !== undefined ? { diskTotalGb: s.diskTotalGb } : {}),
+    ...(s.diskUsedGb !== undefined ? { diskUsedGb: s.diskUsedGb } : {}),
+    ...(s.diskFreeGb !== undefined ? { diskFreeGb: s.diskFreeGb } : {}),
     ...(s.threads !== undefined ? { threads: s.threads } : {}),
+    ...(s.openFiles !== undefined ? { openFiles: s.openFiles } : {}),
     ...(s.fds !== undefined ? { fds: s.fds } : {}),
     ...(s.connectionState !== undefined ? { connectionState: s.connectionState } : {}),
     ...(s.readErrors !== undefined ? { readErrors: s.readErrors } : {}),

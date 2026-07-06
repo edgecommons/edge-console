@@ -126,7 +126,7 @@ describe("FleetWsGateway - subscribe-signals (R0 data plane)", () => {
 describe("FleetWsGateway - subscribe-attributes (R0)", () => {
   it("answers the snapshot and streams attribute updates", () => {
     const { attributes, gateway } = rig();
-    attributes.ingest(envelope("metric", "sys", { cpu: 22, memory: 180 }));
+    attributes.ingest(envelope("metric", "sys", { cpu_usage: 22, memory_usage: 180 }));
 
     const { t, session } = connectReady(gateway, "c1");
     session.onMessage(frame({ type: "subscribe-attributes" }));
@@ -135,12 +135,12 @@ describe("FleetWsGateway - subscribe-attributes (R0)", () => {
     if (snap.type !== "attributes") throw new Error("unreachable");
     expect(snap.components[0]).toMatchObject({ cpuPercent: 22, memoryMb: 180 });
 
-    attributes.ingest(envelope("metric", "sys", { cpu: 40 }));
+    attributes.ingest(envelope("metric", "sys", { cpu_usage: 40 }));
     expect(t.messages().at(-1)).toMatchObject({ type: "attribute", updates: [{ cpuPercent: 40 }] });
 
     session.onMessage(frame({ type: "unsubscribe-attributes" }));
     const after = t.sent.length;
-    attributes.ingest(envelope("metric", "sys", { cpu: 50 }));
+    attributes.ingest(envelope("metric", "sys", { cpu_usage: 50 }));
     expect(t.sent.length).toBe(after);
   });
 });

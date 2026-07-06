@@ -40,6 +40,12 @@ import { SearchContext } from "./shell/search";
 import type { SearchState } from "./shell/search";
 import { useTheme } from "./shell/theme";
 
+const PERSISTENT_NAV_QUERY = "(min-width: 66rem)";
+
+function hasPersistentNav(): boolean {
+  return typeof window === "undefined" ? true : window.matchMedia(PERSISTENT_NAV_QUERY).matches;
+}
+
 /** The shell's view routes (one per shipped screen; `detail` is the Components sub-screen). */
 type Route =
   | "overview"
@@ -59,7 +65,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const [theme, toggleTheme] = useTheme();
   const [route, setRoute] = useState<Route>("overview");
   const [query, setQuery] = useState("");
-  const [navExpanded, setNavExpanded] = useState(true);
+  const [navExpanded, setNavExpanded] = useState(() => hasPersistentNav());
   // The Component Detail target (set by the Components screen / a detail link), and the
   // component the Configuration screen should open pre-selected (set by a detail "View config").
   const [detailKey, setDetailKey] = useState<ComponentKey | undefined>(undefined);
@@ -81,6 +87,15 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
     setRoute("signals");
   };
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(PERSISTENT_NAV_QUERY);
+    const syncNav = () => setNavExpanded(media.matches);
+    syncNav();
+    media.addEventListener("change", syncNav);
+    return () => media.removeEventListener("change", syncNav);
+  }, []);
+
   // The notifications badge + the Overview columns are global — subscribe the alarm and
   // runtime-attribute surfaces once on connect (server-side interest is per-connection; a
   // fresh snapshot on reconnect self-heals).
@@ -99,6 +114,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
     // The side rail opens Signals fleet-wide (a Component-Detail deep-link scopes it instead).
     if (to === "signals") setSignalsScope(undefined);
     setRoute(to);
+    if (!hasPersistentNav()) setNavExpanded(false);
   };
 
   return (
