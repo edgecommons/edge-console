@@ -317,8 +317,8 @@ export class FleetClient {
 
   /**
    * Subscribe to the runtime-attribute surface (R0 `subscribe-attributes`): one replace
-   * `attributes` snapshot (every known component's latest cpu/mem/threads/fds + conn
-   * state) arrives immediately, then each later change as an `attribute` push. The
+   * `attributes` snapshot (every known component's latest cpu/mem/disk/threads/files/fds
+   * + conn state) arrives immediately, then each later change as an `attribute` push. The
    * Overview subscribes on connect (the CPU/Memory/Conn columns are always shown);
    * server-side interest is per-connection, so the owning view re-subscribes whenever
    * the connection comes (back) up — the same reconnect story as the others.

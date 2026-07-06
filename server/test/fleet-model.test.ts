@@ -84,7 +84,7 @@ describe("FleetModel - discovery + LKV cache", () => {
     clock.tick(500);
     model.ingest(env({ cls: "data", channel: "temp", body: { v: 2 } }));
     model.ingest(env({ cls: "data", channel: "pressure", body: { v: 9 } }));
-    model.ingest(env({ cls: "metric", channel: "sys", body: { cpu: 0.2 } }));
+    model.ingest(env({ cls: "metric", channel: "sys", body: { cpu_usage: 0.2 } }));
 
     const comp = model.snapshot().devices[0]!.components[0]!;
     expect(comp.values).toHaveLength(3);
@@ -212,7 +212,7 @@ describe("FleetModel - miss-detection ladder (warn 2x / stale 2.5x / offline 5x)
   it("degrades a component that never sent state from its discovery time (honest 'missing')", () => {
     const clock = new TestClock();
     const model = new FleetModel(clock.fn);
-    model.ingest(env({ cls: "metric", channel: "sys", body: { cpu: 0.1 } }));
+    model.ingest(env({ cls: "metric", channel: "sys", body: { cpu_usage: 0.1 } }));
     const before = model.snapshot().devices[0]!.components[0]!;
     expect(before.liveness).toBe("FRESH");
     expect(before.status).toBeUndefined();
@@ -300,7 +300,7 @@ describe("FleetModel - whole-device UNREACHABLE (bridge LWT, G5)", () => {
     model.ingest(unreachable());
 
     // Cached (still useful data) but NOT a reachability proof.
-    const metricDeltas = model.ingest(env({ cls: "metric", channel: "sys", body: { cpu: 0.5 } }));
+    const metricDeltas = model.ingest(env({ cls: "metric", channel: "sys", body: { cpu_usage: 0.5 } }));
     expect(types(metricDeltas)).toEqual(["value-updated"]);
     expect(model.snapshot().devices[0]!.unreachable).toBe(true);
 

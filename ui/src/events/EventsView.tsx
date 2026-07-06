@@ -289,6 +289,88 @@ function FeedRowView({
   );
 }
 
+function FeedCardView({
+  row,
+  nowServerMs,
+  expanded,
+  ackAudit,
+  onToggle,
+  onAck,
+}: {
+  row: FeedRow;
+  nowServerMs: number;
+  expanded: boolean;
+  ackAudit: AckAudit;
+  onToggle: (id: string) => void;
+  onAck: (alarmId: string) => void;
+}): React.JSX.Element {
+  return (
+    <article className={`ec-card ec-feed-card${row.kind === "alarm" ? " ec-feed-card--alarm" : ""}`} data-testid={`feed-card-${row.id}`}>
+      <div className="ec-card__head">
+        <FeedSeverityTag row={row} />
+        <div className="ec-card__title">
+          <span className="ec-pri">{row.title}</span>
+          <span className="ec-dim ec-mono">
+            {row.key.device} · {row.key.component}
+          </span>
+        </div>
+        <FeedStateCell row={row} />
+      </div>
+      {row.summary !== "" && <p className="ec-card__summary ec-dim">{row.summary}</p>}
+      <dl className="ec-card__metrics">
+        <div className="ec-kv">
+          <dt>Time</dt>
+          <dd>
+            <span className="ec-mono ec-tnum">{formatClockTime(row.at)}</span>{" "}
+            <span className="ec-dim ec-tnum">
+              {formatDurationMs(Math.max(0, nowServerMs - row.at))} ago
+            </span>
+          </dd>
+        </div>
+        <div className="ec-kv">
+          <dt>Source</dt>
+          <dd>
+            <span className="ec-pri">{row.key.component}</span>
+            {row.instance !== undefined && row.instance !== "main" && (
+              <Tag size="sm" type="outline" className="ec-instance">
+                {row.instance}
+              </Tag>
+            )}
+          </dd>
+        </div>
+      </dl>
+      <div className="ec-card__actions">
+        {row.ackable && row.alarm !== undefined && (
+          <Button
+            kind="ghost"
+            size="sm"
+            data-testid={`ack-card-${row.alarm.id}`}
+            onClick={() => onAck(row.alarm!.id)}
+          >
+            Ack
+          </Button>
+        )}
+        <button
+          type="button"
+          className="ec-evt-expand"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${row.id} detail`}
+          data-testid={`feed-card-expand-${row.id}`}
+          onClick={() => onToggle(row.id)}
+        >
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <span>{expanded ? "Hide detail" : "Show detail"}</span>
+        </button>
+      </div>
+      {expanded && (
+        <div className="ec-card__detail" data-testid={`feed-card-detail-${row.id}`}>
+          <FeedDetail row={row} ackAudit={ackAudit} />
+        </div>
+      )}
+    </article>
+  );
+}
+
 export interface EventsViewProps {
   state: ClientState;
   /** Client-clock ms (the 1 Hz tick) — drives the ticking age cells. */
@@ -312,8 +394,16 @@ export function EventsView({
   const { events, alarms, status, fatalError } = state;
   const nowServerMs = now - state.fleet.clockOffsetMs;
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
+  const [expandedCardIds, setExpandedCardIds] = useState<ReadonlySet<string>>(new Set());
   const toggle = (id: string) =>
     setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleCard = (id: string) =>
+    setExpandedCardIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -497,6 +587,19 @@ export function EventsView({
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="ec-tablecards" data-testid="events-card-list">
+                {filtered.map((row) => (
+                  <FeedCardView
+                    key={row.id}
+                    row={row}
+                    nowServerMs={nowServerMs}
+                    expanded={expandedCardIds.has(row.id)}
+                    ackAudit={ackAudit}
+                    onToggle={toggleCard}
+                    onAck={onAck}
+                  />
+                ))}
               </div>
             </TableContainer>
           )}

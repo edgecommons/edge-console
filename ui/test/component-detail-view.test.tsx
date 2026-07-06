@@ -57,7 +57,11 @@ function detailState(overrides = {}) {
         runtimeAttrs(DKEY, {
           cpuPercent: 22,
           memoryMb: 210,
+          diskTotalGb: 100,
+          diskUsedGb: 42,
+          diskFreeGb: 58,
           threads: 24,
+          openFiles: 14,
           fds: 96,
           connectionState: "CONNECTED",
           platform: "HOST",
@@ -122,7 +126,9 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     const tiles = screen.getByTestId("health-tiles");
     expect(within(tiles).getByText("22%")).toBeTruthy();
     expect(within(tiles).getByText("210", { exact: false })).toBeTruthy();
-    expect(within(tiles).getByText("24 / 96")).toBeTruthy();
+    expect(within(tiles).getByText("42 / 100", { exact: false })).toBeTruthy();
+    expect(within(tiles).getByText("58 GB free")).toBeTruthy();
+    expect(within(tiles).getByText("24 / 14 / 96")).toBeTruthy();
 
     const checks = screen.getByTestId("health-checks");
     expect(within(checks).getByText("CONNECTED")).toBeTruthy();

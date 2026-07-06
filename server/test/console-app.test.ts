@@ -226,10 +226,10 @@ describe("startConsole - the C1 composition", () => {
     );
     await bus.emitWire(
       "ecv1/gw-02/opcua-adapter/main/metric/sys",
-      wireEnvelope("Metric", identity, { coreName: "gw-02", cpu: 12.5, memory: 40, _aws: {} }),
+      wireEnvelope("Metric", identity, { coreName: "gw-02", cpu_usage: 12.5, memory_usage: 40, _aws: {} }),
     );
     expect(app.events.recent()).toHaveLength(1);
-    expect(app.metrics.seriesCount()).toBe(2); // cpu + memory
+    expect(app.metrics.seriesCount()).toBe(2); // cpu_usage + memory_usage
 
     const sent: ServerMessage[] = [];
     const transport: ClientTransport = {
@@ -262,7 +262,7 @@ describe("startConsole - the C1 composition", () => {
     const snap = sent.at(-1)!;
     expect(snap).toMatchObject({ type: "metrics" });
     if (snap.type !== "metrics") throw new Error("unreachable");
-    expect(snap.series.map((s) => s.measure)).toEqual(["cpu", "memory"]);
+    expect(snap.series.map((s) => s.measure)).toEqual(["cpu_usage", "memory_usage"]);
     expect(snap.series[0]).toMatchObject({ key: KEY, metric: "sys", latest: 12.5 });
 
     // 3. Later bus arrivals stream live to the subscribed client.
@@ -276,13 +276,13 @@ describe("startConsole - the C1 composition", () => {
     });
     await bus.emitWire(
       "ecv1/gw-02/opcua-adapter/main/metric/sys",
-      wireEnvelope("Metric", identity, { cpu: 20, memory: 41 }),
+      wireEnvelope("Metric", identity, { cpu_usage: 20, memory_usage: 41 }),
     );
     expect(sent.at(-1)).toMatchObject({
       type: "metric",
       updates: [
-        { metric: "sys", measure: "cpu", point: { value: 20 } },
-        { metric: "sys", measure: "memory", point: { value: 41 } },
+        { metric: "sys", measure: "cpu_usage", point: { value: 20 } },
+        { metric: "sys", measure: "memory_usage", point: { value: 41 } },
       ],
     });
 
@@ -302,7 +302,7 @@ describe("startConsole - the C1 composition", () => {
     );
     await bus.emitWire(
       "ecv1/gw-02/opcua-adapter/main/metric/sys",
-      wireEnvelope("Metric", identity, { cpu: 1 }),
+      wireEnvelope("Metric", identity, { cpu_usage: 1 }),
     );
     expect(sent.filter((m) => m.type === "event" || m.type === "metric")).toHaveLength(
       activityCount,
@@ -324,7 +324,7 @@ describe("startConsole - the C1 composition", () => {
     );
     await bus.emitWire(
       "ecv1/gw-03/opcua-adapter/main/metric/sys",
-      wireEnvelope("Metric", identity, { cpu: 33, memory: 128, _aws: {} }),
+      wireEnvelope("Metric", identity, { cpu_usage: 33, memory_usage: 128, _aws: {} }),
     );
     await bus.emitWire(
       "ecv1/gw-03/opcua-adapter/main/evt/critical/connection-lost",

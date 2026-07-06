@@ -3,8 +3,8 @@
  * (`docs/mockups-hifi.html`, `#screen-detail`): the breadcrumb
  * (`Overview / Components / {hier path} / {component}`), the title + subtitle, and the tab
  * set. The tabs that available data supports are BUILT for real:
- *   - **Health**    — liveness/state + the runtime attributes (cpu / memory / threads·fds /
- *                     uptime) + the console-computed health checks;
+ *   - **Health**    — liveness/state + the runtime attributes (cpu / memory / disk /
+ *                     threads·files·fds / uptime) + the console-computed health checks;
  *   - **Instances** — every instance of the (device, component) from the identity `instance`
  *                     token;
  *   - **Configuration** — an embedded read-only view of the component's effective `cfg`
@@ -116,6 +116,14 @@ function HealthChecks({ checks }: { checks: HealthCheck[] }): React.JSX.Element 
   );
 }
 
+function countOrDash(value: number | undefined): string {
+  return value !== undefined ? String(Math.round(value)) : "—";
+}
+
+function gbOrDash(value: number | undefined): string {
+  return value !== undefined ? String(Math.round(value)) : "—";
+}
+
 /** The Health tab. */
 function HealthTab({
   comp,
@@ -129,6 +137,12 @@ function HealthTab({
   nowServerMs: number;
 }): React.JSX.Element {
   const cpuSeries = attrs?.cpuSeries;
+  const hasDisk =
+    attrs?.diskTotalGb !== undefined ||
+    attrs?.diskUsedGb !== undefined ||
+    attrs?.diskFreeGb !== undefined;
+  const hasCounts =
+    attrs?.threads !== undefined || attrs?.openFiles !== undefined || attrs?.fds !== undefined;
   const uptimeSecs = detailUptimeSecs(comp, nowServerMs);
   const lastState =
     comp.lastStateAt !== undefined
@@ -175,15 +189,31 @@ function HealthTab({
           </div>
         </Tile>
         <Tile className="ec-tile">
-          <div className="ec-tile__label">Threads / FDs</div>
+          <div className="ec-tile__label">Disk</div>
           <div className="ec-tile__num ec-tile__num--md ec-tnum">
-            {attrs?.threads !== undefined || attrs?.fds !== undefined ? (
-              `${attrs?.threads ?? "—"} / ${attrs?.fds ?? "—"}`
+            {hasDisk ? (
+              <>
+                {gbOrDash(attrs?.diskUsedGb)} / {gbOrDash(attrs?.diskTotalGb)}
+                <small>GB</small>
+              </>
             ) : (
               <span className="ec-dim">—</span>
             )}
           </div>
-          <div className="ec-tile__foot">fds n/a on some platforms</div>
+          <div className="ec-tile__foot">
+            {attrs?.diskFreeGb !== undefined ? `${Math.round(attrs.diskFreeGb)} GB free` : "free space —"}
+          </div>
+        </Tile>
+        <Tile className="ec-tile">
+          <div className="ec-tile__label">Threads / Files / FDs</div>
+          <div className="ec-tile__num ec-tile__num--md ec-tnum">
+            {hasCounts ? (
+              `${countOrDash(attrs?.threads)} / ${countOrDash(attrs?.openFiles)} / ${countOrDash(attrs?.fds)}`
+            ) : (
+              <span className="ec-dim">—</span>
+            )}
+          </div>
+          <div className="ec-tile__foot">files/fds n/a on some platforms</div>
         </Tile>
         <Tile className="ec-tile">
           <div className="ec-tile__label">Uptime</div>
