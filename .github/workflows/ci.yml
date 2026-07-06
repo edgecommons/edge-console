@@ -30,9 +30,10 @@ jobs:
         with:
           node-version: "22"  # global WebSocket (used by the ws round-trip tests) is stable from Node 22
       - name: Build core TypeScript library
+        working-directory: .edgecommons-core
         run: |
-          npm install --no-audit --no-fund --prefix "$GITHUB_WORKSPACE/.edgecommons-core"
-          npm --prefix "$GITHUB_WORKSPACE/.edgecommons-core" run build -w @edgecommons/edgecommons
+          npm install --no-audit --no-fund
+          npm run build -w @edgecommons/edgecommons
       - name: Link checked-out core TypeScript library
         env:
           EDGECOMMONS_TS_LIB: ${{ github.workspace }}/.edgecommons-core/libs/ts
