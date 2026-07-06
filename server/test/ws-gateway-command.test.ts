@@ -7,7 +7,7 @@
  * (`command-gateway.test.ts` owns the pure mapping surface.)
  */
 import { describe, expect, it } from "vitest";
-import { Message, MessageBuilder, MessageIdentity, Uns } from "@edgecommons/ggcommons";
+import { Message, MessageBuilder, MessageIdentity, Uns } from "@edgecommons/edgecommons";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
 import type { ComponentKey, ServerMessage } from "@edgecommons/edge-console-protocol";
 

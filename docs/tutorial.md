@@ -20,11 +20,11 @@ MQTT edge is bypassed.
 ### 1. Prerequisites
 
 - Node 20+ (Node 22+ for the WebSocket round-trip tests) and npm.
-- The sibling `ggcommons` TypeScript library built at `../ggcommons/libs/ts` (the console depends on
-  `@edgecommons/ggcommons`). From the console repo root:
+- The sibling `edgecommons` TypeScript library built at `../core/libs/ts` (the console depends on
+  `@edgecommons/edgecommons`). From the console repo root:
 
 ```bash
-npm run link:lib     # generates the gitignored local/ggcommons workspace stub -> ../ggcommons/libs/ts
+npm run link:lib     # generates the gitignored local/edgecommons workspace stub -> ../core/libs/ts
 npm install
 npm run build        # builds protocol -> server -> ui
 ```
@@ -94,7 +94,7 @@ relays each device's traffic into) with at least one component publishing.
 ### 1. A broker + a component
 
 The simplest live rig is an EMQX broker on `:1884` with a `uns-bridge` in front of a device bus, and one
-or two scaffolded ggcommons skeletons publishing. Any broker the bridge feeds will do.
+or two scaffolded edgecommons skeletons publishing. Any broker the bridge feeds will do.
 
 ### 2. Point the console at it
 
@@ -107,7 +107,7 @@ or two scaffolded ggcommons skeletons publishing. Any broker the bridge feeds wi
 
 ### 3. Run the server
 
-The console is a standard ggcommons component — the same CLI shape as any adapter. Give it a **thing name
+The console is a standard edgecommons component — the same CLI shape as any adapter. Give it a **thing name
 of its own** so it does not appear as a device under the fleet it is watching:
 
 ```bash

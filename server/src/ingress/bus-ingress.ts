@@ -11,7 +11,7 @@
  * It also owns the **per-device `republish-*` broadcast** (G1/D-U19): on discovery
  * of a device (and on console start for already-known devices) it publishes
  * `ecv1/{device}/_bcast/main/cmd/republish-state` + `.../republish-cfg` so
- * already-running components re-announce state+cfg (answered once ggcommons S1
+ * already-running components re-announce state+cfg (answered once edgecommons S1
  * lands; the bridge already fires the same broadcast on site-reconnect).
  *
  * Everything here is injectable (messaging service, Uns builder, message factory,
@@ -23,8 +23,8 @@ import {
   UnsClass,
   UnsScope,
   logger,
-} from "@edgecommons/ggcommons";
-import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
+} from "@edgecommons/edgecommons";
+import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/edgecommons";
 import { CONSUMER_CLASSES } from "@edgecommons/edge-console-protocol";
 import type { ConsumerClass } from "@edgecommons/edge-console-protocol";
 import { normalize } from "./normalizer";

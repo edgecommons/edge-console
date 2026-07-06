@@ -1,7 +1,7 @@
 {
   "name": "@edgecommons/edge-console-server",
   "version": "0.1.0",
-  "description": "Edge Console server: a ggcommons TypeScript component that ingests the site UNS bus (six class wildcards + the bridge raw-LWT path) into the FleetModel - the timestamped last-known-value cache with console-side miss-detection. WS gateway (C2), CommandGateway (C4) land in later slices.",
+  "description": "Edge Console server: a edgecommons TypeScript component that ingests the site UNS bus (six class wildcards + the bridge raw-LWT path) into the FleetModel - the timestamped last-known-value cache with console-side miss-detection. WS gateway (C2), CommandGateway (C4) land in later slices.",
   "license": "Apache-2.0",
   "main": "dist/main.js",
   "files": [
@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@edgecommons/edge-console-protocol": "^0.1.0",
-    "@edgecommons/ggcommons": "^0.2.0",
+    "@edgecommons/edgecommons": "^0.2.0",
     "ws": "^8.18.1"
   },
   "devDependencies": {

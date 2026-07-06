@@ -3,8 +3,8 @@
  * `RecordingMessagingService` pattern + wildcard routing via the lib's exported
  * `topicMatches`) and envelope helpers with pinned timestamps (no sleeps).
  */
-import { Message, MessageBuilder, MessageIdentity, ReplyFuture, topicMatches } from "@edgecommons/ggcommons";
-import type { IMessagingService, MessageHandler, MessageTags, Qos } from "@edgecommons/ggcommons";
+import { Message, MessageBuilder, MessageIdentity, ReplyFuture, topicMatches } from "@edgecommons/edgecommons";
+import type { IMessagingService, MessageHandler, MessageTags, Qos } from "@edgecommons/edgecommons";
 
 /** A recorded publish. */
 export interface PublishedRecord {

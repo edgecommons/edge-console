@@ -4,14 +4,14 @@ Reusable command sequence for the whole-stack UNS test: device bus + site broker
 + 2 scaffolded skeletons (TS + Python) + edge-console, verified in a headed browser.
 
 Paths:
-- LIB/monorepo:  C:\Users\breis\source\edgecommons\ggcommons
+- LIB/monorepo:  C:\Users\breis\source\edgecommons\edgecommons
 - BRIDGE:        C:\Users\breis\source\edgecommons\uns-bridge
 - CONSOLE:       C:\Users\breis\source\edgecommons\edge-console
 - SCRATCH (this):  ...\scratchpad\c7   (components/, run-configs/, screenshots/, logs/)
 
-## 0. Brokers (device :1883 already running as `ggcommons-emqx`; add a clean site broker :1884)
+## 0. Brokers (device :1883 already running as `edgecommons-emqx`; add a clean site broker :1884)
 ```bash
-# Device bus = the standing ggcommons-emqx on :1883 (anon, no ACL). Leave as-is.
+# Device bus = the standing edgecommons-emqx on :1883 (anon, no ACL). Leave as-is.
 # Site broker = a fresh anon EMQX on :1884 WITHOUT the P3-5 ACL (plaintext/anon functional test):
 docker run -d --name uns-c7-site -p 1884:1883 -e EMQX_ALLOW_ANONYMOUS=true emqx/emqx:5.8.2
 #   NB: deploy/site-broker/docker-compose.yml's `site` service mounts acl.conf whose trailing
@@ -22,9 +22,9 @@ docker run -d --name uns-c7-site -p 1884:1883 -e EMQX_ALLOW_ANONYMOUS=true emqx/
 ## 1. Scaffold 2 skeletons from the LATEST templates (CLI is a fixed pip install → point at live repo)
 ```bash
 cd <SCRATCH>/c7/components
-ggcommons create-component -n com.example.TsSensor -l TYPESCRIPT -p . \
+edgecommons create-component -n com.example.TsSensor -l TYPESCRIPT -p . \
   -u <LIB>/templates/typescript -g <LIB>/libs/ts --dep-source local --platforms HOST
-ggcommons create-component -n com.example.PyMeter  -l PYTHON     -p . \
+edgecommons create-component -n com.example.PyMeter  -l PYTHON     -p . \
   -u <LIB>/templates/python                        --dep-source local --platforms HOST
 ```
 
@@ -32,7 +32,7 @@ ggcommons create-component -n com.example.PyMeter  -l PYTHON     -p . \
 ```bash
 # TS: sibling libs/ts must be built (dist/) first; file: dep resolves it
 cd <SCRATCH>/c7/components/TsSensor && npm install && npm run build
-# Python: ggcommons is already editable-installed from libs/python (import works globally).
+# Python: edgecommons is already editable-installed from libs/python (import works globally).
 #   Otherwise: pip install -e <LIB>/libs/python
 ```
 
@@ -106,7 +106,7 @@ cd <CONSOLE> && node server/dist/main.js \
 ## 7. Teardown
 ```bash
 # kill node (skeleton+console+vite), python (skeleton), uns-bridge.exe; close browser
-docker stop uns-c7-site && docker rm uns-c7-site        # leave ggcommons-emqx running
+docker stop uns-c7-site && docker rm uns-c7-site        # leave edgecommons-emqx running
 rm -rf <CONSOLE>/.playwright-mcp                          # or wherever the MCP wrote artifacts
 netstat -ano | grep -E ":1884|:5173|:8443"               # confirm free
 ```

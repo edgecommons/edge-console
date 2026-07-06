@@ -49,7 +49,7 @@ broker. The console needs no list of devices or components up front: it discover
 
 ## The Unified Namespace, and six wildcards for the whole fleet
 
-Every ggcommons topic is `ecv1/{device}/{component}/{instance}/{class}[/channel]`. The console consumes
+Every edgecommons topic is `ecv1/{device}/{component}/{instance}/{class}[/channel]`. The console consumes
 the **six consumer classes** with one wildcard each — the entire subscription surface, built through the
 library's `uns().filter()` (never a hand-assembled string):
 
@@ -198,7 +198,7 @@ here.
 
 ## Deployment shape
 
-Because the console is a standard ggcommons component it deploys the same three ways as everything else —
+Because the console is a standard edgecommons component it deploys the same three ways as everything else —
 HOST, Greengrass, Kubernetes — and the library owns config/messaging/logging/metrics/heartbeat/shutdown.
 Two console-specific constraints follow from its nature:
 

@@ -2,7 +2,7 @@
  * ThroughputMeter — the console's own bus-ingest rate counter (slice R1).
  *
  * The Overview "Edge bus msgs/s" tile is the console's OWN throughput (the console is
- * itself a ggcommons component): a small rolling meter the ingress tee `mark()`s once
+ * itself a edgecommons component): a small rolling meter the ingress tee `mark()`s once
  * per normalized envelope. `ratePerSec()` is a simple average over a bounded window of
  * per-second buckets — cheap and memory-bounded (at most `windowSecs` buckets, regardless
  * of message rate), with an injected clock so it is unit-testable without sleeps.

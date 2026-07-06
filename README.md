@@ -1,7 +1,7 @@
 # edge-console
 
 The **EdgeCommons Edge Console**: an edge-deployed, real-time web UI to **monitor and
-command** every [ggcommons](https://github.com/edgecommons/ggcommons) component on a site —
+command** every [edgecommons](https://github.com/edgecommons/edgecommons) component on a site —
 and the site's **sole browser↔bus bridge** (browsers speak HTTPS+WS to the console; only the
 console speaks MQTT/UNS). It attaches to the **site broker** (the aggregation point every
 device's [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into), consumes the
@@ -14,7 +14,7 @@ from its `cfg` announcements). Design source of truth: `docs/DESIGN.md` (v0.3) r
 against the shipped UNS core in `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md`.
 
 **Status: slices C0 (scaffold) + C1 (BusIngress + FleetModel) + C2 (WS gateway) + C3
-(the edge-health UI — priority #1 closed, zero new ggcommons code) + C4 (CommandGateway —
+(the edge-health UI — priority #1 closed, zero new edgecommons code) + C4 (CommandGateway —
 RBAC-gated `invoke-command` → request/reply) + C5 (config-review — priority #2 closed) +
 C6 (events & metrics screens) + C7 (the full-system UNS e2e — run and passed, HOST → kind).**
 The RBAC command core is built and enforced; the remaining Phase-1 auth work — the
@@ -25,7 +25,7 @@ log — is deferred by decision (see "The WS gateway").
 
 | Package | What it is |
 |---|---|
-| `server/` | The Node backend — a standard **ggcommons TypeScript component** (`com.edgecommons.edge-console`): the library owns config/messaging/logging/metrics/heartbeat/shutdown; the console adds BusIngress + FleetModel (this slice), then the WS gateway + CommandGateway. |
+| `server/` | The Node backend — a standard **edgecommons TypeScript component** (`com.mbreissi.edgecommons.EdgeConsole`): the library owns config/messaging/logging/metrics/heartbeat/shutdown; the console adds BusIngress + FleetModel (this slice), then the WS gateway + CommandGateway. |
 | `ui/` | The IBM **Carbon/React** front end (Vite, `g100` dark per the signed-off hi-fi). Ships the **edge-health view** (C3): a WS client + client-side fleet store mirroring the FleetModel, and the Overview screen (health tiles → issue notes → fleet table grouped by device). |
 | `protocol/` | Shared TypeScript types: the WS API contract (snapshots, deltas, liveness) + UNS envelope shapes. A hard contract between `server/` and `ui/`. |
 | `test-configs/` | A runnable sample config (the console's own knobs live under `component.global.console`). |
@@ -71,7 +71,7 @@ WS gateway fans out.
 
 **Late-join rehydration**: on first sight of a device the console publishes the per-device
 broadcast pair `ecv1/{device}/_bcast/main/cmd/republish-state` + `…/republish-cfg`
-(fire-and-forget `cmd` notifications). Components answer once the ggcommons `_bcast` listener
+(fire-and-forget `cmd` notifications). Components answer once the edgecommons `_bcast` listener
 slice (G-S1) lands; until then the periodic `state` keepalive converges liveness within one
 interval, and `cfg` of long-running components is the known gap.
 
@@ -194,7 +194,7 @@ MetricStore):
   `$secret` refs are vault pointers) and registers per-connection interest, so every
   later `cfg` arrival for that key is pushed unprompted. `refresh-config{device}`
   fires the per-device `_bcast` `republish-cfg` broadcast (fire-and-forget; absence
-  is silent until the device-side ggcommons S1 listener lands). The view
+  is silent until the device-side edgecommons S1 listener lands). The view
   (`ui/src/configreview/`) is the hi-fi's 340 px picker + Structured/Raw-JSON detail,
   with redaction rendered *as* redaction — closes priority #2.
 - **Events (C6, protocol v3)** — subscribe/stream (events are notifications, not
@@ -231,7 +231,7 @@ version handshake turns any protocol skew into a clean "reload the page".
 
 ## Configuration
 
-The console is configured like any ggcommons component; its own knobs live in the permissive
+The console is configured like any edgecommons component; its own knobs live in the permissive
 `component.global.console` subtree (no canonical-schema change — the bridge precedent):
 
 ```jsonc
@@ -258,8 +258,8 @@ the **site broker**, and the same file doubles as the `--transport MQTT` payload
 ## Build, test, run
 
 ```bash
-# Local dev: satisfy @edgecommons/ggcommons from the sibling checkout (../ggcommons/libs/ts).
-# This generates the GITIGNORED local/ggcommons workspace stub - the npm analog of the
+# Local dev: satisfy @edgecommons/edgecommons from the sibling checkout (../core/libs/ts).
+# This generates the GITIGNORED local/edgecommons workspace stub - the npm analog of the
 # bridge's .cargo/config.toml paths override. CI skips this and resolves the published
 # package from GitHub Packages instead. (Requires the sibling lib to be built.)
 npm run link:lib
@@ -291,7 +291,7 @@ npm run dev -w ui                  # http://localhost:5173 (vite proxies /ws to 
 
 Note: `package-lock.json` is deliberately untracked while the sibling link is the dev path
 (it would record the local stub, which does not exist in CI); it becomes tracked when the
-console pins a published `@edgecommons/ggcommons` release.
+console pins a published `@edgecommons/edgecommons` release.
 
 ## Roadmap (Phase 1, per the reconciliation plan §4)
 
@@ -302,6 +302,6 @@ console pins a published `@edgecommons/ggcommons` release.
 | ~~C2~~ | ~~HTTP+WS gateway: snapshot-then-deltas, resume-from-seq, per-client backpressure isolation~~ |
 | ~~C3~~ | ~~Edge-health UI (Carbon): the Overview screen — fleet health rollups, liveness/reachability live from the gateway (this slice; **closes priority #1**). Components tree + Component detail ride the C5/C6 screens.~~ |
 | ~~C4~~ | ~~CommandGateway: RBAC (config-driven allow/deny per verb) → `uns().topicFor()` + `request()` (timeouts ≤ 30 s), RBAC-gated at the WS gateway~~ — **built**; the append-before-dispatch **audit log** and real IdP auth-seam wiring are still to come (deferred) |
-| ~~C5~~ | ~~Config-review UI (needs ggcommons G-S1 for already-running components — now shipped) — **closes priority #2**~~ |
+| ~~C5~~ | ~~Config-review UI (needs edgecommons G-S1 for already-running components — now shipped) — **closes priority #2**~~ |
 | ~~C6~~ | ~~Events & metrics screens: the `evt` rolling log (subscribe/stream) + generic metric latest-value/sparkline table~~ |
 | ~~C7~~ | ~~Full-system test~~ — **run and passed (HOST → kind)**; the GREENGRASS leg of the deployment-validation gate rides the uns-bridge's IPC-primary variant |

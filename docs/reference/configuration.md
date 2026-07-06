@@ -7,12 +7,12 @@ see the [how-to guides](../how-to-guides.md); for the wire protocols, see
 
 ## Config source
 
-The console is a standard ggcommons TypeScript component (`com.edgecommons.edge-console`; UNS component
+The console is a standard edgecommons TypeScript component (`com.mbreissi.edgecommons.EdgeConsole`; UNS component
 token `edge-console`). It reads one JSON document from `-c/--config`, defaulting by platform:
 `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG`, `KUBERNETES` → `CONFIGMAP`. The console's own knobs live
 under **`component.global.console`** (a permissive subtree); the sibling sections (`messaging`,
 `hierarchy`, `identity`, `logging`, `heartbeat`,
-`metricEmission`, `tags`, `topic`) are standard ggcommons sections the library parses.
+`metricEmission`, `tags`, `topic`) are standard edgecommons sections the library parses.
 
 **Every `console` field is optional** — parsing is deliberately lenient: a missing or malformed
 section/field falls back to its default rather than failing the component.
@@ -26,7 +26,7 @@ section/field falls back to its default rather than failing the component.
 | `hierarchy` | optional | UNS enterprise-hierarchy level names; last level is the device. Drives the console's dynamic grouping/tree. Absent ⇒ `["device"]`. |
 | `identity` | optional | Values for every hierarchy level except the last (the resolved thing). Sets the *console's own* identity — give it a distinct thing so it doesn't self-appear. |
 | `heartbeat` | optional | The console's own keepalive (it is a component too). |
-| `logging`, `metricEmission`, `tags`, `topic` | optional | Standard ggcommons sections. |
+| `logging`, `metricEmission`, `tags`, `topic` | optional | Standard edgecommons sections. |
 
 ## `component.global.console.ws` — the gateway endpoint
 

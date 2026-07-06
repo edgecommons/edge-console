@@ -11,7 +11,7 @@ The repo is an npm workspace of three packages — `protocol` (the shared WS typ
 `server` (the Node backend), and `ui` (the Carbon/React front end):
 
 ```bash
-npm run link:lib     # dev only: satisfy @edgecommons/ggcommons from the sibling ../ggcommons/libs/ts
+npm run link:lib     # dev only: satisfy @edgecommons/edgecommons from the sibling ../core/libs/ts
 npm install
 npm run build        # protocol -> server -> ui (order matters; server + ui import protocol)
 npm test             # server + ui unit suites (fake bus/socket, injected clock — no live IO)
@@ -19,8 +19,8 @@ npm run coverage     # vitest v8 coverage, thresholds 90/90/85/80 (the ecosystem
 npm run lint         # eslint (flat config) over the whole workspace
 ```
 
-`npm run link:lib` generates the **gitignored** `local/ggcommons` stub — the npm analog of the bridge's
-`.cargo/config.toml` paths override. CI skips it and resolves the published `@edgecommons/ggcommons` from
+`npm run link:lib` generates the **gitignored** `local/edgecommons` stub — the npm analog of the bridge's
+`.cargo/config.toml` paths override. CI skips it and resolves the published `@edgecommons/edgecommons` from
 GitHub Packages instead (via the committed `.npmrc`).
 
 ---
@@ -28,7 +28,7 @@ GitHub Packages instead (via the committed `.npmrc`).
 ## Point the console at your site broker
 
 The console has **one** connection — the *site broker*, the aggregation point every device's `uns-bridge`
-relays into. It is an ordinary ggcommons `messaging.local` block:
+relays into. It is an ordinary edgecommons `messaging.local` block:
 
 ```jsonc
 "messaging": {
@@ -91,7 +91,7 @@ node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE 
 
 ## Deploy on Kubernetes
 
-The console is a standard ggcommons component, so it runs under the library's `KUBERNETES` platform —
+The console is a standard edgecommons component, so it runs under the library's `KUBERNETES` platform —
 config from a mounted **ConfigMap**, identity from the **Downward API**, stdout JSON logging, an HTTP
 health probe, `SIGTERM` graceful shutdown, and a pull `/metrics`:
 
@@ -226,7 +226,7 @@ toast. Under the hood the gateway issues one `messaging.request()` to the compon
 A component that started **before** the console cannot be asked for its current `cfg`/`state` through
 retain (the platform uses no broker retain). On **Configuration**, **Refresh** fires a per-device
 `republish-cfg` broadcast on the bus asking every component on that device to re-push. It is
-fire-and-forget: a component re-pushes only if its device-side ggcommons runtime handles the `_bcast`
+fire-and-forget: a component re-pushes only if its device-side edgecommons runtime handles the `_bcast`
 broadcast. The periodic `state` keepalive reconverges liveness within one interval regardless; the `cfg`
 of an already-running component may not refresh until that component re-announces.
 
@@ -235,7 +235,7 @@ of an already-running component may not refresh until that component re-announce
 ## Observe the console itself
 
 - **Health probe**: `GET /healthz` returns `200 ok` — wire it to your liveness/readiness check.
-- **Its own metrics/logs/state**: the console is a ggcommons component, so it emits the standard `state`
+- **Its own metrics/logs/state**: the console is a edgecommons component, so it emits the standard `state`
   keepalive, `metric` health, and logging like any other — visible in *another* console, or on the bus.
 - **In-product**: the Overview "Edge bus msgs/s" tile is the console's own ingest throughput; the "Edge
   node — console self" tile is its own CPU/memory/uptime; **Settings** shows its resolved policy.

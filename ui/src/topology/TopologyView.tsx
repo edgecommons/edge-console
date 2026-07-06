@@ -366,7 +366,7 @@ export function TopologyView({ state, onOpenDetail }: TopologyViewProps): React.
       <h1 className="ec-ph">Site topology</h1>
       <div className="ec-ph-sub">
         <span>
-          A live connectivity graph — each ggcommons <b>component</b> and the external{" "}
+          A live connectivity graph — each edgecommons <b>component</b> and the external{" "}
           <b>field</b> and <b>cloud</b> systems it talks to. Structure comes from identity, the
           endpoint arrows from each component&apos;s <code>cfg</code>.
         </span>

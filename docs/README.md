@@ -1,15 +1,15 @@
 # Edge Console — Documentation
 
-`com.edgecommons.edge-console` is an **edge-deployed, real-time web console** for a
-[ggcommons](https://github.com/edgecommons/ggcommons) site. It **monitors and commands** every
+`com.mbreissi.edgecommons.EdgeConsole` is an **edge-deployed, real-time web console** for a
+[edgecommons](https://github.com/edgecommons/edgecommons) site. It **monitors and commands** every
 component on the site — and it is the site's **sole browser↔bus bridge**: browsers speak HTTP + WebSocket
 to the console, and only the console speaks MQTT / the Unified Namespace (UNS). It attaches to **one**
 bus — the *site broker*, the aggregation point every device's
 [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — subscribes six UNS class
 wildcards, and needs **zero per-component knowledge** to render the whole fleet.
 
-It is itself a **standard ggcommons TypeScript component** (a Node server built on
-`@edgecommons/ggcommons`), so it deploys the same way as everything else — HOST, Greengrass, or
+It is itself a **standard edgecommons TypeScript component** (a Node server built on
+`@edgecommons/edgecommons`), so it deploys the same way as everything else — HOST, Greengrass, or
 Kubernetes — and the library owns its config, messaging, logging, metrics, state keepalive and graceful
 shutdown. The console adds the fleet model, the WebSocket gateway, the command gateway, and an IBM
 **Carbon / React** UI on top.
@@ -70,5 +70,5 @@ The console surfaces each of these in the product as well as here:
 ## Audience
 
 These docs are for **operators and integrators** — people who deploy the console, point it at a site
-broker, and use it to watch and command a ggcommons fleet. They do not cover modifying the console's own
+broker, and use it to watch and command a edgecommons fleet. They do not cover modifying the console's own
 source.

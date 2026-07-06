@@ -13,7 +13,7 @@
  * posture is permissive (the built-ins are allowed) — the seam is real and wired, the
  * enforcement is honest, only the identity source is stubbed.
  *
- * Config shape (`component.global.console.rbac`, reconciliation G12 — no ggcommons schema
+ * Config shape (`component.global.console.rbac`, reconciliation G12 — no edgecommons schema
  * change, the knobs live in the console's own permissive `component.global` subtree):
  *
  * ```jsonc

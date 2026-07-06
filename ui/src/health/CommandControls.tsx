@@ -2,7 +2,7 @@
  * CommandControls (slice C4) — the per-component command affordance surfaced inside an
  * expanded fleet row. Faithful to the hi-fi mockup's component-detail button row
  * (`Ping` / `Query status` / …): a button group for the three UNIVERSAL built-in verbs
- * every ggcommons component answers (`ping`, `reload-config`, `get-configuration` —
+ * every edgecommons component answers (`ping`, `reload-config`, `get-configuration` —
  * uns-test-vectors/commands.json), plus a generic "Send command…" form for custom/
  * advanced verbs.
  *

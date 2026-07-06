@@ -1,7 +1,7 @@
 /**
  * Edge Console server — process entry point.
  *
- * A standard ggcommons TypeScript component: the library owns CLI parsing, config
+ * A standard edgecommons TypeScript component: the library owns CLI parsing, config
  * (with the console's own knobs under `component.global.console`), messaging (the
  * ONE connection — pointed at the **site broker**), logging, metrics, the state
  * keepalive, the effective-config publisher, and SIGTERM/SIGINT graceful shutdown.
@@ -18,15 +18,15 @@
  * (The config file doubles as the `--transport MQTT` payload — its `messaging.local`
  * is the site broker — the same pattern the uns-bridge uses.)
  */
-import { GGCommonsBuilder, MessageBuilder, logger } from "@edgecommons/ggcommons";
+import { EdgeCommonsBuilder, MessageBuilder, logger } from "@edgecommons/edgecommons";
 
 import { startConsole } from "./console-app";
 
 /** The component's full name (short name/UNS component token: `edge-console`). */
-const COMPONENT_NAME = "com.edgecommons.edge-console";
+const COMPONENT_NAME = "com.mbreissi.edgecommons.EdgeConsole";
 
 async function main(): Promise<void> {
-  const gg = await new GGCommonsBuilder(COMPONENT_NAME).args(process.argv.slice(2)).build();
+  const gg = await new EdgeCommonsBuilder(COMPONENT_NAME).args(process.argv.slice(2)).build();
   logger.info(
     `edge-console starting: component=${gg.componentName()} device=${gg.config().componentIdentity.device} path=${gg.config().componentIdentity.path}`,
   );

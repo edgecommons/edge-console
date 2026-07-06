@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Message } from "@edgecommons/ggcommons";
+import { Message } from "@edgecommons/edgecommons";
 
 import { normalize } from "../src/ingress/normalizer";
 import { RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";

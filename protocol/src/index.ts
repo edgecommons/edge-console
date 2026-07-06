@@ -558,7 +558,7 @@ export interface RuntimeAttributes {
 /* -----------------------------------------------------------------------------
  * R1 — the console's OWN self-identity + process vitals + messaging transport.
  *
- * The console IS a ggcommons component: it knows its own resolved identity (device/component),
+ * The console IS a edgecommons component: it knows its own resolved identity (device/component),
  * its deployment platform + messaging transport + site-broker host (all from its own runtime
  * config), and can measure its own process (cpu / memory / uptime). This is the honest source
  * behind the Overview "Edge node — console self" tile and the "Edge bus" tile's transport foot
@@ -761,7 +761,7 @@ export interface AlarmSnapshot {
  * args), awaits the reply (the uns-bridge rewrites `reply_to` so a site→device
  * request/reply is transparent), and answers with exactly one `command-result`.
  *
- * The built-in verbs every ggcommons component answers (uns-test-vectors/commands.json,
+ * The built-in verbs every edgecommons component answers (uns-test-vectors/commands.json,
  * DESIGN-uns §9.5): `ping`, `reload-config`, `get-configuration`. Custom-verb DISCOVERY
  * is a Phase-2 concern (the `describe` capability manifest / panels), so the console
  * cannot enumerate a component's custom verbs yet — it offers the built-ins plus a
@@ -797,7 +797,7 @@ export type ConsoleCommandErrorCode =
   | "MALFORMED_REPLY"
   | "UNAVAILABLE";
 
-/** The three universal built-in verbs every ggcommons component answers. */
+/** The three universal built-in verbs every edgecommons component answers. */
 export const BUILTIN_COMMAND_VERBS = ["ping", "reload-config", "get-configuration"] as const;
 export type BuiltinCommandVerb = (typeof BUILTIN_COMMAND_VERBS)[number];
 
@@ -832,7 +832,7 @@ export type WsErrorCode = "malformed" | "unsupported-protocol-version";
  *    broadcast on the site bus, asking every component on `device` to re-push its
  *    `cfg`. Fire-and-forget: no direct reply; the fresh announcements arrive on the
  *    bus and flow to interested clients as `config` pushes. (Whether any component
- *    answers depends on the device-side ggcommons S1 listener — absence is silent,
+ *    answers depends on the device-side edgecommons S1 listener — absence is silent,
  *    never an error.)
  *  - `subscribe-events` (C6) — register this connection's interest in the fleet-wide
  *    `evt` stream. The gateway answers with ONE `events` backlog frame (the recent

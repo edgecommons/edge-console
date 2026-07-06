@@ -2,7 +2,7 @@
 
 Everything the console **subscribes**, **publishes**, and **requests** on the site UNS bus. Addressing
 follows the **Unified Namespace (UNS)**: `ecv1/{device}/{component}/{instance}/{class}[/channel]`, built
-and validated by the library (`@edgecommons/ggcommons`) — never a hand-assembled string. For the
+and validated by the library (`@edgecommons/edgecommons`) — never a hand-assembled string. For the
 browser↔console WebSocket side, see [data-types.md](data-types.md); for the model, see
 [explanation.md](../explanation.md).
 
@@ -30,7 +30,7 @@ per-component topic templates.
 
 ## Envelope & identity
 
-All non-raw messages use the GGCommons JSON envelope `{header, identity, tags, body}`. The console
+All non-raw messages use the EdgeCommons JSON envelope `{header, identity, tags, body}`. The console
 attributes **every** message by its top-level **`identity`** element — never the topic:
 
 ```jsonc
@@ -69,7 +69,7 @@ UNREACHABLE with **event-time = delivery time**. Every other raw message is drop
 
 ### As a component (library-owned)
 
-The console is itself `com.edgecommons.edge-console`, so the library publishes its **own** `state`
+The console is itself `com.mbreissi.edgecommons.EdgeConsole`, so the library publishes its **own** `state`
 keepalive, `metric` health, and `cfg` on `main` — visible to *another* console. These are the standard
 reserved classes; the console never hand-addresses them.
 
@@ -84,7 +84,7 @@ ecv1/{device}/_bcast/main/cmd/republish-cfg
 ```
 
 These ask already-running components on the device to re-announce `state`+`cfg` (the platform uses no
-broker retain). They are answered only if the device-side ggcommons runtime handles the `_bcast`
+broker retain). They are answered only if the device-side edgecommons runtime handles the `_bcast`
 broadcast; the periodic `state` keepalive reconverges liveness within one interval regardless, while the
 `cfg` of a long-running component may not refresh until it re-announces. No `reply_to`, no direct reply; a
 hostile/invalid device token or a publish failure is logged and skipped.
@@ -128,7 +128,7 @@ plus `UNAVAILABLE` when no command seam is wired). See
 
 ### Built-in verbs
 
-Every ggcommons component answers three universal built-ins, which the console offers on all components:
+Every edgecommons component answers three universal built-ins, which the console offers on all components:
 
 | Verb | Result (typical) |
 |------|------------------|

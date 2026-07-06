@@ -3,7 +3,7 @@
  *
  * The Overview "Edge node — console self" tile shows the console's own node/device name, its
  * deployment platform, and its live process cpu% / memory / uptime; the "Edge bus" tile's foot
- * shows the console's messaging transport + site-broker host. The console IS a ggcommons
+ * shows the console's messaging transport + site-broker host. The console IS a edgecommons
  * component, so all of this is honestly sourced:
  *  - the STATIC identity (device/component/platform/transport/broker) comes from the console's
  *    own resolved runtime config (`main.ts` reads it off `gg` and passes it in);

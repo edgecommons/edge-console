@@ -2,7 +2,7 @@
   "name": "@edgecommons/edge-console-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "Edge Console workspace: server (Node backend on @edgecommons/ggcommons), ui (IBM Carbon/React), protocol (shared WS API + envelope types).",
+  "description": "Edge Console workspace: server (Node backend on @edgecommons/edgecommons), ui (IBM Carbon/React), protocol (shared WS API + envelope types).",
   "license": "Apache-2.0",
   "workspaces": [
     "protocol",

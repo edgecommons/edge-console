@@ -9,7 +9,7 @@ export default defineConfig({
       include: ["src/**"],
       // main.ts is the runnable process-entry harness (CLI boot + live broker) —
       // validated end-to-end against the dual-EMQX rig, not unit tests (the same
-      // scoping the ggcommons TS lib applies to its *_verify entry points).
+      // scoping the edgecommons TS lib applies to its *_verify entry points).
       exclude: ["src/main.ts"],
       reporter: ["text"],
       thresholds: {

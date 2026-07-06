@@ -3,7 +3,7 @@
 **Version 0.3** · Status: **DESIGN (low-fidelity)** · 2026-07-02
 
 > This is a design document, not an implementation. It is deliberately opinionated: because EdgeCommons has
-> **no production installed base yet**, this revision treats the core `ggcommons` libraries as **in scope to change**,
+> **no production installed base yet**, this revision treats the core `edgecommons` libraries as **in scope to change**,
 > and mandates the changes needed to make a single, reliable, site-wide console possible. Every mandated change is
 > listed explicitly in [§12](#12-mandated-changes-the-core-lib-asks).
 >
@@ -16,7 +16,7 @@
 >
 > **Split (2026-07-02):** the platform-level **UNS** design — namespace, message classes, configurable hierarchy +
 > top-level identity, the `messaging()` / `uns()` / facade API, streaming enrichment, and the `uns-bridge` site-bus
-> realization — now lives in the **ggcommons repo → `docs/platform/DESIGN-uns.md`** (indexed in
+> realization — now lives in the **edgecommons repo → `docs/platform/DESIGN-uns.md`** (indexed in
 > `docs/platform/README.md`). This document covers only the **console**; **§3–§5** are console-facing summaries that
 > reference it.
 
@@ -45,7 +45,7 @@
 
 ## 1. What the Edge Console is
 
-The Edge Console is a **browser-based operations console for a fleet of ggcommons components at one industrial
+The Edge Console is a **browser-based operations console for a fleet of edgecommons components at one industrial
 site**. Its two priority jobs are, in order:
 
 1. **Edge health monitoring** — is everything alive, what is wrong right now, and where.
@@ -54,7 +54,7 @@ site**. Its two priority jobs are, in order:
 Beyond those it provides command and control (issue commands to components, including device writes through the
 southbound adapters), an events/alarms feed, a data-plane signal browser, and a graphical map of the site.
 
-It is itself a **standard ggcommons component**, so it deploys the same way as everything else across the three
+It is itself a **standard edgecommons component**, so it deploys the same way as everything else across the three
 platforms (HOST, Greengrass, Kubernetes) and speaks the same message bus. The important architectural fact is what
 sits on either side of it:
 
@@ -64,7 +64,7 @@ flowchart LR
     B1["Operator tab"]
     B2["Wall monitor"]
   end
-  subgraph Console["edge-console (one ggcommons component)"]
+  subgraph Console["edge-console (one edgecommons component)"]
     WS["HTTP + WebSocket server"]
     FM["FleetModel (in-memory, hierarchical)"]
     CG["CommandGateway"]
@@ -86,11 +86,11 @@ flowchart LR
 
 The browser **never** talks to components directly — components are not individually reachable (on Greengrass IPC
 they are not addressable off-device at all). The console is the **sole bridge** between the browser world (HTTPS +
-WebSocket) and the bus world (the ggcommons message envelope over MQTT or IPC). Everything the UI shows is either a
+WebSocket) and the bus world (the edgecommons message envelope over MQTT or IPC). Everything the UI shows is either a
 live bus message or something the console computed from bus messages; everything the UI *does* becomes a bus
 command.
 
-Two grounded facts about today's `ggcommons` shape the whole design and recur throughout:
+Two grounded facts about today's `edgecommons` shape the whole design and recur throughout:
 
 - **There is no MQTT "retain" and no consumer-side liveness detection in the platform.** So the console cannot ask
   the broker "what was the last value?" — it must keep that itself, and it must compute staleness itself. This is
@@ -112,7 +112,7 @@ so identity has to include where a thing sits, or `opcua-adapter` on line 3 coll
 **The exact levels are the enterprise's choice** (DESIGN-uns §5). This document uses `site → area(line) → device` as
 its running example, but `site → factory → zone → device` — or any other named, arbitrary-depth hierarchy — is equally
 valid. What is fixed is only that one level is the physical **device** and that `component` / `instance` are the
-ggcommons addressing suffix beneath it. The console renders whatever levels the deployment declares.
+edgecommons addressing suffix beneath it. The console renders whatever levels the deployment declares.
 
 The console adopts that one hierarchy end to end — for identity, for grouping, and for navigation (the *topic* stays
 hierarchy-independent — DESIGN-uns §3):
@@ -150,10 +150,10 @@ spine the namespace and the topology use.
 
 ## 3. Platform dependency — the UNS and the site bus
 
-The console is a normal ggcommons component. Everything about *how it talks to other components* — the
+The console is a normal edgecommons component. Everything about *how it talks to other components* — the
 topic namespace, message classes, configurable hierarchy, top-level identity, the `messaging()` / `uns()`
 API and platform facades, streaming enrichment, and the physical **site-wide UNS bus** (the `uns-bridge` +
-site broker that aggregate per-device buses) — is specified once, platform-side, in the **ggcommons repo →
+site broker that aggregate per-device buses) — is specified once, platform-side, in the **edgecommons repo →
 `docs/platform/DESIGN-uns.md`**. This document does not re-specify it; it describes only what is
 *console-specific*.
 
@@ -200,7 +200,7 @@ all console-specific:
 
 - An **HTTPS + WebSocket server** (default `:8443`) — the sole bus↔browser bridge — configured by a new
   `console` config section (`enabled/port/bindAddress/tls/auth`), modeled on the existing `health` section
-  (M12). Everything else uses the standard ggcommons surface (`gg.messaging()` / `gg.uns()` / the platform
+  (M12). Everything else uses the standard edgecommons surface (`gg.messaging()` / `gg.uns()` / the platform
   facades) per DESIGN-uns §7.
 - The internal subsystems that turn bus traffic into a live browser experience — **FleetModel**,
   **WsFanout**, **CommandGateway**, **PanelRegistry** — are the subject of §6.
@@ -574,7 +574,7 @@ built so value grows monotonically:
 The **platform** mandates this console depends on — the UNS grammar, identity/hierarchy, the messaging model,
 `request()` hardening, MQTT LWT (retain deferred), the `uns-bridge` + site broker, streaming enrichment, the southbound
 command family, heartbeat-default parity, and the conformance vectors (**M1–M9, M11, M14, M15**) — live in the
-ggcommons repo at **`docs/platform/DESIGN-uns.md` §11**, and were **all approved in the mandate walk of 2026-07-02**
+edgecommons repo at **`docs/platform/DESIGN-uns.md` §11**, and were **all approved in the mandate walk of 2026-07-02**
 (M7 revised to LWT-only; M9 accepted in full). This section lists only what is specific to the **`edge-console`**
 component:
 
@@ -596,7 +596,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 ## 13. Open decisions
 
 > **Platform / UNS decisions** (D4 LWT/retain, D8 multi-device topology, D10–D16 topic/identity/messaging/streaming)
-> are now authoritative in the ggcommons repo at **`docs/platform/DESIGN-uns.md` §2** — retained below for continuity.
+> are now authoritative in the edgecommons repo at **`docs/platform/DESIGN-uns.md` §2** — retained below for continuity.
 > The genuinely console-specific decisions are D3, D5, D6, D7, D9 (and D1/D2, which the console surfaced but the
 > platform owns).
 
@@ -607,13 +607,13 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 | D3 | Repo name | **`edge-console`** — ✅ **approved 2026-07-02.** |
 | D4 | MQTT LWT/retain | ✅ **Revised 2026-07-02 → LWT only** (M7). LWT is required by the bridge (whole-device UNREACHABLE on the always-MQTT site-broker hop). **Retain deferred** — MQTT-only, redundant with broadcast `republish-state` + the console's timestamped cache (§6.1), and can't express staleness. See DESIGN-uns D9/§9.3. |
 | D5 | Staleness thresholds | Warn shading at 2×, STALE at 2.5×, OFFLINE at 5× of the in-band `keepalive_secs`; tunable in Settings. |
-| D6 | Console server language | **TypeScript/Node** on the ggcommons TS lib (shared `protocol` package with the React/Carbon UI); WS protocol kept as a hard contract so a Rust server could swap in later. |
+| D6 | Console server language | **TypeScript/Node** on the edgecommons TS lib (shared `protocol` package with the React/Carbon UI); WS protocol kept as a hard contract so a Rust server could swap in later. |
 | D7 | Config write path in v1 | Read-only + `reload-config`; feature-flagged whole-document push in Phase 2; per-key patching deferred to the SHARED_CONFIG design. |
 | D8 | Multi-device topology | **`uns-bridge` + site broker** (M1) as primary; console multi-connection federation and per-line-console UI federation as documented fallbacks. |
 | D9 | Descriptor DSL evolution | Hold the no-logic line; the `treeBrowser`/`signalGrid` widgets are the pressure-relief valve. Revisit derive primitives only against a "three concrete demands" bar. |
 | D10 | Topic depth vs hierarchy | **Superseded in v0.3.** The topic is **device-only** (`ecv1/{device}/{component}/{instance}/{class}`) so depth is constant; the enterprise-configurable hierarchy lives in the top-level `identity`, not the topic. Optional single root level via `topic.includeRoot` for a multi-site broker. |
 | D11 | Merge heartbeat + announce into `state` | Yes — one timer, one subscription, one staleness rule, and the keepalive doubles as the late-join answer. |
-| D12 | Hierarchy shape | ✅ **v0.3: enterprise-configurable** — an ordered, named `hierarchy.levels` list (arbitrary depth) with one `deviceLevel`; `component`/`instance` are the fixed ggcommons suffix. |
+| D12 | Hierarchy shape | ✅ **v0.3: enterprise-configurable** — an ordered, named `hierarchy.levels` list (arbitrary depth) with one `deviceLevel`; `component`/`instance` are the fixed edgecommons suffix. |
 | D13 | Identity placement | ✅ **v0.3: top-level `identity` element** (not `tags`), carrying ordered `hier` + precomputed `path` + `device`. `tags` kept for business context (app/org/cost); `tags.thing` removed. |
 | D14 | Developer messaging | ✅ **v0.3:** keep **`gg.messaging()`** as the general bus taking **arbitrary topics** (UNS or external); explicit **`gg.uns()`** helper builds+validates UNS topics; `commands()` = the console-exposed request/reply subset. No dedicated service registry (rely on `describe` + `broadcast`). |
 | D15 | Topic/verb delimiter | ✅ **v0.3: `/` throughout** (MQTT-native, wildcardable); `.` only as a literal within a single level (as the component name already is). Verbs lowercase-hyphenated; families namespaced (`cmd/sb/read`). |
@@ -657,7 +657,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 ## Appendix A — Changelog
 
 > Section references in the entries below (e.g. `§4.4`, `§5.2`) point to sections **as they were before the
-> 2026-07-02 split**; that UNS content now lives in the ggcommons repo at `docs/platform/DESIGN-uns.md`.
+> 2026-07-02 split**; that UNS content now lives in the edgecommons repo at `docs/platform/DESIGN-uns.md`.
 
 ### v0.1 → v0.2
 
@@ -673,7 +673,7 @@ Responds to the first review round; each point maps to the change made.
 | **5. Why is file-replicator special-cased?** | It no longer is — the UNS collapses every scheme onto six uniform subscriptions (DESIGN-uns §6, §4). |
 | **6. Full UNS + enforcing core APIs** | [§4](#4-the-unified-namespace-uns) (namespace) + [§5](#5-enforcing-the-uns-new-core-library-apis) (facades that make ad-hoc topics impossible). |
 | **7. Hard-to-follow prose; add mermaid** | Full rewrite into teaching prose; diagrams throughout. |
-| **8. File the heartbeat parity issue** | Done — [ggcommons#33](https://github.com/edgecommons/ggcommons/issues/33). |
+| **8. File the heartbeat parity issue** | Done — [edgecommons#33](https://github.com/edgecommons/edgecommons/issues/33). |
 | **9. Site is flat; model factory→lines→devices** | [§2](#2-the-site-model) — the hierarchical site model and FleetModel. |
 | **10. Render breaks on an embedded iframe** | Fixed — the v0.1 doc contained literal `<iframe>`/`<...>` text (machine-assembled) that renderers parsed as HTML; this rewrite keeps all such tokens in code spans. |
 
@@ -692,14 +692,14 @@ Responds to the identity + facade discussion; each row is a settled decision (se
 | **Service discovery** | No dedicated registry — business components find each other via `describe`-advertised ops + `broadcast` (platform-service territory left to GG / k8s). |
 | **UNS in streaming** | The durable streaming path (Kinesis/Kafka/Parquet via `gg.streams()`) auto-enriches records with identity + header + tags; columnar sinks derive hierarchy **columns** + optional partitioning from the `hierarchy` schema; telemetry-processor `stream:<name>` preserves originating identity (§4.6, M15). |
 | **Identity dedup** | Dropped the standalone `device` field — the device is the **last `hier` entry** (invariant: deepest level is the node), so `deviceLevel` also went away; a computed `device` accessor keeps code ergonomic (§4.4). |
-| **Shared-config dependency** | Hierarchy + shared location levels are distributed via ggcommons **Shared/Layered Config** (`base ⊕ component` merge), defined once in the base layer, not repeated per component. The UNS is the concrete driver for SHARED_CONFIG's deferred multi-level hierarchy. Location moves out of `tags.site/shop/line` into `identity`. |
+| **Shared-config dependency** | Hierarchy + shared location levels are distributed via edgecommons **Shared/Layered Config** (`base ⊕ component` merge), defined once in the base layer, not repeated per component. The UNS is the concrete driver for SHARED_CONFIG's deferred multi-level hierarchy. Location moves out of `tags.site/shop/line` into `identity`. |
 | **Instance is per-message** | `instance` is not a static identity field — a component serves many `component.instances[]`, so the `{instance}` segment is stamped per message from the instance the message pertains to (default `main` for component-level messages). |
 
 ### Doc split (2026-07-02)
 
 The platform-level **UNS** design (namespace, message classes, configurable hierarchy + top-level identity, the
 `messaging()` / `uns()` / facade API, streaming enrichment, and the `uns-bridge` site-bus realization) was extracted
-to the ggcommons repo at **`docs/platform/DESIGN-uns.md`** (indexed in `docs/platform/README.md`), where it belongs
+to the edgecommons repo at **`docs/platform/DESIGN-uns.md`** (indexed in `docs/platform/README.md`), where it belongs
 alongside the other platform designs and can be consumed by any site-scoped component. This document was trimmed to
 the **console** only: §3–§5 are now console-facing summaries that reference DESIGN-uns; the platform mandates
 (M1–M9, M11, M14, M15) moved with it, leaving the console mandates M10/M12/M13 here.

@@ -6,7 +6,7 @@
  * runs with no bus and no sleeps.
  */
 import { describe, expect, it } from "vitest";
-import { Message, MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/ggcommons";
+import { Message, MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/edgecommons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { CommandGateway } from "../src/command/command-gateway";
 import type { CommandGatewayDeps, CommandRequestFn } from "../src/command/command-gateway";

@@ -14,7 +14,7 @@
  * index is known per subscription (the ingress derives it from the filter it built),
  * and the channel is every token after it.
  */
-import type { Message } from "@edgecommons/ggcommons";
+import type { Message } from "@edgecommons/edgecommons";
 import type { ConsumerClass, WireIdentity } from "@edgecommons/edge-console-protocol";
 
 /** The bridge's component token — the only component whose raw state is meaningful. */

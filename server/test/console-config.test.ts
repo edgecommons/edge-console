@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { join, resolve } from "path";
 import { describe, expect, it } from "vitest";
-import { Config, validate } from "@edgecommons/ggcommons";
+import { Config, validate } from "@edgecommons/edgecommons";
 
 import {
   BRIDGE_REPLY_TTL_MS,
@@ -197,12 +197,12 @@ describe("test-configs/config.json - the shipped sample", () => {
     readFileSync(join(__dirname, "..", "..", "test-configs", "config.json"), "utf8"),
   );
 
-  it("validates against the canonical ggcommons config schema", () => {
+  it("validates against the canonical edgecommons config schema", () => {
     expect(() => validate(raw)).not.toThrow();
   });
 
   it("resolves the console's identity and parses the console section", () => {
-    const config = Config.fromValue("com.edgecommons.edge-console", "gw-01", raw);
+    const config = Config.fromValue("com.mbreissi.edgecommons.EdgeConsole", "gw-01", raw);
     expect(config.componentIdentity.component).toBe("edge-console");
     expect(config.componentIdentity.device).toBe("gw-01");
 

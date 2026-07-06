@@ -20,8 +20,8 @@
  * `FORBIDDEN` (RBAC, never hits the bus), `TIMEOUT`, `REQUEST_FAILED`, `INVALID_TARGET`,
  * `MALFORMED_REPLY`.
  */
-import { MessageIdentity, RequestTimeoutError, UnsClass } from "@edgecommons/ggcommons";
-import type { Message, MessageBuilder, Uns } from "@edgecommons/ggcommons";
+import { MessageIdentity, RequestTimeoutError, UnsClass } from "@edgecommons/edgecommons";
+import type { Message, MessageBuilder, Uns } from "@edgecommons/edgecommons";
 import { isPlainObject } from "@edgecommons/edge-console-protocol";
 import type { CommandError, ComponentKey } from "@edgecommons/edge-console-protocol";
 import type { Clock } from "../fleet/fleet-model";

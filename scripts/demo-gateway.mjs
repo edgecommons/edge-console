@@ -43,7 +43,7 @@ import { consoleConfigFromGlobal } from "../server/dist/console-config.js";
 import { consoleSettings } from "../server/dist/fleet/console-settings.js";
 import { FleetWsGateway } from "../server/dist/ws/gateway.js";
 import { WsServer } from "../server/dist/ws/ws-server.js";
-import { MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/ggcommons";
+import { MessageBuilder, MessageIdentity, RequestTimeoutError, Uns } from "@edgecommons/edgecommons";
 
 const PORT = Number(process.env.DEMO_PORT ?? 8443);
 const clock = () => Date.now();
@@ -271,7 +271,7 @@ const rbac = new ConfigRbacPolicy(demoRbacConfig);
 // the demo RBAC over the parsed defaults, plus the demo's synthetic console self-identity.
 const demoConsoleConfig = consoleConfigFromGlobal({ console: { rbac: demoRbacConfig } });
 
-/** The fake site-bus request edge: reply as a real ggcommons CommandInbox would. */
+/** The fake site-bus request edge: reply as a real edgecommons CommandInbox would. */
 function fakeComponentRequest(topic) {
   const parts = topic.split("/"); // ecv1/{device}/{component}/{instance}/cmd/{verb...}
   const component = parts[2];

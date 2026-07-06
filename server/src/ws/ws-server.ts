@@ -22,7 +22,7 @@ import { extname, join, resolve as resolvePath } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
-import { logger } from "@edgecommons/ggcommons";
+import { logger } from "@edgecommons/edgecommons";
 import type { ClientTransport, FleetWsGateway } from "./gateway";
 
 let nextClientId = 1;

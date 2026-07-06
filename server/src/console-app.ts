@@ -1,7 +1,7 @@
 /**
  * The console composition root (testable): wires config -> FleetModel -> BusIngress
  * -> the liveness sweeper -> the C2 WS gateway, over injected collaborators only —
- * `main.ts` adapts the live `GGCommons` runtime onto these five dependencies, tests
+ * `main.ts` adapts the live `EdgeCommons` runtime onto these five dependencies, tests
  * inject fakes.
  *
  * Wiring rules (reconciliation §3):
@@ -27,7 +27,7 @@
  *    the config-driven {@link ConfigRbacPolicy}; the WS auth seam (`resolveRole`) maps
  *    each connection to a role (today the RBAC `defaultRole` — no real auth yet).
  */
-import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/ggcommons";
+import type { IMessagingService, MessageBuilder, Uns } from "@edgecommons/edgecommons";
 import { consoleConfigFromGlobal } from "./console-config";
 import type { ConsoleConfig } from "./console-config";
 import { BusIngress } from "./ingress/bus-ingress";
@@ -191,7 +191,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
   // satisfies FleetSource structurally — snapshot() + onDelta()), plus the C5 config
   // seam: get-config answered from the retained-cfg cache, refresh-config wired to
   // the per-device republish broadcast (the on-demand re-pull; components answer once
-  // the device-side ggcommons S1 listener lands).
+  // the device-side edgecommons S1 listener lands).
   const gateway = new FleetWsGateway(
     model,
     {

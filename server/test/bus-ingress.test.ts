@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/ggcommons";
+import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/edgecommons";
 
 import { BusIngress } from "../src/ingress/bus-ingress";
 import type { IngressEvent } from "../src/ingress/normalizer";

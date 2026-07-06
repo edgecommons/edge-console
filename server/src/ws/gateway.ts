@@ -26,7 +26,7 @@
  * fresh snapshot, not queued) - this never blocks or delays delivery to any other
  * client, since sending is a simple non-blocking call per session in a plain loop.
  */
-import { logger } from "@edgecommons/ggcommons";
+import { logger } from "@edgecommons/edgecommons";
 import { PROTOCOL_VERSION, componentKeyId, parseClientMessage } from "@edgecommons/edge-console-protocol";
 import type {
   AlarmSnapshot,

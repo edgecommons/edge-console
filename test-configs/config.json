@@ -1,20 +1,39 @@
 {
-  "logging": { "level": "INFO" },
-  "heartbeat": { "enabled": true, "intervalSecs": 5 },
-  "metricEmission": { "target": "messaging" },
-
+  "logging": {
+    "level": "INFO"
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalSecs": 5
+  },
+  "metricEmission": {
+    "target": "messaging"
+  },
   "messaging": {
-    "local": { "host": "localhost", "port": 1884, "clientId": "edge-console" },
+    "local": {
+      "host": "localhost",
+      "port": 1884,
+      "clientId": "edge-console"
+    },
     "requestTimeoutSeconds": 30
   },
-
-  "hierarchy": { "levels": ["site", "device"] },
-  "identity": { "site": "dallas" },
-
+  "hierarchy": {
+    "levels": [
+      "site",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "dallas"
+  },
   "component": {
     "global": {
       "console": {
-        "ws": { "port": 8443, "bindAddress": "0.0.0.0", "heartbeatIntervalMs": 15000 },
+        "ws": {
+          "port": 8443,
+          "bindAddress": "0.0.0.0",
+          "heartbeatIntervalMs": 15000
+        },
         "staleness": {
           "warnMultiplier": 2,
           "staleMultiplier": 2.5,
@@ -22,9 +41,16 @@
           "defaultIntervalSecs": 5,
           "sweepIntervalMs": 1000
         },
-        "cache": { "maxChannelsPerComponent": 1024 }
+        "cache": {
+          "maxChannelsPerComponent": 1024
+        }
       }
     },
-    "instances": [{ "id": "main" }]
+    "instances": [
+      {
+        "id": "main"
+      }
+    ],
+    "token": "edge-console"
   }
 }

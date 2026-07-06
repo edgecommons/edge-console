@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/ggcommons";
+import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/edgecommons";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
 import type { FleetDelta, ServerMessage } from "@edgecommons/edge-console-protocol";
 

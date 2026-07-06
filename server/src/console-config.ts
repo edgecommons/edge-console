@@ -4,12 +4,12 @@
  * component's own permissive `component.global` subtree — the bridge precedent — so no
  * canonical-schema change is needed; the old M12 "console section" mandate dissolved).
  *
- * Parsing is deliberately lenient with defaults, matching the ggcommons config-model
+ * Parsing is deliberately lenient with defaults, matching the edgecommons config-model
  * house style (`HeartbeatConfig` et al.): a missing/malformed section or field falls
  * back to its default rather than failing the component.
  */
 import { resolve } from "node:path";
-import { logger } from "@edgecommons/ggcommons";
+import { logger } from "@edgecommons/edgecommons";
 import { DEFAULT_RBAC_CONFIG } from "./command/rbac";
 import type { RbacConfig, RolePolicy } from "./command/rbac";
 
