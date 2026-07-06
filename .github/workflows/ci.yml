@@ -43,7 +43,7 @@ jobs:
           }
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
           NODE
-          npm install --no-audit --no-fund --omit=optional --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
+          npm install --no-audit --no-fund --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
           npm run build --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
       - name: Link checked-out core TypeScript library
         env:
