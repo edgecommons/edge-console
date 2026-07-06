@@ -4,10 +4,9 @@
  * `.cargo/config.toml` `paths` override.
  *
  * The committed `server/package.json` declares the PUBLISHED dependency
- * (`"@edgecommons/edgecommons": "^0.1.1"`, GitHub Packages) so CI resolves the real
- * release. For local development against the sibling checkout
- * (`../core/libs/ts`, e.g. on `feat/unified-namespace` before it publishes),
- * this script generates the **gitignored** `local/edgecommons/` workspace stub:
+ * (`"@edgecommons/edgecommons": "^0.2.0"`, GitHub Packages). Until the GitHub
+ * Packages path is published, CI and local development can build against a core
+ * checkout by generating the **gitignored** `local/edgecommons/` workspace stub:
  *
  *   - `package.json`  — name `@edgecommons/edgecommons`, the sibling's version, so the
  *     npm workspace satisfies the dependency by name and `npm install` never
@@ -18,14 +17,18 @@
  *     real path, exactly like cargo's `paths` override.
  *
  * Usage:  npm run link:lib   (then `npm install` as usual)
+ * Set `EDGECOMMONS_TS_LIB` to override the default `../core/libs/ts` checkout.
  * Requires the sibling lib to be built (`npm run build` in core/libs/ts).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const sibling = resolve(root, "..", "core", "libs", "ts");
+const configuredSibling = process.env.EDGECOMMONS_TS_LIB?.trim();
+const sibling = configuredSibling
+  ? resolve(configuredSibling)
+  : resolve(root, "..", "core", "libs", "ts");
 const stubDir = join(root, "local", "edgecommons");
 
 if (!existsSync(join(sibling, "package.json"))) {
@@ -48,7 +51,8 @@ if (siblingPkg.name !== "@edgecommons/edgecommons") {
 mkdirSync(stubDir, { recursive: true });
 
 // Relative from local/edgecommons/ to the sibling's dist (POSIX separators for portability).
-const rel = "../../../core/libs/ts/dist/index";
+let rel = relative(stubDir, join(sibling, "dist", "index")).split("\\").join("/");
+if (!rel.startsWith(".")) rel = `./${rel}`;
 
 writeFileSync(
   join(stubDir, "package.json"),

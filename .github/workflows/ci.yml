@@ -7,11 +7,11 @@ on:
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
-# TypeScript workspace (protocol + server + ui). The server depends on @edgecommons/edgecommons from
-# GitHub Packages npm; auth comes from EDGECOMMONS_READ_TOKEN (org secret, read:packages) with the
-# built-in GITHUB_TOKEN as a fallback. The committed .npmrc scopes @edgecommons to GH Packages and
-# reads the token from NODE_AUTH_TOKEN. package-lock.json is intentionally gitignored (it would record
-# the local/edgecommons dev link, which does not exist in CI), so we `npm install` rather than `npm ci`.
+# TypeScript workspace (protocol + server + ui). The server depends on @edgecommons/edgecommons.
+# Until the GitHub Packages npm path is published, CI checks out the private core repo, builds
+# libs/ts, and generates the gitignored local/edgecommons workspace stub before install. package-lock.json
+# is intentionally gitignored because it records the local/edgecommons dev link, so we `npm install`
+# rather than `npm ci`.
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -20,9 +20,23 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout core library until the GitHub Packages path is published
+        uses: actions/checkout@v4
+        with:
+          repository: edgecommons/ggcommons
+          token: ${{ secrets.EDGECOMMONS_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          path: .edgecommons-core
       - uses: actions/setup-node@v4
         with:
           node-version: "22"  # global WebSocket (used by the ws round-trip tests) is stable from Node 22
+      - name: Build core TypeScript library
+        run: |
+          npm install --no-audit --no-fund --prefix "$GITHUB_WORKSPACE/.edgecommons-core"
+          npm --prefix "$GITHUB_WORKSPACE/.edgecommons-core" run build -w @edgecommons/edgecommons
+      - name: Link checked-out core TypeScript library
+        env:
+          EDGECOMMONS_TS_LIB: ${{ github.workspace }}/.edgecommons-core/libs/ts
+        run: npm run link:lib
       - name: Install (workspace)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.EDGECOMMONS_READ_TOKEN || secrets.GITHUB_TOKEN }}
