@@ -23,7 +23,7 @@ jobs:
       - name: Checkout core library until the GitHub Packages path is published
         uses: actions/checkout@v4
         with:
-          repository: edgecommons/ggcommons
+          repository: edgecommons/edgecommons
           token: ${{ secrets.EDGECOMMONS_READ_TOKEN || secrets.GITHUB_TOKEN }}
           path: .edgecommons-core
       - uses: actions/setup-node@v4
