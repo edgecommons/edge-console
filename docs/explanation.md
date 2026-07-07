@@ -59,11 +59,10 @@ ecv1/+/+/+/metric/# ecv1/+/+/+/data/#   ecv1/+/+/+/log/#
 ```
 
 **Identity always comes from the envelope's top-level `identity` element**, never the topic — the device
-is the last hierarchy level, and grouping/routing never parse the body or the topic string. There is
-exactly **one documented exception**: the `uns-bridge`'s Last Will is a *bare, un-enveloped* JSON payload
-`{"status":"UNREACHABLE"}` that the broker (not the bridge) publishes on
-`ecv1/{device}/uns-bridge/{instance}/state`. For that one shape the topic is parsed for `{device}` and
-the whole device is marked UNREACHABLE. Every other raw message is dropped.
+is the last hierarchy level, and grouping/routing never parse the body or the topic string. The
+`uns-bridge` Last Will is broker-published, but its payload is still a protobuf `state` envelope from
+the bridge identity with `status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/{instance}/state`. That
+envelope marks the whole device UNREACHABLE. Raw messages are not normal UNS data and are dropped.
 
 ## The retain substitute: a timestamped last-known-value cache
 

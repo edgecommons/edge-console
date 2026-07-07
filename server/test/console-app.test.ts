@@ -9,7 +9,7 @@ import type { FleetDelta, ServerMessage } from "@edgecommons/edge-console-protoc
 import { startConsole } from "../src/console-app";
 import type { ConsoleApp } from "../src/console-app";
 import type { ClientTransport } from "../src/ws/gateway";
-import { FakeBus, RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";
+import { FakeBus, makeIdentity, wireEnvelope } from "./_fakes";
 
 const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "gw-01" }], "edge-console");
 
@@ -75,8 +75,11 @@ describe("startConsole - the C1 composition", () => {
       "ecv1/gw-02/_bcast/main/cmd/republish-cfg",
     ]);
 
-    // A second device discovered via LWT gets its own broadcast too.
-    await bus.emitWire("ecv1/gw-03/uns-bridge/main/state", RAW_LWT);
+    // A second device discovered via a protobuf state envelope gets its own broadcast too.
+    await bus.emitWire(
+      "ecv1/gw-03/press-18/main/state",
+      wireEnvelope("state", makeIdentity("gw-03", "press-18"), { status: "RUNNING", uptimeSecs: 1 }),
+    );
     await vi.runOnlyPendingTimersAsync();
     expect(bus.published.map((p) => p.topic)).toContain("ecv1/gw-03/_bcast/main/cmd/republish-state");
 
@@ -311,7 +314,7 @@ describe("startConsole - the C1 composition", () => {
     await app.stop();
   });
 
-  it("serves the R0 round-trip: data→signals, metric→attributes, evt→alarms, and device-LWT containment", async () => {
+  it("serves the R0 round-trip: data→signals, metric→attributes, evt→alarms, and protobuf LWT containment", async () => {
     const bus = new FakeBus();
     const app = await start(bus);
     const identity = makeIdentity("gw-03", "opcua-adapter");
@@ -368,7 +371,10 @@ describe("startConsole - the C1 composition", () => {
     // The bridge LWT marks the device UNREACHABLE -> the FleetModel reachability delta
     // drives alarm CONTAINMENT (the alarm leaves the active counts, streamed live as a
     // fresh `alarms` frame — the C2 `delta` frame for the same transition follows it).
-    await bus.emitWire("ecv1/gw-03/uns-bridge/main/state", RAW_LWT);
+    await bus.emitWire(
+      "ecv1/gw-03/uns-bridge/main/state",
+      wireEnvelope("state", makeIdentity("gw-03", "uns-bridge"), { status: "UNREACHABLE" }),
+    );
     const contained = sent.filter((m) => m.type === "alarms").at(-1)!;
     if (contained.type !== "alarms") throw new Error("unreachable");
     expect(contained.snapshot.counts).toMatchObject({ active: 0, contained: 1 });

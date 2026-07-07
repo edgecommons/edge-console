@@ -19,7 +19,7 @@ per-component topic templates.
 
 | Class | Wildcard | What the console does with it |
 |-------|----------|-------------------------------|
-| `state` | `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]`; the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge raw LWT (below). |
+| `state` | `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]`; the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge protobuf LWT (below). |
 | `cfg` | `ecv1/+/+/+/cfg` | Effective, source-redacted config → the Configuration screen; the cadence source (`config.heartbeat.intervalSecs`). |
 | `evt` | `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
 | `metric` | `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
@@ -30,8 +30,9 @@ per-component topic templates.
 
 ## Envelope & identity
 
-All non-raw messages use the EdgeCommons JSON envelope `{header, identity, tags, body}`. The console
-attributes **every** message by its top-level **`identity`** element — never the topic:
+Normal messages use the EdgeCommons protobuf envelope whose diagnostic JSON shape is
+`{header, identity, tags, body}`. The console attributes **every** message by its top-level
+**`identity`** element — never the topic:
 
 ```jsonc
 "identity": {
@@ -51,19 +52,19 @@ attributes **every** message by its top-level **`identity`** element — never t
 An envelope the console cannot attribute (no parseable `identity`) is counted (`missing-identity`) and
 dropped — never fatal.
 
-## The one exception: the bridge Last Will (raw)
+## Bridge Last Will
 
-Identity always comes from the envelope, with a **single documented exception**. The `uns-bridge`'s Last
-Will is a *bare, un-enveloped* JSON payload published by the **broker** (not the bridge) on:
+The `uns-bridge` Last Will is published by the **broker** when the bridge connection dies, but the payload
+is still a normal EdgeCommons protobuf `state` envelope from the bridge identity:
 
 ```text
 topic:   ecv1/{device}/uns-bridge/{instance}/state
-payload: {"status":"UNREACHABLE"}
+body:    {"status":"UNREACHABLE"}
 ```
 
-For exactly this shape — raw, on the `state` wildcard, component token `uns-bridge`, exact leaf depth,
-`status === "UNREACHABLE"` — the topic is parsed for `{device}` and the **whole device** is marked
-UNREACHABLE with **event-time = delivery time**. Every other raw message is dropped (`raw-non-lwt`).
+For this bridge `state` envelope, `status === "UNREACHABLE"` marks the **whole device** UNREACHABLE with
+event time equal to console receipt time. Every raw/non-protobuf message is dropped before normal
+FleetModel processing.
 
 ## What the console publishes
 

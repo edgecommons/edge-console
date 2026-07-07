@@ -1,7 +1,7 @@
 /**
  * Shared test fakes — the console's fake bus (no live broker, the lib's
  * `RecordingMessagingService` pattern + wildcard routing via the lib's exported
- * `topicMatches`) and envelope helpers with pinned timestamps (no sleeps).
+ * `topicMatches`) and protobuf envelope helpers with pinned timestamps (no sleeps).
  */
 import { Message, MessageBuilder, MessageIdentity, ReplyFuture, topicMatches } from "@edgecommons/edgecommons";
 import type { IMessagingService, MessageHandler, MessageTags, Qos } from "@edgecommons/edgecommons";
@@ -20,9 +20,9 @@ export interface RequestRecord {
 }
 
 /**
- * An in-memory `IMessagingService`: records publishes; `emitWire` delivers a wire
- * payload to every subscription whose filter matches the topic (real MQTT wildcard
- * semantics via the lib's `topicMatches`).
+ * An in-memory `IMessagingService`: records publishes; `emitWire` decodes protobuf
+ * bytes through the TS core API, then delivers to every subscription whose filter
+ * matches the topic (real MQTT wildcard semantics via the lib's `topicMatches`).
  */
 export class FakeBus implements IMessagingService {
   readonly published: PublishedRecord[] = [];
@@ -89,11 +89,26 @@ export class FakeBus implements IMessagingService {
     return this.connectedState;
   }
 
-  /** Deliver a wire payload to every matching subscription (awaits the handlers). */
-  async emitWire(topic: string, payload: string): Promise<void> {
+  /** Deliver an EdgeCommons protobuf wire payload to every matching subscription. */
+  async emitWire(topic: string, payload: Buffer | Uint8Array): Promise<void> {
+    let message: Message;
+    try {
+      message = Message.fromBytes(payload);
+    } catch {
+      return;
+    }
     for (const [filter, handler] of [...this.subscriptions.entries()]) {
       if (topicMatches(filter, topic)) {
-        await handler(topic, Message.fromWire(payload));
+        await handler(topic, message);
+      }
+    }
+  }
+
+  /** Deliver a pre-decoded message to matching subscriptions for narrow raw-path tests. */
+  async emitMessage(topic: string, message: Message): Promise<void> {
+    for (const [filter, handler] of [...this.subscriptions.entries()]) {
+      if (topicMatches(filter, topic)) {
+        await handler(topic, message);
       }
     }
   }
@@ -116,21 +131,18 @@ export function makeIdentity(
   return new MessageIdentity(hier, component, instance);
 }
 
-/** Serialize an envelope with a pinned timestamp (deterministic; optionally identityless). */
+/** Serialize an envelope to protobuf bytes with a pinned timestamp (deterministic; optionally identityless). */
 export function wireEnvelope(
   name: string,
   identity: MessageIdentity | undefined,
   body: unknown,
   tags?: MessageTags,
-): string {
+): Buffer {
   const builder = MessageBuilder.create(name, "1.0")
     .withPayload(body)
     .withTimestamp("2026-07-03T00:00:00.000Z")
     .withUuid("00000000-0000-0000-0000-000000000000");
   if (identity !== undefined) builder.withIdentity(identity);
   if (tags !== undefined) builder.withTags(tags);
-  return builder.build().toJSON();
+  return builder.build().toBytes();
 }
-
-/** The bridge's raw Last-Will payload, exactly as the broker publishes it (G5). */
-export const RAW_LWT = '{"status":"UNREACHABLE"}';

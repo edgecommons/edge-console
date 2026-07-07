@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MessageBuilder, MessageIdentity, Uns } from "@edgecommons/edgecommons";
+import { Message, MessageBuilder, MessageIdentity, Uns } from "@edgecommons/edgecommons";
 
 import { BusIngress } from "../src/ingress/bus-ingress";
 import type { IngressEvent } from "../src/ingress/normalizer";
-import { FakeBus, RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";
+import { FakeBus, makeIdentity, wireEnvelope } from "./_fakes";
 
 /** The console's own identity (a component on the gateway box, rootless topics). */
 const CONSOLE_IDENTITY = new MessageIdentity([{ level: "device", value: "gw-01" }], "edge-console");
@@ -63,14 +63,28 @@ describe("BusIngress - delivery -> normalized events", () => {
     ]);
   });
 
-  it("delivers the bridge raw LWT on the state wildcard as device-unreachable (G5)", async () => {
+  it("drops malformed/non-protobuf payloads before they reach the FleetModel", async () => {
     const bus = new FakeBus();
     const { ingress, events } = makeIngress(bus);
     await ingress.start();
 
-    await bus.emitWire("ecv1/gw-07/uns-bridge/main/state", RAW_LWT);
+    await bus.emitWire("ecv1/gw-07/uns-bridge/main/state", Buffer.from('{"status":"UNREACHABLE"}', "utf8"));
+    expect(events).toEqual([]);
+  });
+
+  it("ignores an explicitly decoded raw payload from a custom raw seam", async () => {
+    const bus = new FakeBus();
+    const { ingress, events } = makeIngress(bus);
+    await ingress.start();
+
+    await bus.emitMessage("ecv1/gw-07/uns-bridge/main/state", Message.raw({ status: "UNREACHABLE" }));
     expect(events).toEqual([
-      { kind: "device-unreachable", device: "gw-07", topic: "ecv1/gw-07/uns-bridge/main/state" },
+      {
+        kind: "ignored",
+        cls: "state",
+        topic: "ecv1/gw-07/uns-bridge/main/state",
+        reason: "raw-non-lwt",
+      },
     ]);
   });
 

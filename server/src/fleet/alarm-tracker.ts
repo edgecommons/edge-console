@@ -7,7 +7,8 @@
  * Alarms are DERIVED from the `evt` severity stream (the console owns this; the library
  * has no alarm facade). Keyed by `(component, type)`:
  *  - a critical/error/warning `evt` RAISES (or re-raises, bumping the count) an active
- *    alarm — see {@link isAlarmingSeverity};
+ *    alarm — see {@link isAlarmingSeverity}; an event body with `active:false` clears the
+ *    same alarm even when it rides the same alarming channel;
  *  - a normal-severity (info/debug/unknown) `evt` on the SAME `(component, type)` CLEARS
  *    it into history (a "resolve" convention: `evt/info/connection-lost` clears the
  *    `connection-lost` alarm raised by `evt/critical/connection-lost`);
@@ -86,8 +87,9 @@ export class AlarmTracker {
   }
 
   /**
-   * Tee one ingress event into the tracker. Only attributable `evt` envelopes act; an
-   * alarming severity raises/re-raises, a normal severity clears the matching alarm.
+   * Tee one ingress event into the tracker. Only attributable `evt` envelopes act. An explicit
+   * `active:false` clears the matching alarm; otherwise alarming severity raises/re-raises and a
+   * normal severity clears.
    */
   ingest(event: IngressEvent): void {
     if (event.kind !== "envelope" || event.cls !== "evt") return;
@@ -103,7 +105,9 @@ export class AlarmTracker {
     const componentId = componentKeyId(key);
     const id = `${componentId}::${type}`;
 
-    if (isAlarmingSeverity(level)) {
+    if (activeFlagOf(event.body) === false) {
+      this.clear(id);
+    } else if (isAlarmingSeverity(level)) {
       this.raise(id, key, componentId, level!, type, event);
     } else {
       this.clear(id);
@@ -275,6 +279,14 @@ function messageOf(body: unknown): string | undefined {
   if (body !== null && typeof body === "object" && !Array.isArray(body)) {
     const m = (body as Record<string, unknown>).message;
     if (typeof m === "string") return m;
+  }
+  return undefined;
+}
+
+function activeFlagOf(body: unknown): boolean | undefined {
+  if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+    const active = (body as Record<string, unknown>).active;
+    if (typeof active === "boolean") return active;
   }
   return undefined;
 }

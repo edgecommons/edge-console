@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FleetDelta } from "@edgecommons/edge-console-protocol";
 
 import { FleetModel } from "../src/fleet/fleet-model";
-import type { EnvelopeEvent, IngressEvent } from "../src/ingress/normalizer";
+import type { EnvelopeEvent } from "../src/ingress/normalizer";
 
 /** A manually-advanced clock (ms) — no sleeps anywhere. */
 class TestClock {
@@ -48,11 +48,19 @@ function cfg(intervalSecs: unknown): EnvelopeEvent {
   return env({ cls: "cfg", body: { config: { heartbeat: { intervalSecs } } } });
 }
 
-const unreachable = (device = "gw-01"): IngressEvent => ({
-  kind: "device-unreachable",
-  device,
-  topic: `ecv1/${device}/uns-bridge/main/state`,
-});
+function bridgeLwt(device = "gw-01"): EnvelopeEvent {
+  return env({
+    cls: "state",
+    body: { status: "UNREACHABLE" },
+    identity: {
+      hier: [{ level: "device", value: device }],
+      path: device,
+      component: "uns-bridge",
+      instance: "main",
+    },
+    topic: `ecv1/${device}/uns-bridge/main/state`,
+  });
+}
 
 function types(deltas: FleetDelta[]): string[] {
   return deltas.map((d) => d.type);
@@ -266,7 +274,7 @@ describe("FleetModel - whole-device UNREACHABLE (bridge LWT, G5)", () => {
     model.ingest(state("RUNNING", 1, "press-17"));
     model.ingest(state("RUNNING", 1, "opcua-adapter"));
 
-    const deltas = model.ingest(unreachable());
+    const deltas = model.ingest(bridgeLwt());
     expect(deltas).toEqual([
       expect.objectContaining({
         type: "device-reachability-changed",
@@ -289,15 +297,15 @@ describe("FleetModel - whole-device UNREACHABLE (bridge LWT, G5)", () => {
   it("is idempotent (a repeated LWT changes nothing)", () => {
     const model = new FleetModel(new TestClock().fn);
     model.ingest(state("RUNNING", 1));
-    model.ingest(unreachable());
-    expect(model.ingest(unreachable())).toEqual([]);
+    model.ingest(bridgeLwt());
+    expect(model.ingest(bridgeLwt())).toEqual([]);
   });
 
   it("stays terminal through non-state traffic and clears only on the next state envelope", () => {
     const clock = new TestClock();
     const model = new FleetModel(clock.fn);
     model.ingest(state("RUNNING", 1));
-    model.ingest(unreachable());
+    model.ingest(bridgeLwt());
 
     // Cached (still useful data) but NOT a reachability proof.
     const metricDeltas = model.ingest(env({ cls: "metric", channel: "sys", body: { cpu_usage: 0.5 } }));
@@ -318,7 +326,7 @@ describe("FleetModel - whole-device UNREACHABLE (bridge LWT, G5)", () => {
 
   it("discovers a device from its LWT alone (bridge dies before anything else was seen)", () => {
     const model = new FleetModel(new TestClock().fn);
-    const deltas = model.ingest(unreachable("gw-99"));
+    const deltas = model.ingest(bridgeLwt("gw-99"));
     expect(types(deltas)).toEqual(["device-discovered", "device-reachability-changed"]);
     expect(model.devices()).toEqual(["gw-99"]);
     expect(model.snapshot().devices[0]!).toMatchObject({ device: "gw-99", unreachable: true, components: [] });
@@ -366,7 +374,7 @@ describe("FleetModel - snapshot/delta contract (the C2 seam)", () => {
 
   it("lists known devices sorted (the republish-broadcast iteration set)", () => {
     const model = new FleetModel(new TestClock().fn);
-    model.ingest(unreachable("gw-09"));
+    model.ingest(bridgeLwt("gw-09"));
     model.ingest(state("RUNNING", 1));
     expect(model.devices()).toEqual(["gw-01", "gw-09"]);
   });

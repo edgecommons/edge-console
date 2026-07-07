@@ -79,6 +79,22 @@ describe("AlarmTracker - raise / re-raise / clear", () => {
     expect(snaps).toHaveLength(3);
   });
 
+  it("clears a stateful alarm when the event body carries active false on the same alarming channel", () => {
+    const clock = new TestClock();
+    const tracker = new AlarmTracker(clock.fn);
+
+    tracker.ingest(evtEvent(MODBUS, "critical/connection", { message: "Modbus link down" }));
+    expect(tracker.snapshot().counts).toMatchObject({ critical: 1, active: 1 });
+
+    clock.tick(1000);
+    tracker.ingest(evtEvent(MODBUS, "critical/connection", { active: false }));
+
+    expect(tracker.snapshot().counts).toMatchObject({ critical: 0, active: 0 });
+    expect(tracker.snapshot().active).toHaveLength(0);
+    expect(tracker.history()).toHaveLength(1);
+    expect(tracker.history()[0]).toMatchObject({ type: "connection", resolvedAt: 1_001_000 });
+  });
+
   it("buckets warning + error together; a clear with no active alarm is a silent no-op", () => {
     const clock = new TestClock();
     const tracker = new AlarmTracker(clock.fn);

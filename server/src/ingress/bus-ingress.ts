@@ -4,9 +4,9 @@
  * Holds the injected {@link IMessagingService} (the console's ONE connection: the
  * site broker — reconciliation §3), subscribes the **six consumer-class wildcards**
  * built through the library's `uns().filter()` (never by hand — G10/bridge
- * precedent), and normalizes every delivery into an {@link IngressEvent} for the
- * sink (the FleetModel). The `state` wildcard also delivers the bridges' raw LWT
- * payloads — the normalizer's one topic-parse exception (G5).
+ * precedent), and normalizes every decoded EdgeCommons protobuf delivery into an
+ * {@link IngressEvent} for the sink (the FleetModel). The standard core subscription
+ * drops malformed/non-protobuf bytes before handlers run.
  *
  * It also owns the **per-device `republish-*` broadcast** (G1/D-U19): on discovery
  * of a device (and on console start for already-known devices) it publishes

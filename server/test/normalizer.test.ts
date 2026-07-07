@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { Message } from "@edgecommons/edgecommons";
+import { Message, MessageBuilder } from "@edgecommons/edgecommons";
 
 import { normalize } from "../src/ingress/normalizer";
-import { RAW_LWT, makeIdentity, wireEnvelope } from "./_fakes";
+import { makeIdentity, wireEnvelope } from "./_fakes";
 
 /** Rootless grammar: the class token sits at topic level 4. */
 const CLASS_INDEX = 4;
 
-function decode(payload: string): Message {
-  return Message.fromWire(payload);
+function decode(payload: Buffer): Message {
+  return Message.fromBytes(payload);
 }
 
 describe("normalize - envelope path", () => {
@@ -100,36 +100,73 @@ describe("normalize - envelope path", () => {
     expect(ev).toMatchObject({ kind: "ignored", cls: "state", reason: "missing-identity" });
   });
 
-  it("drops an envelope whose malformed identity the lib parsed away (lenient drop)", () => {
-    // The lib's lenient identity parser drops a malformed identity with a WARN and
-    // still delivers the envelope — the console must not crash on it.
-    const wire = JSON.stringify({
-      header: { name: "state", version: "1.0", timestamp: "", correlation_id: "", uuid: "" },
-      identity: { bogus: 1 },
-      body: { status: "RUNNING" },
-    });
-    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/mystery/main/state", decode(wire));
+  it("drops a decoded envelope whose identity is absent", () => {
+    const msg = Message.envelope(
+      {
+        name: "state",
+        version: "1.0",
+        timestamp: "",
+        timestamp_ms: 0,
+        correlation_id: "",
+        uuid: "",
+      },
+      undefined,
+      { status: "RUNNING" },
+    );
+    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/mystery/main/state", msg);
     expect(ev).toMatchObject({ kind: "ignored", reason: "missing-identity" });
+  });
+
+  it("projects opaque protobuf bodies as diagnostics without exposing payload bytes", () => {
+    const msg = MessageBuilder.create("FramePreview", "1.0")
+      .withTimestamp("2026-07-03T00:00:00.000Z")
+      .withUuid("00000000-0000-0000-0000-000000000000")
+      .withIdentity(makeIdentity("gw-01", "camera"))
+      .withTags({ capture_mode: "preview", _relay: ["gw-01/uns-bridge"] })
+      .withOpaqueBody(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg")
+      .build();
+
+    const ev = normalize("data", CLASS_INDEX, "ecv1/gw-01/camera/main/data/frame-preview", Message.fromBytes(msg.toBytes()));
+
+    expect(ev.kind).toBe("envelope");
+    if (ev.kind !== "envelope") return;
+    expect(ev.tags).toEqual({ capture_mode: "preview", _relay: ["gw-01/uns-bridge"] });
+    expect(ev.body).toMatchObject({ content_type: "image/jpeg", length: 4 });
+    expect((ev.body as Record<string, unknown>).sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect((ev.body as Record<string, unknown>).data).toBeUndefined();
+  });
+
+  it("keeps structured byte values as core diagnostic markers, not assumed JSON", () => {
+    const msg = MessageBuilder.create("SouthboundSignalUpdate", "1.0")
+      .withTimestamp("2026-07-03T00:00:00.000Z")
+      .withUuid("00000000-0000-0000-0000-000000000000")
+      .withIdentity(makeIdentity("gw-01", "camera"))
+      .withSouthboundSignalUpdate({
+        signal: { id: "camera-1/thumbnail", name: "thumbnail" },
+        samples: [{ value: Buffer.from([0, 1, 2, 254, 255]), quality: "GOOD" }],
+      })
+      .build();
+
+    const ev = normalize("data", CLASS_INDEX, "ecv1/gw-01/camera/main/data/camera-1/thumbnail", Message.fromBytes(msg.toBytes()));
+
+    expect(ev.kind).toBe("envelope");
+    if (ev.kind !== "envelope") return;
+    const body = ev.body as { samples: Array<{ value: unknown; quality?: string }> };
+    expect(body.samples[0]!.quality).toBe("GOOD");
+    expect(body.samples[0]!.value).toEqual({
+      _edgecommonsBinary: { encoding: "base64", length: 5, data: "AAEC/v8=" },
+    });
   });
 });
 
-describe("normalize - raw-LWT path (the one documented topic-parse exception, G5)", () => {
-  it("marks the device UNREACHABLE for the bridge LWT on the state wildcard", () => {
-    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/uns-bridge/main/state", decode(RAW_LWT));
-    expect(ev).toEqual({
-      kind: "device-unreachable",
-      device: "gw-01",
-      topic: "ecv1/gw-01/uns-bridge/main/state",
-    });
-  });
-
-  it("accepts any bridge instance token ({instance} is not pinned)", () => {
-    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/uns-bridge/relay/state", decode(RAW_LWT));
-    expect(ev.kind).toBe("device-unreachable");
-  });
-
-  it("ignores raw state payloads from components other than uns-bridge", () => {
-    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/rogue/main/state", decode(RAW_LWT));
+describe("normalize - raw path", () => {
+  it("ignores raw state payloads, including legacy bridge LWT shapes", () => {
+    const ev = normalize(
+      "state",
+      CLASS_INDEX,
+      "ecv1/gw-01/uns-bridge/main/state",
+      Message.raw({ status: "UNREACHABLE" }),
+    );
     expect(ev).toMatchObject({ kind: "ignored", reason: "raw-non-lwt" });
   });
 
@@ -138,13 +175,13 @@ describe("normalize - raw-LWT path (the one documented topic-parse exception, G5
       "state",
       CLASS_INDEX,
       "ecv1/gw-01/uns-bridge/main/state",
-      decode('{"status":"RUNNING"}'),
+      Message.raw({ status: "RUNNING" }),
     );
     expect(ev).toMatchObject({ kind: "ignored", reason: "raw-non-lwt" });
   });
 
   it("ignores raw non-object payloads (unparseable bytes arrive as a raw string)", () => {
-    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/uns-bridge/main/state", decode("not json"));
+    const ev = normalize("state", CLASS_INDEX, "ecv1/gw-01/uns-bridge/main/state", Message.raw("not json"));
     expect(ev).toMatchObject({ kind: "ignored", reason: "raw-non-lwt" });
   });
 
@@ -153,13 +190,13 @@ describe("normalize - raw-LWT path (the one documented topic-parse exception, G5
       "state",
       CLASS_INDEX,
       "ecv1/gw-01/uns-bridge/main/state/extra",
-      decode(RAW_LWT),
+      Message.raw({ status: "UNREACHABLE" }),
     );
     expect(ev).toMatchObject({ kind: "ignored", reason: "raw-non-lwt" });
   });
 
   it("ignores raw payloads on every non-state class", () => {
-    const ev = normalize("data", CLASS_INDEX, "ecv1/gw-01/x/main/data/temp", decode('{"v":1}'));
+    const ev = normalize("data", CLASS_INDEX, "ecv1/gw-01/x/main/data/temp", Message.raw({ v: 1 }));
     expect(ev).toMatchObject({ kind: "ignored", cls: "data", reason: "raw-non-lwt" });
   });
 });

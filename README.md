@@ -43,12 +43,12 @@ ecv1/+/+/+/state    ecv1/+/+/+/cfg      ecv1/+/+/+/evt/#
 ecv1/+/+/+/metric/# ecv1/+/+/+/data/#   ecv1/+/+/+/log/#
 ```
 
-Identity always comes from the envelope's top-level `identity` element — with **one
-documented exception**: the bridge's Last Will is a bare raw JSON `{"status":"UNREACHABLE"}`
-on `ecv1/{device}/uns-bridge/{instance}/state` (broker-published, no envelope). For exactly
-that shape the topic is parsed for `{device}` and the whole device is marked UNREACHABLE,
-event-time = delivery time. Everything else raw is dropped; `tags._relay` (the bridge hop
-tag) is cached but never used for business logic.
+Identity always comes from the envelope's top-level `identity` element. The bridge's Last
+Will is a broker-published protobuf `state` envelope from `uns-bridge` with
+`status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/{instance}/state`; the FleetModel treats
+that envelope as whole-device UNREACHABLE containment. Raw payloads are not normal UNS data
+and are dropped; `tags._relay` (the bridge hop tag) is cached but never used for business
+logic.
 
 The **FleetModel** (pure, injected clock) is the platform's **retain substitute**: a
 timestamped last-known-value cache keyed by `(device, component, instance, class[, channel])`

@@ -17,10 +17,11 @@
  *  - restart vs gap: an `uptimeSecs` decrease means restart (G4);
  *  - graceful `{"status":"STOPPED"}` holds STOPPED (no staleness decay) until the
  *    next RUNNING state;
- *  - whole-device UNREACHABLE from the bridge raw LWT (G5): the device subtree is
- *    frozen (sweeper skips it), components report UNREACHABLE by overlay, and the
- *    flag is terminal until the next `state` **envelope** from that device (a state
- *    that arrived at the site broker proves the uplink works again).
+ *  - whole-device UNREACHABLE from the bridge protobuf LWT state envelope (G5):
+ *    the device subtree is frozen (sweeper skips it), components report UNREACHABLE
+ *    by overlay, and the flag is terminal until the next non-LWT `state` envelope
+ *    from that device (a state that arrived at the site broker proves the uplink works
+ *    again).
  */
 import type {
   CachedValue,
@@ -36,6 +37,8 @@ import type {
 } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { EnvelopeEvent, IngressEvent } from "../ingress/normalizer";
+
+const BRIDGE_COMPONENT = "uns-bridge";
 
 /**
  * Parse the state body's `instances[]` (#1c) defensively — returns the valid entries (skipping
@@ -69,6 +72,15 @@ function sameInstances(a: InstanceStatus[] | undefined, b: InstanceStatus[]): bo
     }
   }
   return true;
+}
+
+function isBridgeUnreachableState(event: EnvelopeEvent): boolean {
+  if (event.cls !== "state" || event.identity.component !== BRIDGE_COMPONENT) return false;
+  const body =
+    event.body !== null && typeof event.body === "object" && !Array.isArray(event.body)
+      ? (event.body as Record<string, unknown>)
+      : {};
+  return body.status === "UNREACHABLE";
 }
 
 /** Milliseconds since the epoch, injectable for tests (DESIGN's "no sleeps" rule). */
@@ -275,6 +287,22 @@ export class FleetModel {
     const deviceName = last?.value;
     if (deviceName === undefined || deviceName === "") return; // unattributable — defensive
     const device = this.ensureDevice(deviceName, now, deltas);
+
+    if (isBridgeUnreachableState(event)) {
+      if (!device.unreachable) {
+        device.unreachable = true;
+        device.unreachableSince = now;
+        this.push(deltas, {
+          type: "device-reachability-changed",
+          at: now,
+          device: device.device,
+          unreachable: true,
+          componentCount: device.components.size,
+        });
+      }
+      return;
+    }
+
     const comp = this.ensureComponent(device, event, now, deltas);
 
     this.cacheValue(comp, event, now, deltas);

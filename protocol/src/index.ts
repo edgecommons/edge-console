@@ -117,8 +117,8 @@ export function componentKeyId(key: ComponentKey): string {
  *  - `OFFLINE`     — overdue past 5 x (miss-detection's "missing");
  *  - `STOPPED`     — the component reported a graceful `{"status":"STOPPED"}` state
  *                    (held until the next RUNNING state — no staleness decay);
- *  - `UNREACHABLE` — whole-device containment from the bridge's raw LWT
- *                    (`{"status":"UNREACHABLE"}`); overlays every component on the
+ *  - `UNREACHABLE` — whole-device containment from the bridge protobuf LWT state
+ *                    envelope (`status:"UNREACHABLE"`); overlays every component on the
  *                    device until the next `state` envelope arrives from it.
  */
 export type Liveness = "FRESH" | "WARN" | "STALE" | "OFFLINE" | "STOPPED" | "UNREACHABLE";
@@ -146,7 +146,7 @@ export interface CachedValue {
   body: unknown;
   /** Envelope tags, verbatim. `_`-prefixed keys are system-reserved (e.g. `_relay`) — never business context. */
   tags?: Record<string, unknown>;
-  /** Console receipt time (ms epoch) — the authoritative LKV timestamp (event-time on the raw-LWT path too). */
+  /** Console receipt time (ms epoch) — the authoritative LKV timestamp. */
   receivedAt: number;
   /** The publisher's `header.timestamp` claim, when present (display only — never drives staleness). */
   sourceTimestamp?: string;
@@ -699,10 +699,11 @@ export interface ConsoleSettings {
  *
  * The console derives alarms from the `evt` severity stream: a critical/error/warning
  * `evt` RAISES an active alarm keyed by `(component, type)`; a normal-severity (info/
- * debug) follow-up on the same key CLEARS it (into history). `ack` is console-side
- * state. Device UNREACHABLE CONTAINS a device's component alarms — they are suppressed
- * from the active counts ("the road is down, not the houses"), not cleared. This is the
- * data behind the Overview "Active alerts" tile (R1) and the Events & Alarms screen (R4).
+ * debug) follow-up, or a same-channel event body with `active:false`, CLEARS it (into
+ * history). `ack` is console-side state. Device UNREACHABLE CONTAINS a device's component
+ * alarms — they are suppressed from the active counts ("the road is down, not the houses"),
+ * not cleared. This is the data behind the Overview "Active alerts" tile (R1) and the Events
+ * & Alarms screen (R4).
  * --------------------------------------------------------------------------- */
 
 /** The severities that RAISE an alarm (everything else clears — the class is open). */

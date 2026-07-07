@@ -3,22 +3,20 @@
  * {@link IngressEvent} the FleetModel can consume. No IO; unit-tested exhaustively.
  *
  * Identity ALWAYS comes from the top-level envelope `identity` element, never the
- * topic — with **one documented exception** (reconciliation G5): the uns-bridge's
- * broker-published Last Will is a bare raw JSON payload `{"status":"UNREACHABLE"}` on
- * `ecv1/{device}/uns-bridge/{instance}/state` (no envelope, no identity, no honest
- * timestamp — the broker publishes it, not the bridge). For that one shape the topic
- * is parsed for `{device}` and the whole device is marked UNREACHABLE, with
- * **event-time = delivery time** (the FleetModel stamps receipt).
+ * topic. Normal EdgeCommons UNS messages arrive here only after the TS core has
+ * decoded the protobuf `EdgeCommonsMessage` bytes; malformed/non-EdgeCommons bytes
+ * are dropped by the messaging service before this normalizer runs.
+ *
+ * Raw messages are not normal EdgeCommons UNS data under the protobuf contract; a
+ * custom raw seam may still inject one in tests, but it is ignored here.
  *
  * Class and channel are structural topic positions (not identity): the class token's
  * index is known per subscription (the ingress derives it from the filter it built),
  * and the channel is every token after it.
  */
+import { MessageBodyCase } from "@edgecommons/edgecommons";
 import type { Message } from "@edgecommons/edgecommons";
 import type { ConsumerClass, WireIdentity } from "@edgecommons/edge-console-protocol";
-
-/** The bridge's component token — the only component whose raw state is meaningful. */
-const BRIDGE_COMPONENT = "uns-bridge";
 
 /** Why a message was dropped by the normalizer (observability/testing). */
 export type IgnoreReason =
@@ -34,13 +32,14 @@ export interface EnvelopeEvent {
   identity: WireIdentity;
   /** Envelope tags verbatim. `_`-prefixed keys (e.g. the bridge hop tag `_relay`) are system-reserved — consumers ignore them for business/grouping logic (G6). */
   tags?: Record<string, unknown>;
+  /** Diagnostic-safe body projection. Opaque bodies expose metadata, never raw bytes. */
   body: unknown;
   /** The publisher's header timestamp claim, when present. */
   sourceTimestamp?: string;
   topic: string;
 }
 
-/** The raw-LWT path (G5): the bridge's Last Will marks the whole device UNREACHABLE. */
+/** Synthetic reachability event used by the FleetModel and tests. Live bus ingress uses protobuf envelopes. */
 export interface DeviceUnreachableEvent {
   kind: "device-unreachable";
   device: string;
@@ -74,7 +73,7 @@ export function normalize(
   msg: Message,
 ): IngressEvent {
   if (msg.isRaw()) {
-    return normalizeRaw(cls, classIndex, topic, msg.getRaw());
+    return normalizeRaw(cls, topic);
   }
 
   const identity = msg.getIdentity();
@@ -97,47 +96,30 @@ export function normalize(
       instance: identity.instance,
     },
     tags: msg.tags,
-    body: msg.getBody(),
+    body: diagnosticBody(msg),
     sourceTimestamp: msg.header.timestamp !== "" ? msg.header.timestamp : undefined,
     topic,
   };
 }
 
 /**
- * The raw-message path. Only ONE raw shape means anything to the console — the bridge
- * LWT on the `state` wildcard: topic `ecv1/{device}/uns-bridge/{instance}/state`
- * (exactly `classIndex + 1` tokens — `state` is a leaf class) with the bare payload
- * `{"status":"UNREACHABLE"}`. Everything else raw is dropped.
+ * FleetModel/UI diagnostics consume JSON-shaped projections, not raw wire bytes.
+ * Structured protobuf bodies are already decoded by the TS core into diagnostic
+ * values (including `_edgecommonsBinary` markers for nested byte values). Opaque
+ * protobuf bodies stay opaque: use the core diagnostic projection so the UI sees
+ * content type, length, and hash rather than the payload bytes.
  */
-function normalizeRaw(
-  cls: ConsumerClass,
-  classIndex: number,
-  topic: string,
-  raw: unknown,
-): IngressEvent {
-  if (cls === "state") {
-    const tokens = topic.split("/");
-    const device = tokens[classIndex - 3];
-    if (
-      tokens.length === classIndex + 1 &&
-      tokens[classIndex] === "state" &&
-      tokens[classIndex - 2] === BRIDGE_COMPONENT &&
-      typeof device === "string" &&
-      device !== "" &&
-      isUnreachablePayload(raw)
-    ) {
-      return { kind: "device-unreachable", device, topic };
-    }
+function diagnosticBody(msg: Message): unknown {
+  if (msg.getBodyCase() === MessageBodyCase.Opaque) {
+    return msg.toDiagnosticJson().body;
   }
-  return { kind: "ignored", cls, topic, reason: "raw-non-lwt" };
+  return msg.getBody();
 }
 
-/** Whether a raw payload is the bridge LWT body `{"status":"UNREACHABLE"}`. */
-function isUnreachablePayload(raw: unknown): boolean {
-  return (
-    raw !== null &&
-    typeof raw === "object" &&
-    !Array.isArray(raw) &&
-    (raw as Record<string, unknown>).status === "UNREACHABLE"
-  );
+/**
+ * The raw-message path. Live EdgeCommons UNS traffic is protobuf; raw values are
+ * ignored when a custom seam injects one.
+ */
+function normalizeRaw(cls: ConsumerClass, topic: string): IngressEvent {
+  return { kind: "ignored", cls, topic, reason: "raw-non-lwt" };
 }
