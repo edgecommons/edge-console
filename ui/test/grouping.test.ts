@@ -56,6 +56,32 @@ describe("groupFleet — [site, line, device] (one intermediate tier)", () => {
   });
 });
 
+describe("groupFleet — [enterprise, site, line, device]", () => {
+  it("keeps site as the page context and groups below the named site level", () => {
+    const view = fleetView([
+      deviceView("gw-fill-01", [
+        compView({
+          key: key("gw-fill-01", "opcua-adapter"),
+          hier: hier(
+            ["enterprise", "bottles-r-us"],
+            ["site", "dallas"],
+            ["line", "filling-line"],
+            ["device", "gw-fill-01"],
+          ),
+          path: "bottles-r-us/dallas/filling-line/gw-fill-01",
+        }),
+      ]),
+    ]);
+
+    const g = groupFleet(view);
+    expect(g.site).toBe("dallas");
+    expect(g.levelNames).toEqual(["line"]);
+    expect(g.unit).toBe("line");
+    expect(g.groups[0]!.key).toBe("line=filling-line");
+    expect(g.groups[0]!.value).toBe("filling-line");
+  });
+});
+
 describe("groupFleet — [site, device] (no intermediate tier ⇒ flat device list)", () => {
   const view = fleetView([
     deviceView("gw-01", [compView({ key: key("gw-01", "a") }), compView({ key: key("gw-01", "b") })]),

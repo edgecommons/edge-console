@@ -608,7 +608,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 | D4 | MQTT LWT/retain | ✅ **Revised 2026-07-02 → LWT only** (M7). LWT is required by the bridge (whole-device UNREACHABLE on the always-MQTT site-broker hop). **Retain deferred** — MQTT-only, redundant with broadcast `republish-state` + the console's timestamped cache (§6.1), and can't express staleness. See DESIGN-uns D9/§9.3. |
 | D5 | Staleness thresholds | Warn shading at 2×, STALE at 2.5×, OFFLINE at 5× of the in-band `keepalive_secs`; tunable in Settings. |
 | D6 | Console server language | **TypeScript/Node** on the edgecommons TS lib (shared `protocol` package with the React/Carbon UI); WS protocol kept as a hard contract so a Rust server could swap in later. |
-| D7 | Config write path in v1 | Read-only + `reload-config`; feature-flagged whole-document push in Phase 2; per-key patching deferred to the SHARED_CONFIG design. |
+| D7 | Config write path in v1 | Read-only + `reload-config`; feature-flagged whole-document push in Phase 2; per-key patching deferred to a future hierarchical-config administration design. |
 | D8 | Multi-device topology | **`uns-bridge` + site broker** (M1) as primary; console multi-connection federation and per-line-console UI federation as documented fallbacks. |
 | D9 | Descriptor DSL evolution | Hold the no-logic line; the `treeBrowser`/`signalGrid` widgets are the pressure-relief valve. Revisit derive primitives only against a "three concrete demands" bar. |
 | D10 | Topic depth vs hierarchy | **Superseded in v0.3.** The topic is **device-only** (`ecv1/{device}/{component}/{instance}/{class}`) so depth is constant; the enterprise-configurable hierarchy lives in the top-level `identity`, not the topic. Optional single root level via `topic.includeRoot` for a multi-site broker. |
@@ -647,7 +647,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 - Enterprise/multi-site rollup (the console is a site tool; multi-site is a cloud concern above the bridge's optional
   northbound relay).
 - Bridge store-and-forward / durable history (belongs to streams + file-replicator).
-- Per-key config patching (belongs to the unimplemented SHARED_CONFIG design).
+- Per-key config patching (belongs to a future hierarchical-config administration design).
 - Console-per-device as the site answer, and console-as-N-broker-federator as the *primary* (both kept only as
   documented fallbacks).
 - IoT Core as the site aggregation path (kept only as the optional HQ-relay).
@@ -692,7 +692,7 @@ Responds to the identity + facade discussion; each row is a settled decision (se
 | **Service discovery** | No dedicated registry — business components find each other via `describe`-advertised ops + `broadcast` (platform-service territory left to GG / k8s). |
 | **UNS in streaming** | The durable streaming path (Kinesis/Kafka/Parquet via `gg.streams()`) auto-enriches records with identity + header + tags; columnar sinks derive hierarchy **columns** + optional partitioning from the `hierarchy` schema; telemetry-processor `stream:<name>` preserves originating identity (§4.6, M15). |
 | **Identity dedup** | Dropped the standalone `device` field — the device is the **last `hier` entry** (invariant: deepest level is the node), so `deviceLevel` also went away; a computed `device` accessor keeps code ergonomic (§4.4). |
-| **Shared-config dependency** | Hierarchy + shared location levels are distributed via edgecommons **Shared/Layered Config** (`base ⊕ component` merge), defined once in the base layer, not repeated per component. The UNS is the concrete driver for SHARED_CONFIG's deferred multi-level hierarchy. Location moves out of `tags.site/shop/line` into `identity`. |
+| **Hierarchical-config dependency** | Hierarchy + shared location levels are distributed via edgecommons **Hierarchical Config** (`layers[]` root-to-component merge), defined once at the highest useful lineage scope, not repeated per component. The console reads the resulting effective `cfg` and `identity.hier`; it does not parse ConfigComponent catalogs. Location moves out of `tags.site/shop/line` into `identity`. |
 | **Instance is per-message** | `instance` is not a static identity field — a component serves many `component.instances[]`, so the `{instance}` segment is stamped per message from the instance the message pertains to (default `main` for component-level messages). |
 
 ### Doc split (2026-07-02)

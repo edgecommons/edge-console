@@ -76,6 +76,27 @@ describe("siteMap", () => {
     expect(map.entries[0]!.path).toEqual([]);
   });
 
+  it("derives site and device path from [enterprise, site, line, device]", () => {
+    const fleet = fleetView([
+      deviceView("gw-fill-01", [
+        compView({
+          key: key("gw-fill-01", "opcua-adapter"),
+          hier: hier(
+            ["enterprise", "bottles-r-us"],
+            ["site", "dallas"],
+            ["line", "filling-line"],
+            ["device", "gw-fill-01"],
+          ),
+        }),
+      ]),
+    ]);
+    const map = siteMap(fleet);
+    expect(map.site).toBe("dallas");
+    expect(map.levelNames).toEqual(["enterprise", "site", "line", "device"]);
+    expect(map.groupingLevel).toBe("line");
+    expect(map.entries[0]!.path).toEqual([{ level: "line", value: "filling-line" }]);
+  });
+
   it("handles an empty fleet honestly (no entries, no levels)", () => {
     const map = siteMap(fleetView([]));
     expect(map.entries).toEqual([]);

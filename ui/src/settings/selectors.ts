@@ -40,7 +40,7 @@ export interface SiteMapEntry {
 
 /** The identity-derived site map — the read-only substitute for a stored device→line mapping. */
 export interface SiteMap {
-  /** The site value (`hier[0]`) — the page context — when any component carries one. */
+  /** The named `site` hierarchy value — the page context — when any component carries one. */
   site?: string;
   /** The identity hierarchy level names, outer→inner (e.g. `["site","line","device"]`). */
   levelNames: string[];
@@ -52,7 +52,7 @@ export interface SiteMap {
 
 /**
  * Build the identity-derived site map from the fleet view: each device's placement is taken
- * from its components' UNS `hier` (`[site, …intermediate…, device]`), so the "thing → line"
+ * from its components' UNS `hier` (`[…above-site, site, …intermediate…, device]`), so the "thing → line"
  * mapping is READ from the running identities — the console needs no stored site-map. A fleet
  * with no intermediate tier (`[site, device]`) yields empty paths (flat), flagged by the view.
  */
@@ -65,13 +65,16 @@ export function siteMap(fleet: FleetView): SiteMap {
     // A representative hierarchy for the device (the first component that carries one).
     const rep = device.components.find((c) => c.hier.length > 0)?.hier ?? [];
     if (rep.length > deepest.length) deepest = rep.map((e) => ({ level: e.level, value: e.value }));
-    if (rep.length >= 1) {
-      const site = rep[0]!.value;
+    const siteIndex = rep.findIndex((entry) => entry.level === "site");
+    if (siteIndex >= 0) {
+      const site = rep[siteIndex]!.value;
       siteCounts.set(site, (siteCounts.get(site) ?? 0) + 1);
     }
-    // Intermediate levels between site and device (the grouping path); empty when flat.
-    const path =
-      rep.length >= 3 ? rep.slice(1, rep.length - 1).map((e) => ({ level: e.level, value: e.value })) : [];
+    // Intermediate levels between the named site and device (the grouping path); empty when flat.
+    const start = siteIndex >= 0 ? siteIndex + 1 : 0;
+    const path = start < rep.length - 1
+      ? rep.slice(start, rep.length - 1).map((e) => ({ level: e.level, value: e.value }))
+      : [];
     entries.push({ device: device.device, path, componentCount: device.components.length });
   }
 

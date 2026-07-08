@@ -239,6 +239,30 @@ describe("buildTopologyModel — a 3-level hierarchy with endpoints", () => {
 });
 
 describe("buildTopologyModel — hierarchy shapes + containment", () => {
+  it("uses named site for model context and below-site values for group captions", () => {
+    const k = key("gw-fill-01", "opcua-adapter");
+    const model = buildTopologyModel(
+      inputs({
+        fleet: fleetView([
+          deviceView("gw-fill-01", [
+            compView({
+              key: k,
+              hier: hier(
+                ["enterprise", "bottles-r-us"],
+                ["site", "dallas"],
+                ["line", "filling-line"],
+                ["device", "gw-fill-01"],
+              ),
+            }),
+          ]),
+        ]),
+        attributes: attributesView([runtimeAttrs(k, { platform: "HOST" })]),
+      }),
+    );
+    expect(model.site).toBe("dallas");
+    expect(model.groups[0]!.label).toBe("filling-line · gw-fill-01 · HOST");
+  });
+
   it("labels a 2-level [site, device] group with just the device (+ platform)", () => {
     const k = key("gw-01", "opcua-adapter");
     const model = buildTopologyModel(

@@ -23,7 +23,7 @@ import type { ConnLevel } from "../fleet/grouping";
 import { displayUptimeSecs, formatDurationMs } from "../fleet/selectors";
 
 /**
- * The full identity path values for the Components-screen breadcrumb (site → … → device),
+ * The full identity path values for the Components-screen breadcrumb (full hierarchy → device),
  * i.e. every hier value (the component name is appended by the caller). Falls back to the
  * bare device when no hierarchy was advertised.
  */
@@ -33,12 +33,16 @@ export function componentFullPath(comp: ComponentView): string[] {
 }
 
 /**
- * The Detail breadcrumb's MIDDLE segment values — everything below the site (intermediate
+ * The Detail breadcrumb's MIDDLE segment values — everything below the named site (intermediate
  * levels + device), which the mockup renders between "Components" and the component name
  * (e.g. `packaging / pack-gw-01`). With no intermediate tier this is just the device.
  */
 export function componentDetailPath(comp: ComponentView): string[] {
-  if (comp.hier.length > 1) return comp.hier.slice(1).map((e) => e.value);
+  const siteIndex = comp.hier.findIndex((entry) => entry.level === "site");
+  if (siteIndex >= 0 && siteIndex < comp.hier.length - 1) {
+    return comp.hier.slice(siteIndex + 1).map((e) => e.value);
+  }
+  if (comp.hier.length > 1) return comp.hier.map((e) => e.value);
   return [comp.key.device];
 }
 
@@ -61,9 +65,11 @@ export function detailSubtitleParts(
   nowServerMs: number,
 ): string[] {
   const parts: string[] = [];
-  // Intermediate levels above the device (e.g. "line packaging"), verbatim from the hierarchy.
-  if (comp.hier.length > 2) {
-    for (const level of comp.hier.slice(1, comp.hier.length - 1)) {
+  // Intermediate levels below the named site and above the device (e.g. "line packaging").
+  if (comp.hier.length > 1) {
+    const siteIndex = comp.hier.findIndex((entry) => entry.level === "site");
+    const start = siteIndex >= 0 ? siteIndex + 1 : 0;
+    for (const level of comp.hier.slice(start, comp.hier.length - 1)) {
       parts.push(`${level.level} ${level.value}`);
     }
   }

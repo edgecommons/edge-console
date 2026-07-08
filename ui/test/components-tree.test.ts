@@ -67,6 +67,29 @@ describe("buildComponentTree — dynamic hierarchy", () => {
     expect(device.children[0]!.kind).toBe("component");
   });
 
+  it("uses the named site level for page context when enterprise sits above it", () => {
+    const tree = buildComponentTree(
+      fleetView([
+        deviceView("gw-fill-01", [
+          compView({
+            key: key("gw-fill-01", "opcua-adapter"),
+            hier: hier(
+              ["enterprise", "bottles-r-us"],
+              ["site", "dallas"],
+              ["line", "filling-line"],
+              ["device", "gw-fill-01"],
+            ),
+          }),
+        ]),
+      ]),
+    );
+    expect(tree.site).toBe("dallas");
+    expect(tree.roots[0]!.level).toBe("enterprise");
+    expect(tree.roots[0]!.value).toBe("bottles-r-us");
+    expect(tree.roots[0]!.children[0]!.level).toBe("site");
+    expect(tree.roots[0]!.children[0]!.value).toBe("dallas");
+  });
+
   it("nests as deep as the hier goes (4-level: site → area → line → device)", () => {
     const tree = buildComponentTree(
       fleetView([

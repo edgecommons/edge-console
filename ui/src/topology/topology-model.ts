@@ -6,7 +6,7 @@
  * endpoint shapes; the SVG in {@link module:TopologyView} is the view.
  *
  * Topology is IDENTITY-driven and cfg-fed — both already on the wire, no new data:
- *  - the graph STRUCTURE (site → …intermediate hier levels… → device → component nesting)
+ *  - the graph STRUCTURE (full hierarchy → device → component nesting)
  *    comes straight from each component's identity `hier` — the SAME dynamic-hierarchy the
  *    Overview grouping and the Components tree use (never a hardcoded "line"/"adapter" tier);
  *  - the connectivity EDGES (a component → the external endpoint it talks to) come from each
@@ -450,11 +450,13 @@ function prettyPlatform(platform: string): string {
   return titleCase(platform);
 }
 
-/** The device group caption: intermediate hier values · device · platform (all dynamic). */
+/** The device group caption: below-site hier values · device · platform (all dynamic). */
 function groupLabel(first: ComponentView, device: string, platform: string | undefined): string {
   const parts: string[] = [];
-  if (first.hier.length > 2) {
-    for (const lvl of first.hier.slice(1, first.hier.length - 1)) parts.push(lvl.value);
+  if (first.hier.length > 1) {
+    const siteIndex = first.hier.findIndex((entry) => entry.level === "site");
+    const start = siteIndex >= 0 ? siteIndex + 1 : 0;
+    for (const lvl of first.hier.slice(start, first.hier.length - 1)) parts.push(lvl.value);
   }
   parts.push(device);
   if (platform !== undefined && platform !== "") parts.push(prettyPlatform(platform));
@@ -468,7 +470,7 @@ function deriveSite(fleet: FleetView): string | undefined {
   let bestN = 0;
   for (const d of fleet.devices) {
     for (const c of d.components) {
-      const site = c.hier[0]?.value;
+      const site = c.hier.find((entry) => entry.level === "site")?.value;
       if (site === undefined) continue;
       const n = (counts.get(site) ?? 0) + 1;
       counts.set(site, n);

@@ -28,6 +28,25 @@ describe("breadcrumb paths", () => {
     expect(componentFullPath(bare)).toEqual(["gw-x"]);
     expect(componentDetailPath(bare)).toEqual(["gw-x"]);
   });
+
+  it("uses the named site as the detail split when enterprise is above it", () => {
+    const enterpriseComp = compView({
+      key: key("gw-fill-01", "opcua-adapter"),
+      hier: hier(
+        ["enterprise", "bottles-r-us"],
+        ["site", "dallas"],
+        ["line", "filling-line"],
+        ["device", "gw-fill-01"],
+      ),
+    });
+    expect(componentFullPath(enterpriseComp)).toEqual([
+      "bottles-r-us",
+      "dallas",
+      "filling-line",
+      "gw-fill-01",
+    ]);
+    expect(componentDetailPath(enterpriseComp)).toEqual(["filling-line", "gw-fill-01"]);
+  });
 });
 
 describe("alarmsForComponent", () => {
@@ -68,6 +87,22 @@ describe("detailSubtitleParts", () => {
     delete (comp as { lastStateAt?: number }).lastStateAt;
     const parts = detailSubtitleParts(comp, undefined, 2, T0);
     expect(parts).toEqual(["gw-01", "2 instances", "keepalive 10s", "no state received yet"]);
+  });
+
+  it("omits enterprise/site from subtitle context and keeps below-site levels", () => {
+    const comp = compView({
+      key: key("gw-fill-01", "telemetry-processor"),
+      hier: hier(
+        ["enterprise", "bottles-r-us"],
+        ["site", "dallas"],
+        ["line", "filling-line"],
+        ["device", "gw-fill-01"],
+      ),
+      expectedIntervalSecs: 10,
+      lastStateAt: T0 - 5_000,
+    });
+    const parts = detailSubtitleParts(comp, undefined, 1, T0);
+    expect(parts.slice(0, 2)).toEqual(["line filling-line", "gw-fill-01"]);
   });
 });
 

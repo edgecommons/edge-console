@@ -1,13 +1,15 @@
 /**
  * The Components-screen navigable tree (slice R2) — built DYNAMICALLY from each
  * component's identity `hier` (never a hardcoded "line" tier), the same discipline the
- * Overview grouping uses. The UNS hierarchy is `[site, …intermediate…, device]` and the
+ * Overview grouping uses. The UNS hierarchy may include levels above site (for example
+ * `[enterprise, site, line, device]`) and the
  * components hang off the device, so the full navigable tree is
  *   Site → …intermediate levels… → device → component
  * with as many (or as few) intermediate levels as the fleet actually advertises:
- *   - `[site, line, device]`        → Site → line → device → component;
- *   - `[site, area, line, device]`  → Site → area → line → device → component;
- *   - `[site, device]`              → Site → device → component (no intermediate tier);
+ *   - `[enterprise, site, line, device]` → enterprise → Site → line → device → component;
+ *   - `[site, line, device]`             → Site → line → device → component;
+ *   - `[site, area, line, device]`       → Site → area → line → device → component;
+ *   - `[site, device]`                   → Site → device → component (no intermediate tier);
  *   - `[device]` / empty            → device → component (degenerate — no site context).
  *
  * Selecting a **group** node (site / an intermediate level / a device) rosters everything
@@ -55,7 +57,7 @@ export interface ComponentTreeNode {
 
 /** The whole Components tree the screen renders. */
 export interface ComponentTree {
-  /** The site value (`hier[0]`) — the page-context label; undefined when no component carries it. */
+  /** The `site` hierarchy value — the page-context label; undefined when no component carries it. */
   site?: string;
   /** The top-level nodes (usually a single Site root). */
   roots: ComponentTreeNode[];
@@ -68,6 +70,10 @@ function hierSegments(comp: ComponentView): { level: string; value: string }[] {
   if (comp.hier.length > 0) return comp.hier.map((e) => ({ level: e.level, value: e.value }));
   // Degenerate: no advertised hierarchy — group by the device alone.
   return [{ level: "device", value: comp.key.device }];
+}
+
+function siteValue(comp: ComponentView): string | undefined {
+  return comp.hier.find((entry) => entry.level === "site")?.value;
 }
 
 /** A mutable trie builder assembled during the walk, converted to immutable nodes at the end. */
@@ -156,10 +162,9 @@ export function buildComponentTree(
       if (statusFilter !== undefined && comp.liveness !== statusFilter) continue;
       total++;
       const segments = hierSegments(comp);
-      // The site is the advertised `hier[0]` (mirrors the Overview grouping); a component
-      // with NO advertised hierarchy contributes no site (the synthetic device fallback isn't one).
-      if (comp.hier.length > 0) {
-        const site = comp.hier[0]!.value;
+      // The page context is the named `site` level, not necessarily the first hierarchy level.
+      const site = siteValue(comp);
+      if (site !== undefined) {
         siteCounts.set(site, (siteCounts.get(site) ?? 0) + 1);
       }
       // Walk/insert the group path; attach the component at the terminal (device) node.

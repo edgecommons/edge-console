@@ -2,13 +2,14 @@
  * Dynamic fleet grouping (slice R1) — the Overview's "Fleet, grouped by …" tree, built
  * DYNAMICALLY from each component's `hier` (never a hardcoded "line" tier).
  *
- * The UNS identity hierarchy is `[site, …intermediate…, device]` (last level = the device
- * the component runs on). The Overview groups the fleet by the INTERMEDIATE levels — from
- * one below the site down to the device's immediate parent — nesting when there is more
- * than one:
- *   - `[site, line, device]`        → one tier, grouped by line (device shown per row);
- *   - `[site, area, line, device]`  → area → line nested;
- *   - `[site, device]`              → no intermediate tier ⇒ a flat list of device groups.
+ * The UNS identity hierarchy may include levels above site, for example
+ * `[enterprise, site, line, device]` (last level = the device the component runs on).
+ * The Overview groups the fleet by the levels BELOW the named `site` and above the device,
+ * nesting when there is more than one:
+ *   - `[enterprise, site, line, device]` → one tier, grouped by line;
+ *   - `[site, line, device]`             → one tier, grouped by line;
+ *   - `[site, area, line, device]`       → area → line nested;
+ *   - `[site, device]`                   → no intermediate tier ⇒ a flat list of device groups.
  * The site is the page context (the header), not a group tier. Each group's status tag is
  * the WORST-OF rollup over every component beneath it, and a group whose device is
  * UNREACHABLE contains its components (the "road is down, not the houses" treatment).
@@ -49,7 +50,7 @@ export interface GroupNode {
 
 /** The whole grouping result the Overview renders. */
 export interface FleetGrouping {
-  /** The site value (`hier[0]`), the page-context label — undefined when no component carries it. */
+  /** The named `site` hierarchy value, the page-context label — undefined when no component carries it. */
   site?: string;
   /** The grouping level names, outer→inner (e.g. `["line"]`, `["area","line"]`, or `["device"]`). */
   levelNames: string[];
@@ -73,12 +74,25 @@ interface Entry {
   deviceUnreachableSince?: number;
 }
 
+function siteIndex(h: ComponentView["hier"]): number {
+  return h.findIndex((entry) => entry.level === "site");
+}
+
+function siteValueOf(comp: ComponentView): string | undefined {
+  const index = siteIndex(comp.hier);
+  return index >= 0 ? comp.hier[index]!.value : undefined;
+}
+
 /** The grouping path for one component: the intermediate levels, or the device (flat fallback). */
 function groupPathOf(comp: ComponentView): { level: string; value: string }[] {
   const h = comp.hier;
-  if (h.length >= 3) {
-    // [site, …intermediate…, device] → the intermediate levels (between site and device).
-    return h.slice(1, h.length - 1).map((e) => ({ level: e.level, value: e.value }));
+  if (h.length >= 2) {
+    // [possibly-above-site, site, …intermediate…, device] → levels between site and device.
+    const site = siteIndex(h);
+    const start = site >= 0 ? site + 1 : 0;
+    if (start < h.length - 1) {
+      return h.slice(start, h.length - 1).map((e) => ({ level: e.level, value: e.value }));
+    }
   }
   // No intermediate tier → group by the device itself (the "flat device list").
   const deviceLevel = h.length >= 2 ? h[h.length - 1]!.level : "device";
@@ -212,7 +226,7 @@ export function groupFleet(
       entries.push({
         comp,
         path: groupPathOf(comp),
-        ...(comp.hier.length >= 1 ? { siteValue: comp.hier[0]!.value } : {}),
+        ...(siteValueOf(comp) !== undefined ? { siteValue: siteValueOf(comp)! } : {}),
         deviceUnreachable: device.unreachable,
         ...(device.unreachableSince !== undefined
           ? { deviceUnreachableSince: device.unreachableSince }
@@ -221,7 +235,7 @@ export function groupFleet(
     }
   }
 
-  // The site = the most common hier[0] (one console = one site in practice).
+  // The site = the most common named `site` hierarchy value (one console = one site in practice).
   const site = mostCommon(entries.map((e) => e.siteValue).filter((s): s is string => s !== undefined));
 
   // The grouping level names (deepest path wins) + the innermost unit noun.
