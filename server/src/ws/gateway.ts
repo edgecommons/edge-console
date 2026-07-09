@@ -27,10 +27,11 @@
  * client, since sending is a simple non-blocking call per session in a plain loop.
  */
 import { logger } from "@edgecommons/edgecommons";
-import { PROTOCOL_VERSION, componentKeyId, parseClientMessage } from "@edgecommons/edge-console-protocol";
+import { PROTOCOL_VERSION, componentKeyId, isPlainObject, parseClientMessage } from "@edgecommons/edge-console-protocol";
 import type {
   AlarmSnapshot,
   ClientMessage,
+  ComponentDescribeManifest,
   ComponentKey,
   ConsoleEvent,
   ConsoleSelf,
@@ -413,6 +414,10 @@ export class FleetWsGateway {
         // listener exists) arrives on the bus and flows back as a `config` push.
         this.config?.refreshDevice(msg.device);
         return;
+      case "get-descriptor":
+      case "refresh-descriptor":
+        this.onGetDescriptor(session, msg.key);
+        return;
       case "subscribe-events": {
         // Register interest first (an event racing in lands as a push, dedupable by
         // id), then answer with the newest-first backlog — the client's baseline.
@@ -484,6 +489,69 @@ export class FleetWsGateway {
         this.onInvokeCommand(session, msg);
         return;
     }
+  }
+
+  /**
+   * Phase 3 descriptor discovery: invoke the target component's built-in `describe`
+   * command through the same gateway/RBAC path as visible commands, but return descriptor
+   * frames so operator command history stays reserved for explicit actions.
+   */
+  private onGetDescriptor(session: Session, key: ComponentKey): void {
+    if (this.command === undefined) {
+      this.send(session, {
+        type: "descriptor-unavailable",
+        protocolVersion: PROTOCOL_VERSION,
+        key,
+        code: "UNAVAILABLE",
+        reason: "the console command gateway is not configured",
+      });
+      return;
+    }
+    const requestId = `descriptor-${componentKeyId(key)}-${this.opts.clock()}`;
+    void this.command.gateway
+      .invoke({ requestId, key, verb: "describe" }, session.role)
+      .then((result) => {
+        if (this.sessions.get(session.transport.id) !== session) return;
+        if (!result.ok) {
+          this.send(session, {
+            type: "descriptor-unavailable",
+            protocolVersion: PROTOCOL_VERSION,
+            key,
+            code: result.error?.code,
+            reason: result.error?.message ?? "describe failed",
+          });
+          return;
+        }
+        const manifest = normalizeDescribeManifest(result.result);
+        if (manifest === undefined) {
+          this.send(session, {
+            type: "descriptor-unavailable",
+            protocolVersion: PROTOCOL_VERSION,
+            key,
+            code: "MALFORMED_DESCRIBE",
+            reason: "describe did not return a component manifest object",
+          });
+          return;
+        }
+        this.send(session, {
+          type: "descriptor",
+          protocolVersion: PROTOCOL_VERSION,
+          key,
+          manifest,
+          receivedAt: this.opts.clock(),
+        });
+      })
+      .catch((e) => {
+        logger.warn(`edge-console ws: descriptor lookup for ${componentKeyId(key)} threw: ${String(e)}`);
+        if (this.sessions.get(session.transport.id) !== session) return;
+        this.send(session, {
+          type: "descriptor-unavailable",
+          protocolVersion: PROTOCOL_VERSION,
+          key,
+          code: "REQUEST_FAILED",
+          reason: String(e),
+        });
+      });
   }
 
   /**
@@ -719,5 +787,54 @@ function configMessage(entry: StoredConfig): ServerMessage {
     cfg: entry.body,
     receivedAt: entry.receivedAt,
     ...(entry.sourceTimestamp !== undefined ? { sourceTimestamp: entry.sourceTimestamp } : {}),
+  };
+}
+
+/** Normalize the component's `describe` result into the UI-facing descriptor contract. */
+function normalizeDescribeManifest(result: unknown): ComponentDescribeManifest | undefined {
+  if (!isPlainObject(result)) return undefined;
+
+  const commands = Array.isArray(result.commands)
+    ? result.commands.filter(isCommandCapability)
+    : isPlainObject(result.commands) && Array.isArray(result.commands.verbs)
+      ? result.commands.verbs.filter(isCommandCapability)
+      : undefined;
+
+  const panels = normalizePanels(result.panels);
+  return {
+    ...(typeof result.schema === "string"
+      ? { schema: result.schema }
+      : typeof result.schemaVersion === "string"
+        ? { schema: result.schemaVersion }
+        : { schema: "edgecommons.component.describe.v1" }),
+    ...(isPlainObject(result.component) ? { component: result.component as ComponentDescribeManifest["component"] } : {}),
+    ...(typeof result.digest === "string" ? { digest: result.digest } : {}),
+    ...(commands !== undefined ? { commands } : {}),
+    ...(panels !== undefined ? { panels } : {}),
+  };
+}
+
+function isCommandCapability(value: unknown): value is NonNullable<ComponentDescribeManifest["commands"]>[number] {
+  return isPlainObject(value) && typeof value.verb === "string" && value.verb !== "";
+}
+
+function normalizePanels(value: unknown): ComponentDescribeManifest["panels"] | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const rawViews = Array.isArray(value.views) ? value.views : [];
+  const views = rawViews.filter((view): view is NonNullable<ComponentDescribeManifest["panels"]>["views"][number] => {
+    if (!isPlainObject(view)) return false;
+    const title = typeof view.title === "string" ? view.title : typeof view.label === "string" ? view.label : undefined;
+    return typeof view.id === "string" && view.id !== "" && title !== undefined && title !== "";
+  });
+  return {
+    ...(typeof value.schema === "string"
+      ? { schema: value.schema }
+      : typeof value.schemaVersion === "string"
+        ? { schema: value.schemaVersion }
+        : { schema: "edgecommons.panels.v2" }),
+    ...(typeof value.provider === "string" ? { provider: value.provider } : {}),
+    ...(typeof value.renderer === "string" ? { renderer: value.renderer } : { renderer: "descriptor" }),
+    ...(typeof value.defaultView === "string" ? { defaultView: value.defaultView } : {}),
+    views,
   };
 }

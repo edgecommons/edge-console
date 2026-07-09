@@ -23,10 +23,11 @@
  * `relay_dropped_data` counter) so the sparklines visibly move.
  *
  * For C4: a fake CommandInbox-like responder stands in for the site-bus request/reply
- * (the injected CommandGateway `request` fn): ping → {status, uptimeSecs}, get-configuration
- * → the component's demo config, reload-config → {reloaded:true}, an unknown verb →
- * UNKNOWN_VERB, and one deliberately-SLOW component (telemetry-processor) → TIMEOUT. The
- * demo RBAC policy denies the verb `reboot`, so invoking it shows FORBIDDEN.
+ * (the injected CommandGateway `request` fn): ping → {status, uptimeSecs}, describe → the
+ * descriptor-driven component panel manifest, get-configuration → the component's demo
+ * config, reload-config → {reloaded:true}, an unknown verb → UNKNOWN_VERB, and one
+ * deliberately-SLOW component (telemetry-processor) → TIMEOUT. The demo RBAC policy denies
+ * the verb `reboot`, so invoking it shows FORBIDDEN.
  */
 import { FleetModel } from "../server/dist/fleet/fleet-model.js";
 import { ConfigStore } from "../server/dist/fleet/config-store.js";
@@ -207,6 +208,120 @@ function demoConfig(component, extra = {}) {
   };
 }
 
+function row(label, value) {
+  return { label, value };
+}
+
+function summaryWidget(id, title, rows) {
+  return { kind: "summary", id, title, rows };
+}
+
+function commandSummaryWidget(id, title, verbs) {
+  return { kind: "commandSummary", id, title, verbs };
+}
+
+function opcuaPanelDescriptor() {
+  return {
+    schemaVersion: "edgecommons.component.describe.v1",
+    component: {
+      hier: { site: SITE, line: "packaging", device: "pack-gw-01" },
+      path: `${SITE}/packaging/pack-gw-01`,
+      component: "opcua-adapter",
+      instance: "main",
+    },
+    commands: [
+      { verb: "describe", builtIn: true },
+      { verb: "get-configuration", builtIn: true },
+      { verb: "ping", builtIn: true },
+      { verb: "reload-config", builtIn: true },
+      { verb: "sb/browse", builtIn: false },
+      { verb: "sb/read", builtIn: false },
+      { verb: "sb/rescan", builtIn: false },
+      { verb: "sb/status", builtIn: false },
+      { verb: "sb/subscriptions", builtIn: false },
+      { verb: "sb/write", builtIn: false },
+    ],
+    panels: {
+      schemaVersion: "edgecommons.panels.v2",
+      provider: "opcua-adapter",
+      renderer: "descriptor",
+      defaultView: "overview",
+      views: [
+        {
+          id: "overview",
+          title: "Overview",
+          order: 10,
+          widgets: [
+            summaryWidget("opcua-summary", "OPC UA adapter", [
+              row("Address space", "Paged browse via cmd/sb/browse"),
+              row("Reads", "Explicit node reads and configured-signal matching"),
+              row("Diagnostics", "Status, subscriptions, and rescan commands"),
+            ]),
+            commandSummaryWidget("opcua-command-bindings", "Command bindings", [
+              "sb/status",
+              "sb/browse",
+              "sb/read",
+              "sb/write",
+              "sb/subscriptions",
+              "sb/rescan",
+            ]),
+          ],
+        },
+        {
+          id: "address-space",
+          title: "Address Space",
+          order: 20,
+          widgets: [
+            {
+              kind: "treeBrowser",
+              id: "address-space-tree",
+              title: "Address space",
+              scope: "instance",
+              mode: "paged",
+              browseVerb: "sb/browse",
+              readVerb: "sb/read",
+              writeVerb: "sb/write",
+            },
+          ],
+        },
+        {
+          id: "signals",
+          title: "Signals",
+          order: 30,
+          widgets: [
+            {
+              kind: "signalGrid",
+              id: "configured-signals",
+              title: "Configured signals",
+              scope: "instance",
+              subscriptionsVerb: "sb/subscriptions",
+              readVerb: "sb/read",
+            },
+          ],
+        },
+        {
+          id: "diagnostics",
+          title: "Diagnostics",
+          order: 40,
+          widgets: [
+            commandSummaryWidget("diagnostic-commands", "Diagnostic commands", [
+              "sb/status",
+              "sb/subscriptions",
+              "sb/rescan",
+            ]),
+            summaryWidget("diagnostic-notes", "Diagnostics", [
+              row("Status", "Live southbound session and address-space counters"),
+              row("Subscriptions", "Configured signal bindings by instance"),
+              row("Rescan", "Rebuild the discovered address-space cache"),
+            ]),
+          ],
+        },
+      ],
+    },
+    digest: "sha256:demo-opcua-panels",
+  };
+}
+
 /**
  * Per-device cfg announcements — the demo's "device-side republish-cfg listener".
  * NOTE: asm-gw-01/file-replicator deliberately has NO cfg (the UNAVAIL path).
@@ -263,7 +378,10 @@ const demoRbacConfig = {
   defaultRole: "operator",
   roles: {
     operator: { allow: ["*"], deny: ["reboot"] },
-    viewer: { allow: ["ping", "get-configuration"], deny: [] },
+    viewer: {
+      allow: ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read", "sb/subscriptions"],
+      deny: [],
+    },
   },
 };
 const rbac = new ConfigRbacPolicy(demoRbacConfig);
@@ -289,11 +407,46 @@ function fakeComponentRequest(topic) {
     setTimeout(() => {
       if (verb === "ping") {
         resolve(reply({ ok: true, result: { status: "RUNNING", uptimeSecs: uptime() } }));
+      } else if (verb === "describe") {
+        resolve(reply({ ok: true, result: component === "opcua-adapter" ? opcuaPanelDescriptor() : { commands: [] } }));
       } else if (verb === "get-configuration") {
         resolve(reply({ ok: true, result: { config: demoConfig(component) } }));
       } else if (verb === "reload-config") {
         resolve(reply({ ok: true, result: { reloaded: true } }));
-      } else if (verb === "sb.read") {
+      } else if (verb === "sb/status") {
+        resolve(reply({ ok: true, result: { id: "main", connected: true, metrics: { nodes: 128, subscriptions: 2 } } }));
+      } else if (verb === "sb/browse") {
+        resolve(
+          reply({
+            ok: true,
+            result: {
+              id: "main",
+              offset: 0,
+              limit: 100,
+              total: 4,
+              nodes: [
+                { signalId: "Channel1.Device1.Temp_01", namespace: 2, idType: "String", browseName: "Temp_01" },
+                { signalId: "Channel1.Device1.Pressure", namespace: 2, idType: "String", browseName: "Pressure" },
+                { signalId: "Channel1.Device1.Flow_A", namespace: 2, idType: "String", browseName: "Flow_A" },
+                { signalId: "Channel1.Device1.MotorState", namespace: 2, idType: "String", browseName: "MotorState" },
+              ],
+            },
+          }),
+        );
+      } else if (verb === "sb/subscriptions") {
+        resolve(
+          reply({
+            ok: true,
+            result: {
+              id: "main",
+              signals: [
+                { signalId: "Channel1.Device1.Temp_01", namespace: 2, idType: "String", match: "Temp_.*" },
+                { signalId: "Channel1.Device1.Pressure", namespace: 2, idType: "String", match: "Pressure" },
+              ],
+            },
+          }),
+        );
+      } else if (verb === "sb/read") {
         // The Signals-screen "Read": an on-demand southbound re-read of one signal. The demo
         // synthesizes a fresh reading (a real component would return its live value + quality).
         resolve(

@@ -4,33 +4,32 @@
  * the identity hierarchy (Site → …intermediate levels… → device → component, never a
  * hardcoded "line"), beside a context pane. Selecting a **line/device** node rosters
  * everything beneath it (the tree doubles as the site inventory); selecting a **component**
- * leaf shows its summary with **Open detail →**. The app-bar global search (shared
+ * leaf opens the real multi-tab component detail inline. The app-bar global search (shared
  * {@link SearchContext}) filters the tree — one of the mockup's four documented paths to a
  * component (this tree + the header search; an Overview row and a Topology chip are the
- * other two).
+ * other two, and still use the standalone detail route as a deep-link surface).
  *
  * `ComponentsView` is purely presentational (state in, DOM out — component-testable without a
  * socket); `ConnectedComponentsView` binds it to the shared {@link FleetClient}.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, InlineLoading, Tag, Tile } from "@carbon/react";
 import {
   ChevronDown,
   ChevronRight,
-  CircleFilled,
   ArrowRight,
 } from "@carbon/react/icons";
-import type { ComponentKey, RuntimeAttributes } from "@edgecommons/edge-console-protocol";
+import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import type { RollupLevel } from "../fleet/selectors";
 import type { ClientState, FleetClient } from "../fleet/client";
 import type { ComponentView } from "../fleet/store";
 import { formatDurationMs } from "../fleet/selectors";
-import { Sparkline } from "../common/Sparkline";
 import { useFleetState, useNowTick } from "../fleet/useFleet";
 import { useSearch } from "../shell/search";
 import { RollupTag, StatusTag } from "../health/StatusTag";
 import { CommandToasts } from "../health/CommandToasts";
 import type { InvokeCommand } from "../health/EdgeHealthView";
+import { ComponentDetailView } from "./ComponentDetailView";
 import {
   buildComponentTree,
   collectComponents,
@@ -165,7 +164,7 @@ function Roster({
           <span>Component</span>
           <span>Device</span>
           <span>Heartbeat</span>
-          <span />
+          <span>Action</span>
         </div>
         {comps.map((comp) => (
           <div className="ec-roster__row" key={comp.id} data-testid={`roster-row-${comp.id}`}>
@@ -193,121 +192,6 @@ function Roster({
   );
 }
 
-/** The summary shown when a component leaf is selected — its vitals + Open detail. */
-function ComponentSummary({
-  comp,
-  attrs,
-  openAlarms,
-  nowServerMs,
-  onOpenDetail,
-  onInvoke,
-}: {
-  comp: ComponentView;
-  attrs: RuntimeAttributes | undefined;
-  openAlarms: number;
-  nowServerMs: number;
-  onOpenDetail: (key: ComponentKey) => void;
-  onInvoke: InvokeCommand;
-}): React.JSX.Element {
-  const heartbeat =
-    comp.lastStateAt !== undefined
-      ? formatDurationMs(Math.max(0, nowServerMs - comp.lastStateAt))
-      : "—";
-  const cpuSeries = attrs?.cpuSeries;
-  return (
-    <div data-testid="component-summary">
-      <div className="ec-detail-head">
-        <div>
-          <div className="ec-detail-head__title">
-            {comp.key.component} <StatusTag liveness={comp.liveness} size="sm" />
-          </div>
-          <div className="ec-dim ec-detail-head__sub">
-            {comp.hier.length > 1 ? comp.hier.slice(1).map((e) => e.value).join(" · ") : comp.key.device}
-            {attrs?.platform !== undefined ? ` · ${attrs.platform}` : ""} · keepalive{" "}
-            {comp.expectedIntervalSecs}s
-          </div>
-        </div>
-        <div className="ec-detail-head__actions">
-          <Button kind="ghost" size="sm" onClick={() => onInvoke(comp.key, "ping")}>
-            Ping
-          </Button>
-          <Button kind="ghost" size="sm" onClick={() => onInvoke(comp.key, "get-configuration")}>
-            Query status
-          </Button>
-          <Button
-            kind="primary"
-            size="sm"
-            renderIcon={ArrowRight}
-            data-testid="open-detail"
-            onClick={() => onOpenDetail(comp.key)}
-          >
-            Open detail
-          </Button>
-        </div>
-      </div>
-
-      <div className="ec-tiles" data-testid="summary-tiles">
-        <Tile className="ec-tile">
-          <div className="ec-tile__label">
-            CPU{" "}
-            {attrs?.cpuPercent !== undefined && (
-              <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled}>
-                live
-              </Tag>
-            )}
-          </div>
-          <div className="ec-tile__busrow">
-            <div className="ec-tile__num ec-tile__num--md ec-tnum">
-              {attrs?.cpuPercent !== undefined ? `${Math.round(attrs.cpuPercent)}%` : <span className="ec-dim">—</span>}
-            </div>
-            {cpuSeries !== undefined && cpuSeries.length > 1 && (
-              <Sparkline
-                points={cpuSeries.map((value, at) => ({ at, value }))}
-                width={80}
-                height={28}
-                ariaLabel={`${comp.key.component} cpu trend`}
-                formatValue={(v) => `${Math.round(v)}%`}
-              />
-            )}
-          </div>
-        </Tile>
-        <Tile className="ec-tile">
-          <div className="ec-tile__label">Memory</div>
-          <div className="ec-tile__num ec-tile__num--md ec-tnum">
-            {attrs?.memoryMb !== undefined ? (
-              <>
-                {Math.round(attrs.memoryMb)}
-                <small>MB</small>
-              </>
-            ) : (
-              <span className="ec-dim">—</span>
-            )}
-          </div>
-        </Tile>
-        <Tile className="ec-tile">
-          <div className="ec-tile__label">Heartbeat</div>
-          <div className="ec-tile__num ec-tile__num--md ec-tnum" data-testid="summary-heartbeat">
-            {heartbeat}
-          </div>
-        </Tile>
-        <Tile className="ec-tile">
-          <div className="ec-tile__label">Open alerts</div>
-          <div className="ec-tile__num ec-tile__num--md ec-tnum" data-testid="summary-alerts">
-            {openAlarms}
-          </div>
-        </Tile>
-      </div>
-
-      <div className="ec-callout">
-        Picking a <b>component</b> shows this summary → <b>Open detail</b>. Picking a{" "}
-        <b>line</b> or <b>device</b> node rosters everything beneath it, so the tree doubles as
-        the site inventory. Four paths reach a component: this tree, an Overview row, a Topology
-        chip, or the header search.
-      </div>
-    </div>
-  );
-}
-
 export interface ComponentsViewProps {
   state: ClientState;
   /** Client-clock ms (the 1 Hz tick) — drives every age/heartbeat cell. */
@@ -316,9 +200,17 @@ export interface ComponentsViewProps {
   query?: string;
   /** Mirror the app-bar search from the on-screen "Filter tree…" box. */
   onSearchChange?: (query: string) => void;
-  /** Open the Component Detail screen for a component. */
-  onOpenDetail?: (key: ComponentKey) => void;
-  /** Fire a C4 command (the summary's Ping / Query status); defaults to a no-op. */
+  /** Notify the connected wrapper which component is selected so it can request detail data. */
+  onSelectedComponentChange?: (key: ComponentKey | undefined) => void;
+  /** Refresh the selected component's panel descriptor. */
+  onRefreshDescriptor?: (key: ComponentKey) => void;
+  /** Refresh/re-announce configuration from the embedded detail. */
+  onRefreshConfig?: (key: ComponentKey) => void;
+  /** To the Events & Alarms screen from the embedded detail. */
+  onOpenEvents?: () => void;
+  /** To the Signals screen, scoped to the selected component. */
+  onOpenSignals?: (key: ComponentKey) => void;
+  /** Fire a C4 command (the embedded detail's Ping / Get config); defaults to a no-op. */
   onInvoke?: InvokeCommand;
 }
 
@@ -327,11 +219,14 @@ export function ComponentsView({
   now,
   query = "",
   onSearchChange,
-  onOpenDetail,
+  onSelectedComponentChange,
+  onRefreshConfig,
+  onRefreshDescriptor,
+  onOpenEvents,
+  onOpenSignals,
   onInvoke = NO_INVOKE,
 }: ComponentsViewProps): React.JSX.Element {
-  const { fleet, status, hasSnapshot, alarms, attributes } = state;
-  const nowServerMs = now - fleet.clockOffsetMs;
+  const { fleet, status, hasSnapshot } = state;
   const tree = buildComponentTree(fleet, query);
 
   const [selectedKey, setSelectedKey] = useState<string | undefined>(undefined);
@@ -349,12 +244,15 @@ export function ComponentsView({
   const selectedNode =
     (selectedKey !== undefined ? findNode(tree.roots, selectedKey) : undefined) ?? tree.roots[0];
 
-  const openAlarmsById: Record<string, number> = {};
-  for (const a of alarms.active) {
-    if (!a.contained) openAlarmsById[a.componentId] = (openAlarmsById[a.componentId] ?? 0) + 1;
-  }
+  const selectNode = (node: ComponentTreeNode) => {
+    setSelectedKey(node.key);
+    onSelectedComponentChange?.(node.kind === "component" && node.comp !== undefined ? node.comp.key : undefined);
+  };
 
-  const selectComp = (comp: ComponentView) => setSelectedKey(comp.id);
+  const selectComp = (comp: ComponentView) => {
+    setSelectedKey(comp.id);
+    onSelectedComponentChange?.(comp.key);
+  };
 
   return (
     <div className="ec-components">
@@ -415,7 +313,7 @@ export function ComponentsView({
                     node={node}
                     selectedKey={selectedNode?.key}
                     collapsed={collapsed}
-                    onSelect={(n) => setSelectedKey(n.key)}
+                    onSelect={selectNode}
                     onToggle={toggle}
                   />
                 ))}
@@ -429,16 +327,19 @@ export function ComponentsView({
                 <p className="ec-dim">Select a node in the tree to roster it or drill in.</p>
               </Tile>
             ) : selectedNode.kind === "component" && selectedNode.comp !== undefined ? (
-              <ComponentSummary
-                comp={selectedNode.comp}
-                attrs={attributes.byId[selectedNode.comp.id]}
-                openAlarms={openAlarmsById[selectedNode.comp.id] ?? 0}
-                nowServerMs={nowServerMs}
-                onOpenDetail={(key) => onOpenDetail?.(key)}
+              <ComponentDetailView
+                state={state}
+                now={now}
+                detailKey={selectedNode.comp.key}
+                embedded
                 onInvoke={onInvoke}
+                {...(onRefreshConfig !== undefined ? { onRefreshConfig } : {})}
+                {...(onRefreshDescriptor !== undefined ? { onRefreshDescriptor } : {})}
+                {...(onOpenEvents !== undefined ? { onOpenEvents } : {})}
+                {...(onOpenSignals !== undefined ? { onOpenSignals: () => onOpenSignals(selectedNode.comp!.key) } : {})}
               />
             ) : (
-              <Roster node={selectedNode} nowServerMs={nowServerMs} onOpen={selectComp} />
+              <Roster node={selectedNode} nowServerMs={now - fleet.clockOffsetMs} onOpen={selectComp} />
             )}
           </div>
         </div>
@@ -451,22 +352,44 @@ export function ComponentsView({
 /** The live container: binds the view to the shared {@link FleetClient} + the 1 Hz tick. */
 export function ConnectedComponentsView({
   client,
-  onOpenDetail,
+  onOpenEvents,
+  onOpenSignals,
 }: {
   client: FleetClient;
-  onOpenDetail?: (key: ComponentKey) => void;
+  onOpenEvents?: () => void;
+  onOpenSignals?: (key: ComponentKey) => void;
 }): React.JSX.Element {
   const state = useFleetState(client);
   const now = useNowTick(1000);
   const { query, setQuery } = useSearch();
+  const [selectedComponent, setSelectedComponent] = useState<ComponentKey | undefined>(undefined);
+  const selectedId = selectedComponent !== undefined ? `${selectedComponent.device}/${selectedComponent.component}` : undefined;
+  const status = state.status;
+
+  useEffect(() => {
+    if (status === "connected" && selectedComponent !== undefined) {
+      client.requestConfig(selectedComponent);
+      client.requestDescriptor(selectedComponent);
+    }
+  }, [client, selectedId, selectedComponent, status]);
+
+  useEffect(() => {
+    if (status === "connected") client.subscribeEvents();
+  }, [client, status]);
+  useEffect(() => () => client.unsubscribeEvents(), [client]);
+
   return (
     <ComponentsView
       state={state}
       now={now}
       query={query}
       onSearchChange={setQuery}
+      onSelectedComponentChange={setSelectedComponent}
+      onRefreshConfig={(key) => client.refreshConfig(key)}
+      onRefreshDescriptor={(key) => client.refreshDescriptor(key)}
+      {...(onOpenEvents !== undefined ? { onOpenEvents } : {})}
+      {...(onOpenSignals !== undefined ? { onOpenSignals } : {})}
       onInvoke={(key, verb, args) => client.invokeCommand(key, verb, args)}
-      {...(onOpenDetail !== undefined ? { onOpenDetail } : {})}
     />
   );
 }

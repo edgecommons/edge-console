@@ -1,11 +1,11 @@
 /**
  * The Component Detail screen (R2) — presentational tests: the breadcrumb, the tab set, the
- * real Health / Instances / Configuration / Events tabs (built from live data), and the HONEST
- * Phase-2 pending states (Panel + opcua sub-tabs, Logs, language/version) that depend on the
- * deferred describe/panels manifest. State in, DOM out, callbacks observed.
+ * real Health / Panel / Instances / Configuration / Events tabs (built from live data), plus the
+ * honest pending Logs state. State in, DOM out, callbacks observed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ComponentDescribeManifest } from "@edgecommons/edge-console-protocol";
 import type { ConfigEntryView } from "../src/fleet/config-store";
 import { ComponentDetailView } from "../src/components/ComponentDetailView";
 import {
@@ -14,12 +14,16 @@ import {
   attributesView,
   clientState,
   compView,
+  commandEntry,
+  commandView,
   consoleAlarm,
   consoleEvent,
   deviceView,
   fleetView,
   hier,
   key,
+  metricSeries,
+  metricsView,
   runtimeAttrs,
 } from "./_fixtures";
 
@@ -35,6 +39,98 @@ function loadedConfig(): ConfigEntryView {
     phase: "loaded",
     body: { config: { heartbeat: { intervalSecs: 5 }, endpoint: { url: "opc.tcp://x:49320" } } },
     receivedAt: T0 - 3000,
+    refreshing: false,
+  };
+}
+
+function opcuaManifest(): ComponentDescribeManifest {
+  return {
+    schema: "edgecommons.component.describe.v1",
+    component: { component: "opcua-adapter", implementation: "Java", version: "0.1.0" },
+    digest: "sha256:test",
+    commands: [
+      { verb: "describe", builtIn: true },
+      { verb: "sb/browse", builtIn: false },
+      { verb: "sb/read", builtIn: false },
+      { verb: "sb/status", builtIn: false },
+      { verb: "sb/subscriptions", builtIn: false },
+    ],
+    panels: {
+      schema: "edgecommons.panels.v2",
+      provider: "opcua-adapter",
+      renderer: "descriptor",
+      defaultView: "overview",
+      views: [
+        {
+          id: "overview",
+          title: "Overview",
+          order: 10,
+          widgets: [
+            {
+              kind: "summary",
+              id: "opcua-summary",
+              title: "OPC UA adapter",
+              rows: [
+                { label: "Mode", value: "Discovery" },
+                { label: "Browse", value: "Hierarchical" },
+              ],
+            },
+            {
+              kind: "commandSummary",
+              id: "opcua-commands",
+              title: "Command bindings",
+              verbs: ["sb/status", "sb/browse", "sb/read", "sb/write"],
+            },
+          ],
+        },
+        {
+          id: "address-space",
+          title: "Address Space",
+          order: 20,
+          widgets: [
+            {
+              kind: "treeBrowser",
+              id: "address-space-tree",
+              title: "Address space",
+              mode: "hierarchical",
+              rootRef: "root",
+              browseVerb: "sb/browse",
+              readVerb: "sb/read",
+              writeVerb: "sb/write",
+            },
+          ],
+        },
+        {
+          id: "signals",
+          title: "Signals",
+          order: 30,
+          widgets: [
+            {
+              kind: "signalGrid",
+              id: "signal-grid",
+              title: "Configured signals",
+              subscriptionsVerb: "sb/subscriptions",
+            },
+          ],
+        },
+        {
+          id: "diagnostics",
+          title: "Diagnostics",
+          order: 40,
+          widgets: [{ kind: "commandSummary", id: "diagnostic-commands", verbs: ["sb/status", "sb/rescan"] }],
+        },
+      ],
+    },
+  };
+}
+
+function descriptorReady() {
+  return {
+    key: DKEY,
+    id: ID,
+    phase: "ready" as const,
+    manifest: opcuaManifest(),
+    receivedAt: T0 - 1000,
     refreshing: false,
   };
 }
@@ -85,8 +181,10 @@ function renderDetail(props = {}) {
   const cbs = {
     onBack: vi.fn(),
     onOpenOverview: vi.fn(),
-    onViewConfig: vi.fn(),
+    onRefreshConfig: vi.fn(),
+    onRefreshDescriptor: vi.fn(),
     onOpenEvents: vi.fn(),
+    onInvoke: vi.fn(),
   };
   render(<ComponentDetailView state={detailState()} now={T0} detailKey={DKEY} {...cbs} {...props} />);
   return cbs;
@@ -106,17 +204,21 @@ describe("ComponentDetailView — breadcrumb + header", () => {
     expect(cbs.onBack).toHaveBeenCalled();
   });
 
-  it("flags language + version as Phase-2 pending in the subtitle (no fabricated 'java · v1.4.2')", () => {
+  it("does not fabricate implementation metadata before describe advertises it", () => {
     renderDetail();
-    expect(screen.getByText(/language · version pending/i)).toBeTruthy();
+    expect(screen.getByText(/implementation pending/i)).toBeTruthy();
     // The mockup's fabricated implementation language / app version are NOT shown.
     expect(screen.queryByText(/v1\.4\.2/)).toBeNull();
   });
 
-  it("routes the header 'View config' to the full Configuration screen", () => {
-    const cbs = renderDetail();
-    fireEvent.click(screen.getByTestId("detail-view-config"));
-    expect(cbs.onViewConfig).toHaveBeenCalled();
+  it("uses implementation metadata once describe advertises it", () => {
+    renderDetail({ state: detailState({ descriptions: { entriesById: { [ID]: descriptorReady() } } }) });
+    expect(screen.getByText("Java · 0.1.0")).toBeTruthy();
+  });
+
+  it("keeps configuration in the Configuration tab (no separate review handoff)", () => {
+    renderDetail();
+    expect(screen.queryByTestId("detail-view-config")).toBeNull();
   });
 });
 
@@ -131,9 +233,34 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(within(tiles).getByText("24 / 14 / 96")).toBeTruthy();
 
     const checks = screen.getByTestId("health-checks");
-    expect(within(checks).getByText("CONNECTED")).toBeTruthy();
-    expect(within(checks).getByText("stale")).toBeTruthy(); // freshness from liveness
+    expect(within(checks).getByText("Operational checks")).toBeTruthy();
+    expect(within(checks).getByText("Connected")).toBeTruthy();
+    expect(within(checks).getByText("Stale")).toBeTruthy(); // freshness from liveness
+    expect(within(checks).queryByText("connectionState")).toBeNull();
+    expect(within(checks).queryByText("readErrors")).toBeNull();
+    expect(screen.queryByText("computed by console")).toBeNull();
     expect(screen.getByTestId("liveness-state")).toBeTruthy();
+    expect(screen.getByTestId("health-connection-state")).toBeTruthy();
+  });
+
+  it("Health: aggregates connection state from component instances", () => {
+    const state = clientState(
+      fleetView([
+        deviceView("pack-gw-01", [
+          compView({
+            key: DKEY,
+            instances: [
+              { instance: "filler1", connected: true },
+              { instance: "kep2", connected: false },
+            ],
+          }),
+        ]),
+      ]),
+    );
+    renderDetail({ state });
+    const connection = screen.getByTestId("health-connection-state");
+    expect(within(connection).getByText("Partially connected")).toBeTruthy();
+    expect(within(connection).getByText("1 of 2 instances connected")).toBeTruthy();
   });
 
   it("Instances: a single-instance (main-only) component shows the no-per-instance-connectivity note", () => {
@@ -166,13 +293,20 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(within(list).getByText("opc.tcp://kep:49320")).toBeTruthy();
   });
 
-  it("Configuration: embeds a read-only effective-config view + a link to the full screen", () => {
+  it("Configuration: embeds the full structured/raw effective-config inspector", () => {
     const cbs = renderDetail();
     fireEvent.click(screen.getByTestId("tab-config"));
-    expect(screen.getByTestId("config-embed-rows")).toBeTruthy();
-    expect(screen.getByText("endpoint.url")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("view-full-config"));
-    expect(cbs.onViewConfig).toHaveBeenCalled();
+    const tree = screen.getByTestId("config-tree");
+    expect(within(tree).getByTestId("config-node-heartbeat")).toBeTruthy();
+    expect(within(tree).getByTestId("config-node-endpoint.url")).toBeTruthy();
+    expect(within(tree).getByText("opc.tcp://x:49320")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Raw JSON" }));
+    expect(screen.getByTestId("config-json").textContent).toContain('"url": "opc.tcp://x:49320"');
+
+    fireEvent.click(screen.getByTestId("refresh-config"));
+    expect(cbs.onRefreshConfig).toHaveBeenCalledWith(DKEY);
+    expect(screen.queryByTestId("view-full-config")).toBeNull();
   });
 
   it("Events: shows only THIS component's events + a link to Events & Alarms", () => {
@@ -185,24 +319,310 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     fireEvent.click(screen.getByTestId("view-full-events"));
     expect(cbs.onOpenEvents).toHaveBeenCalled();
   });
+
+  it("Metrics: shows custom non-system metrics for this component", () => {
+    renderDetail({
+      state: detailState({
+        metrics: metricsView([
+          metricSeries(DKEY, "packaging.throughput", "bottlesPerMin", { latest: 142.25 }),
+          metricSeries(DKEY, "sys", "cpu_usage", { latest: 22 }),
+          metricSeries(DKEY, "southbound_health", "readErrors", { latest: 0 }),
+          metricSeries(key("pack-gw-01", "modbus-adapter"), "packaging.throughput", "bottlesPerMin", { latest: 50 }),
+        ]),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-metrics"));
+    const table = screen.getByTestId("metrics-table");
+    expect(within(table).getByText("packaging.throughput")).toBeTruthy();
+    expect(within(table).getByText("bottlesPerMin")).toBeTruthy();
+    expect(within(table).getByText("142.25")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Metrics · 1" })).toBeTruthy();
+    expect(within(table).queryByText("sys")).toBeNull();
+    expect(within(table).queryByText("southbound_health")).toBeNull();
+    expect(within(table).queryByText("50")).toBeNull();
+  });
 });
 
-describe("ComponentDetailView — honest Phase-2 pending surfaces", () => {
-  it("Panel: renders a pending state + the inert opcua sub-tabs (Overview/Address Space/Signals/Diagnostics)", () => {
+describe("ComponentDetailView — descriptor-driven panel + pending surfaces", () => {
+  it("Panel: shows a loading state while cmd/describe is in flight", () => {
     renderDetail();
     fireEvent.click(screen.getByTestId("tab-panel"));
-    const pending = screen.getByTestId("phase2-panel");
-    expect(within(pending).getByText(/Available in Phase 2/i)).toBeTruthy();
-    const subtabs = screen.getByTestId("panel-subtabs");
-    expect(within(subtabs).getByText("Address Space")).toBeTruthy();
-    expect(within(subtabs).getByText("Diagnostics")).toBeTruthy();
-    expect(subtabs.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByTestId("descriptor-loading")).toBeTruthy();
+    expect(screen.queryByText(/Available in Phase 2/i)).toBeNull();
+  });
+
+  it("Panel: renders descriptor views and invokes only advertised command bindings", () => {
+    const cbs = renderDetail({
+      state: detailState({ descriptions: { entriesById: { [ID]: descriptorReady() } } }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    const panel = screen.getByTestId("descriptor-panel");
+    expect(screen.getByRole("tab", { name: "Panel · 4 views" })).toBeTruthy();
+    expect(within(panel).getByText("Overview")).toBeTruthy();
+    expect(within(panel).getByText("Address Space")).toBeTruthy();
+    expect(within(panel).getByText("Signals")).toBeTruthy();
+    expect(within(panel).getByText("Diagnostics")).toBeTruthy();
+
+    const overview = screen.getByTestId("panel-view-overview");
+    expect(within(overview).getByText("cmd/sb/browse")).toBeTruthy();
+    expect(within(overview).getByText("cmd/sb/write")).toBeTruthy();
+    expect(within(overview).getAllByText("Unavailable").length).toBeGreaterThan(0);
+
+    fireEvent.click(within(panel).getByRole("tab", { name: "Address Space" }));
+    fireEvent.click(screen.getByTestId("panel-browse-load"));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "sb/browse", { ref: "root", depth: 1 });
+    expect(screen.getByText("Read enabled")).toBeTruthy();
+    expect(screen.getByText("Write unavailable")).toBeTruthy();
+  });
+
+  it("Panel: renders treeBrowser browse results as a tree instead of raw JSON", () => {
+    renderDetail({
+      state: detailState({
+        descriptions: { entriesById: { [ID]: descriptorReady() } },
+        commands: commandView([
+          commandEntry({
+            requestId: "browse-1",
+            key: DKEY,
+            verb: "sb/browse",
+            result: {
+              id: "filler1",
+              mode: "hierarchical",
+              ref: "ns=0;i=84",
+              depth: 1,
+              maxRefs: 500,
+              refCount: 1,
+              truncated: true,
+              root: {
+                nodeId: "ns=0;i=84",
+                signalId: "84",
+                namespace: 0,
+                idType: "Numeric",
+                name: "Root",
+                nodeClass: "Object",
+                refs: [
+                  {
+                    referenceType: "Organizes",
+                    referenceTypeId: "ns=0;i=35",
+                    targetNodeId: "ns=2;s=Line1.FillLevel",
+                    target: {
+                      nodeId: "ns=2;s=Line1.FillLevel",
+                      signalId: "Line1.FillLevel",
+                      namespace: 2,
+                      namespaceUri: "urn:kepware:packaging",
+                      idType: "String",
+                      name: "Fill Level",
+                      browseName: "FillLevel",
+                      nodeClass: "Variable",
+                      dataType: "Double",
+                      refs: [],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        ]),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    fireEvent.click(within(screen.getByTestId("descriptor-panel")).getByRole("tab", { name: "Address Space" }));
+
+    const tree = screen.getByTestId("panel-address-tree");
+    expect(within(tree).getByText("Instance")).toBeTruthy();
+    expect(within(tree).getByText("filler1")).toBeTruthy();
+    expect(within(tree).getByText("1 hierarchical refs loaded")).toBeTruthy();
+    expect(within(tree).getByText("Depth 1")).toBeTruthy();
+    expect(within(tree).getByText("More available")).toBeTruthy();
+    expect(within(tree).getByText("Root")).toBeTruthy();
+    expect(within(tree).getByText("Fill Level")).toBeTruthy();
+    expect(within(tree).getByText("ns=2;s=Line1.FillLevel")).toBeTruthy();
+    expect(within(tree).getByText("Organizes")).toBeTruthy();
+    expect(screen.queryByTestId("panel-command-result")).toBeNull();
+  });
+
+  it("Panel: expands address-space branches by browsing the selected node ref", () => {
+    const cbs = {
+      onBack: vi.fn(),
+      onOpenOverview: vi.fn(),
+      onRefreshConfig: vi.fn(),
+      onRefreshDescriptor: vi.fn(),
+      onOpenEvents: vi.fn(),
+      onInvoke: vi.fn(),
+    };
+    const rootEntry = commandEntry({
+      requestId: "browse-root",
+      seq: 1,
+      key: DKEY,
+      verb: "sb/browse",
+      result: {
+        id: "filler1",
+        mode: "hierarchical",
+        ref: "ns=0;i=84",
+        depth: 1,
+        refCount: 1,
+        truncated: false,
+        root: {
+          nodeId: "ns=0;i=84",
+          namespace: 0,
+          name: "Root",
+          nodeClass: "Object",
+          refs: [
+            {
+              referenceType: "Organizes",
+              targetNodeId: "ns=0;i=85",
+              target: {
+                nodeId: "ns=0;i=85",
+                namespace: 0,
+                name: "Objects",
+                nodeClass: "Object",
+              },
+            },
+          ],
+        },
+      },
+    });
+    const { rerender } = render(
+      <ComponentDetailView
+        state={detailState({
+          descriptions: { entriesById: { [ID]: descriptorReady() } },
+          commands: commandView([rootEntry]),
+        })}
+        now={T0}
+        detailKey={DKEY}
+        {...cbs}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    fireEvent.click(within(screen.getByTestId("descriptor-panel")).getByRole("tab", { name: "Address Space" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand Objects (ns=0;i=85)" }));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "sb/browse", { ref: "ns=0;i=85", depth: 1 });
+    expect(screen.getByTestId("panel-tree-status").textContent).toContain("Loading Objects...");
+    expect(screen.getByTestId("panel-tree-status").parentElement?.className).toContain("ec-panel-result-meta--address-tree");
+    expect(screen.getByTestId("panel-tree-status").querySelector(".ec-panel-tree-status__loading")).not.toBeNull();
+    expect(document.querySelector(".ec-panel-tree__row--note")).toBeNull();
+
+    rerender(
+      <ComponentDetailView
+        state={detailState({
+          descriptions: { entriesById: { [ID]: descriptorReady() } },
+          commands: commandView([
+            rootEntry,
+            commandEntry({
+              requestId: "browse-objects",
+              seq: 2,
+              key: DKEY,
+              verb: "sb/browse",
+              result: {
+                id: "filler1",
+                mode: "hierarchical",
+                ref: "ns=0;i=85",
+                depth: 1,
+                refCount: 1,
+                truncated: false,
+                root: {
+                  nodeId: "ns=0;i=85",
+                  namespace: 0,
+                  name: "Objects",
+                  nodeClass: "Object",
+                  refs: [
+                    {
+                      referenceType: "Organizes",
+                      targetNodeId: "ns=2;s=Line1.DeviceSet",
+                      target: {
+                        nodeId: "ns=2;s=Line1.DeviceSet",
+                        namespace: 2,
+                        name: "Device Set",
+                        nodeClass: "Object",
+                      },
+                    },
+                  ],
+                },
+              },
+            }),
+          ]),
+        })}
+        now={T0}
+        detailKey={DKEY}
+        {...cbs}
+      />,
+    );
+
+    const tree = screen.getByTestId("panel-address-tree");
+    expect(within(tree).getByText("Root")).toBeTruthy();
+    expect(within(tree).getByText("Objects")).toBeTruthy();
+    expect(within(tree).getByText("Device Set")).toBeTruthy();
+    expect(within(tree).getByText("ns=2;s=Line1.DeviceSet")).toBeTruthy();
+  });
+
+  it("Panel: renders signalGrid subscriptions as a table instead of raw JSON", () => {
+    renderDetail({
+      state: detailState({
+        descriptions: { entriesById: { [ID]: descriptorReady() } },
+        commands: commandView([
+          commandEntry({
+            requestId: "subscriptions-1",
+            key: DKEY,
+            verb: "sb/subscriptions",
+            result: {
+              id: "filler1",
+              signals: [
+                {
+                  signalId: "ns=2;s=Line1.FillLevel",
+                  namespace: 2,
+                  namespaceUri: "urn:kepware:packaging",
+                  idType: "String",
+                  match: "exact",
+                },
+              ],
+            },
+          }),
+        ]),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    fireEvent.click(within(screen.getByTestId("descriptor-panel")).getByRole("tab", { name: "Signals" }));
+
+    const grid = screen.getByTestId("panel-signal-grid");
+    expect(within(grid).getByText("Instance")).toBeTruthy();
+    expect(within(grid).getByText("filler1")).toBeTruthy();
+    expect(within(grid).getByText("1 subscribed signals")).toBeTruthy();
+    expect(within(grid).getByText("Signal")).toBeTruthy();
+    expect(within(grid).getByText("ns=2;s=Line1.FillLevel")).toBeTruthy();
+    expect(within(grid).getByText("ns=2")).toBeTruthy();
+    expect(within(grid).getByText("String")).toBeTruthy();
+    expect(within(grid).getByText("exact")).toBeTruthy();
+    expect(screen.queryByTestId("panel-command-result")).toBeNull();
+  });
+
+  it("Panel: shows descriptor-unavailable with an explicit refresh action", () => {
+    const cbs = renderDetail({
+      state: detailState({
+        descriptions: {
+          entriesById: {
+            [ID]: {
+              key: DKEY,
+              id: ID,
+              phase: "unavailable",
+              code: "UNAVAILABLE",
+              reason: "the console command gateway is not configured",
+              refreshing: false,
+            },
+          },
+        },
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    expect(screen.getByTestId("descriptor-unavailable")).toBeTruthy();
+    expect(screen.getByText(/UNAVAILABLE/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reload panel" }));
+    expect(cbs.onRefreshDescriptor).toHaveBeenCalledWith(DKEY);
   });
 
   it("Logs: renders a pending state (no log-class surface ships yet)", () => {
     renderDetail();
     fireEvent.click(screen.getByTestId("tab-logs"));
-    expect(within(screen.getByTestId("phase2-logs")).getByText(/Available in Phase 2/i)).toBeTruthy();
+    expect(within(screen.getByTestId("phase2-logs")).getByText(/Not yet available/i)).toBeTruthy();
   });
 });
 
@@ -229,6 +649,6 @@ describe("ComponentDetailView — edge cases", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("tab-config"));
-    expect(screen.getByTestId("config-embed-unavailable")).toBeTruthy();
+    expect(screen.getByTestId("config-unavailable")).toBeTruthy();
   });
 });

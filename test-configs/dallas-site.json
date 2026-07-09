@@ -1,0 +1,56 @@
+{
+  "logging": {
+    "level": "INFO"
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalSecs": 5
+  },
+  "metricEmission": {
+    "target": "messaging"
+  },
+  "messaging": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": 18830,
+      "clientId": "edge-console-dallas"
+    },
+    "requestTimeoutSeconds": 30
+  },
+  "hierarchy": {
+    "levels": [
+      "site",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "dallas"
+  },
+  "component": {
+    "global": {
+      "console": {
+        "ws": {
+          "port": 8443,
+          "bindAddress": "127.0.0.1",
+          "heartbeatIntervalMs": 15000
+        },
+        "staleness": {
+          "warnMultiplier": 2,
+          "staleMultiplier": 2.5,
+          "offlineMultiplier": 5,
+          "defaultIntervalSecs": 5,
+          "sweepIntervalMs": 1000
+        },
+        "cache": {
+          "maxChannelsPerComponent": 1024
+        }
+      }
+    },
+    "instances": [
+      {
+        "id": "main"
+      }
+    ],
+    "token": "edge-console"
+  }
+}

@@ -1,6 +1,6 @@
 /**
  * The Components screen (R2) — presentational tests: the dynamic tree, the roster (group
- * selected), the component summary (leaf selected) + Open detail, and the app-bar search
+ * selected), the inline component detail (leaf selected), and the app-bar search
  * filtering the tree. State in, DOM out, callbacks observed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +79,9 @@ describe("ComponentsView", () => {
   it("rosters everything beneath the default (site) selection — the tree doubles as inventory", () => {
     render(<ComponentsView state={stateWith()} now={T0} />);
     const roster = screen.getByTestId("components-roster");
+    for (const column of ["Health", "Component", "Device", "Heartbeat", "Action"]) {
+      expect(within(roster).getByText(column)).toBeTruthy();
+    }
     // All three components are listed beneath the site.
     expect(within(roster).getByTestId("roster-row-pack-gw-01/opcua-adapter")).toBeTruthy();
     expect(within(roster).getByTestId("roster-row-pack-gw-01/modbus-adapter")).toBeTruthy();
@@ -94,28 +97,24 @@ describe("ComponentsView", () => {
     expect(within(roster).queryByTestId("roster-row-press-gw-01/opcua-adapter")).toBeNull();
   });
 
-  it("shows a component summary (+ Open detail) when a leaf is selected", () => {
-    const onOpenDetail = vi.fn();
-    render(<ComponentsView state={stateWith()} now={T0} onOpenDetail={onOpenDetail} />);
+  it("shows the inline component detail when a leaf is selected", () => {
+    render(<ComponentsView state={stateWith()} now={T0} />);
     fireEvent.click(screen.getByTestId("tree-node-pack-gw-01/opcua-adapter"));
 
-    const summary = screen.getByTestId("component-summary");
-    expect(within(summary).getByText("opcua-adapter")).toBeTruthy();
-    // Vitals come from the runtime attributes + alarms (real data).
-    expect(within(summary).getByTestId("summary-alerts").textContent).toBe("1");
-    expect(within(summary).getByText("210", { exact: false })).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("open-detail"));
-    expect(onOpenDetail).toHaveBeenCalledWith(key("pack-gw-01", "opcua-adapter"));
+    expect(screen.getByTestId("tab-health")).toBeTruthy();
+    expect(screen.getByTestId("tab-config")).toBeTruthy();
+    const tiles = screen.getByTestId("health-tiles");
+    expect(within(tiles).getByText("22%")).toBeTruthy();
+    expect(within(tiles).getByText("210", { exact: false })).toBeTruthy();
+    expect(screen.queryByTestId("open-detail")).toBeNull();
   });
 
-  it("opens detail from a roster row's Open button", () => {
-    const onOpenDetail = vi.fn();
-    render(<ComponentsView state={stateWith()} now={T0} onOpenDetail={onOpenDetail} />);
+  it("opens inline detail from a roster row's Open button", () => {
+    const onSelectedComponentChange = vi.fn();
+    render(<ComponentsView state={stateWith()} now={T0} onSelectedComponentChange={onSelectedComponentChange} />);
     fireEvent.click(screen.getByTestId("roster-open-press-gw-01/opcua-adapter"));
-    // Roster "Open" selects the component (shows its summary); Open detail then hands off.
-    fireEvent.click(screen.getByTestId("open-detail"));
-    expect(onOpenDetail).toHaveBeenCalledWith(key("press-gw-01", "opcua-adapter"));
+    expect(screen.getByTestId("tab-health")).toBeTruthy();
+    expect(onSelectedComponentChange).toHaveBeenCalledWith(key("press-gw-01", "opcua-adapter"));
   });
 
   it("filters the tree from the query (app-bar search) and mirrors it in the filter box", () => {

@@ -28,8 +28,8 @@ describe("CommandControls - built-in buttons", () => {
     expect(screen.getByTestId(`cmd-btn-reload-config-${ID}`)).toBeTruthy();
     expect(screen.getByTestId(`cmd-btn-get-configuration-${ID}`)).toBeTruthy();
     expect(screen.getByTestId(`cmd-send-open-${ID}`)).toBeTruthy();
-    // The custom-verb discovery gap is documented in the UI.
-    expect(screen.getByText(/CUSTOM verbs/)).toBeTruthy();
+    // Component-specific verbs are discovered through the descriptor panel path.
+    expect(screen.getByText(/Panel tab when advertised/)).toBeTruthy();
   });
 
   it("fires onInvoke with the component key + verb when a button is clicked", () => {

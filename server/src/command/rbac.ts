@@ -22,7 +22,8 @@
  *     "defaultRole": "operator",
  *     "roles": {
  *       "operator": { "allow": ["*"] },                         // full control
- *       "viewer":   { "allow": ["ping", "get-configuration"] }  // read-only verbs
+ *       "viewer":   { "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"] }
+ *                                                            // read-only discovery/status verbs
  *     }
  *   }
  * }
@@ -51,14 +52,17 @@ export interface RbacConfig {
 /**
  * The default RBAC posture: two roles, `operator` (full control — the permissive default
  * the reconciliation asks for, "allow the built-ins but make it a real seam") and
- * `viewer` (read-only: the two non-mutating built-ins). New deployments get commanding
+ * `viewer` (read-only: discovery/status verbs). New deployments get commanding
  * out of the box; locking it down is a config edit, not a code change.
  */
 export const DEFAULT_RBAC_CONFIG: RbacConfig = {
   defaultRole: "operator",
   roles: {
     operator: { allow: ["*"], deny: [] },
-    viewer: { allow: ["ping", "get-configuration"], deny: [] },
+    viewer: {
+      allow: ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"],
+      deny: [],
+    },
   },
 };
 

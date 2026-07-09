@@ -3,6 +3,7 @@ import {
   alarmsForComponent,
   componentDetailPath,
   componentFullPath,
+  connectionStateCheck,
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
@@ -107,7 +108,7 @@ describe("detailSubtitleParts", () => {
 });
 
 describe("healthChecks", () => {
-  it("derives freshness / messaging(?) / connectionState / readErrors / open alerts from real data", () => {
+  it("derives human-facing operational checks from real data", () => {
     const comp = compView({ key: key("gw-01", "opcua-adapter"), liveness: "STALE" });
     const attrs = runtimeAttrs(key("gw-01", "opcua-adapter"), {
       connectionState: "RECONNECTING",
@@ -115,25 +116,65 @@ describe("healthChecks", () => {
     });
     const checks = healthChecks(comp, attrs, 1);
     expect(checks.map((c) => c.label)).toEqual([
-      "heartbeat freshness",
-      "messaging / ready",
-      "connectionState",
-      "readErrors",
-      "open alerts",
+      "Heartbeat freshness",
+      "Messaging readiness",
+      "Connection state",
+      "Read errors",
+      "Open alarms",
     ]);
-    expect(checks[0]).toMatchObject({ value: "stale", tone: "warn" });
-    expect(checks[1]).toMatchObject({ value: "?", tone: "unknown", pending: true }); // honest pending
-    expect(checks[2]).toMatchObject({ value: "RECONNECTING", tone: "warn" });
+    expect(checks[0]).toMatchObject({ value: "Stale", tone: "warn" });
+    expect(checks[1]).toMatchObject({ value: "Not reported", tone: "unknown", pending: true });
+    expect(checks[2]).toMatchObject({ value: "Reconnecting", tone: "warn" });
     expect(checks[3]).toMatchObject({ value: "3", tone: "warn" });
     expect(checks[4]).toMatchObject({ value: "1", tone: "err" });
   });
 
-  it("marks connectionState / readErrors pending ('—') for a non-adapter with no attributes", () => {
+  it("aggregates connection state from per-instance connectivity", () => {
+    const base = { key: key("gw-01", "opcua-adapter") };
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: true },
+            { instance: "b", connected: true },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Connected", tone: "ok", detail: "2 of 2 instances connected" });
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: true },
+            { instance: "b", connected: false },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Partially connected", tone: "warn", detail: "1 of 2 instances connected" });
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: false },
+            { instance: "b", connected: false },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Disconnected", tone: "err", detail: "0 of 2 instances connected" });
+  });
+
+  it("marks connection state / read errors pending for a non-adapter with no attributes", () => {
     const comp = compView({ key: key("gw-01", "batch-runner"), liveness: "FRESH" });
     const checks = healthChecks(comp, undefined, 0);
-    expect(checks[2]).toMatchObject({ label: "connectionState", value: "—", pending: true });
-    expect(checks[3]).toMatchObject({ label: "readErrors", value: "—", pending: true });
-    expect(checks[4]).toMatchObject({ label: "open alerts", value: "0", tone: "plain" });
+    expect(checks[2]).toMatchObject({ label: "Connection state", value: "Not reported", pending: true });
+    expect(checks[3]).toMatchObject({ label: "Read errors", value: "Not reported", pending: true });
+    expect(checks[4]).toMatchObject({ label: "Open alarms", value: "0", tone: "plain" });
   });
 });
 

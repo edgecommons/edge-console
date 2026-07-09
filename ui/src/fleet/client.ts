@@ -44,8 +44,12 @@ import { AttributeStore } from "./attribute-store";
 import type { AttributesView } from "./attribute-store";
 import { SignalStore } from "./signal-store";
 import type { SignalsView } from "./signal-store";
+import { MetricStore } from "./metric-store";
+import type { MetricsView } from "./metric-store";
 import { CommandStore } from "./command-store";
 import type { CommandView } from "./command-store";
+import { DescriptionStore } from "./description-store";
+import type { DescriptionsView } from "./description-store";
 
 /** Connection status surfaced to the UI. */
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -114,6 +118,8 @@ export interface ClientState {
   fleet: FleetView;
   /** The C5 config-review entries (per requested component key). */
   configs: ConfigView;
+  /** The Phase 3 descriptor/panel manifests (per requested component key). */
+  descriptions: DescriptionsView;
   /** The C6 rolling event log (newest-first, populated while subscribed). */
   events: EventsView;
   /** The R0 console-side alarm surface (active list + counts) — the notifications badge. */
@@ -122,6 +128,8 @@ export interface ClientState {
   attributes: AttributesView;
   /** The R0 DATA-plane signal surface (latest value + quality + bounded series per series) — the Signals screen (R5). */
   signals: SignalsView;
+  /** The C6 metric surface (component-published non-data numeric series), consumed by component Metrics tabs. */
+  metrics: MetricsView;
   /** The console's own bus-ingest throughput (msgs/sec, from the heartbeat) — the Overview "Edge bus" tile. Undefined until a heartbeat carries it. */
   busMsgsPerSec?: number;
   /** The console's own recent per-second bus rates (from the heartbeat) — the "Edge bus" tile sparkline. */
@@ -149,8 +157,12 @@ export class FleetClient {
   readonly attributeStore: AttributeStore;
   /** The R0 DATA-plane signal fold core (pure; this client is its IO shell). */
   readonly signalStore: SignalStore;
+  /** The C6 metric fold core (pure; this client is its IO shell). */
+  readonly metricStore: MetricStore;
   /** The C4 command fold core (pure; this client is its IO shell). */
   readonly commandStore: CommandStore;
+  /** The Phase 3 descriptor fold core (pure; this client is its IO shell). */
+  readonly descriptionStore: DescriptionStore;
 
   private readonly url: string;
   private readonly socketFactory: SocketFactory;
@@ -195,7 +207,9 @@ export class FleetClient {
     this.alarmStore = new AlarmStore();
     this.attributeStore = new AttributeStore();
     this.signalStore = new SignalStore();
+    this.metricStore = new MetricStore();
     this.commandStore = new CommandStore();
+    this.descriptionStore = new DescriptionStore();
   }
 
   /** The console's own bus-ingest throughput (msgs/sec) from the latest heartbeat. */
@@ -252,6 +266,20 @@ export class FleetClient {
   requestConfig(key: ComponentKey): void {
     this.configStore.noteRequested(key);
     this.sendFrame({ type: "get-config", protocolVersion: PROTOCOL_VERSION, key });
+    this.notify();
+  }
+
+  /** Ask the gateway to discover this component's `cmd/describe` manifest. */
+  requestDescriptor(key: ComponentKey): void {
+    this.descriptionStore.noteRequested(key);
+    this.sendFrame({ type: "get-descriptor", protocolVersion: PROTOCOL_VERSION, key });
+    this.notify();
+  }
+
+  /** Force a fresh `cmd/describe` lookup for this component. */
+  refreshDescriptor(key: ComponentKey): void {
+    this.descriptionStore.noteRequested(key);
+    this.sendFrame({ type: "refresh-descriptor", protocolVersion: PROTOCOL_VERSION, key });
     this.notify();
   }
 
@@ -350,6 +378,20 @@ export class FleetClient {
   }
 
   /**
+   * Subscribe to the METRIC-plane surface (C6 `subscribe-metrics`): one replace
+   * `metrics` snapshot arrives immediately, then fresh numeric metric samples as
+   * `metric` pushes while the interest is active.
+   */
+  subscribeMetrics(): void {
+    this.sendFrame({ type: "subscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /** Stop the metric stream. Idempotent. */
+  unsubscribeMetrics(): void {
+    this.sendFrame({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
    * Acknowledge an active alarm (R0 `ack-alarm`) — console-side state that does not
    * clear the alarm. No direct reply: the tracker re-pushes a fresh `alarms` snapshot
    * (with the alarm now `acked`) to every subscribed client.
@@ -414,19 +456,23 @@ export class FleetClient {
   getState(): ClientState {
     const fleet = this.store.view();
     const configs = this.configStore.view();
+    const descriptions = this.descriptionStore.view();
     const events = this.eventLog.view();
     const alarms = this.alarmStore.view();
     const attributes = this.attributeStore.view();
     const signals = this.signalStore.view();
+    const metrics = this.metricStore.view();
     const commands = this.commandStore.view();
     if (
       this.stateCache === undefined ||
       this.stateCache.fleet !== fleet ||
       this.stateCache.configs !== configs ||
+      this.stateCache.descriptions !== descriptions ||
       this.stateCache.events !== events ||
       this.stateCache.alarms !== alarms ||
       this.stateCache.attributes !== attributes ||
       this.stateCache.signals !== signals ||
+      this.stateCache.metrics !== metrics ||
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
       this.stateCache.role !== this.role ||
@@ -442,10 +488,12 @@ export class FleetClient {
         hasSnapshot: this.store.hasSnapshot(),
         fleet,
         configs,
+        descriptions,
         events,
         alarms,
         attributes,
         signals,
+        metrics,
         ...(this.busMsgsPerSec !== undefined ? { busMsgsPerSec: this.busMsgsPerSec } : {}),
         ...(this.busRecentRates !== undefined ? { busRecentRates: this.busRecentRates } : {}),
         ...(this.self !== undefined ? { self: this.self } : {}),
@@ -551,6 +599,19 @@ export class FleetClient {
         this.retries = 0;
         this.notify();
         return;
+      case "descriptor":
+        this.descriptionStore.applyDescriptor(msg.key, msg.manifest, msg.receivedAt);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "descriptor-unavailable":
+        this.descriptionStore.applyUnavailable(msg.key, {
+          code: msg.code ?? "",
+          message: msg.reason,
+        });
+        this.retries = 0;
+        this.notify();
+        return;
       case "events":
         this.eventLog.applyBacklog(msg.events);
         this.retries = 0;
@@ -595,6 +656,16 @@ export class FleetClient {
         return;
       case "signal":
         this.signalStore.applyUpdates(msg.updates);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "metrics":
+        this.metricStore.applySnapshot(msg.series);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "metric":
+        this.metricStore.applyUpdates(msg.updates);
         this.retries = 0;
         this.notify();
         return;

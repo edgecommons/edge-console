@@ -110,6 +110,16 @@ function invoke(
     ...(args !== undefined ? { args } : {}),
   });
 }
+function descriptor(type: "get-descriptor" | "refresh-descriptor" = "get-descriptor", key = KEY): string {
+  return JSON.stringify({ type, protocolVersion: PROTOCOL_VERSION, key });
+}
+
+function descriptorFrames(t: FakeTransport): Array<Extract<ServerMessage, { type: "descriptor" | "descriptor-unavailable" }>> {
+  return t.messages().filter(
+    (m): m is Extract<ServerMessage, { type: "descriptor" | "descriptor-unavailable" }> =>
+      m.type === "descriptor" || m.type === "descriptor-unavailable",
+  );
+}
 
 describe("FleetWsGateway - invoke-command happy path", () => {
   it("issues the request and answers exactly one command-result correlated by requestId", async () => {
@@ -182,6 +192,97 @@ describe("FleetWsGateway - invoke-command without the seam", () => {
     session.onMessage(invoke("r", KEY, "ping"));
     expect(t.results()[0]).toMatchObject({ ok: false, error: { code: "UNAVAILABLE" } });
     expect(t.closed).toBeUndefined();
+  });
+});
+
+describe("FleetWsGateway - descriptor discovery", () => {
+  it("invokes cmd/describe and returns a normalized descriptor frame", async () => {
+    const { gateway, calls } = rig();
+    const t = new FakeTransport("c1");
+    const session = gateway.connect(t, "viewer");
+    session.onMessage(hello());
+    session.onMessage(descriptor());
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.topic).toBe("ecv1/gw-01/opcua-adapter/main/cmd/describe");
+    calls[0]!.resolve(
+      reply("describe", {
+        ok: true,
+        result: {
+          schemaVersion: "edgecommons.component.describe.v1",
+          component: { component: "opcua-adapter", instance: "main" },
+          digest: "sha256:test",
+          commands: [{ verb: "sb/browse", builtIn: false }],
+          panels: {
+            schemaVersion: "edgecommons.panels.v2",
+            provider: "opcua-adapter",
+            renderer: "descriptor",
+            defaultView: "overview",
+            views: [{ id: "overview", title: "Overview", order: 10 }],
+          },
+        },
+      }),
+    );
+    await flush();
+
+    expect(descriptorFrames(t)).toHaveLength(1);
+    expect(descriptorFrames(t)[0]).toMatchObject({
+      type: "descriptor",
+      key: KEY,
+      manifest: {
+        schema: "edgecommons.component.describe.v1",
+        component: { component: "opcua-adapter" },
+        digest: "sha256:test",
+        commands: [{ verb: "sb/browse", builtIn: false }],
+        panels: {
+          schema: "edgecommons.panels.v2",
+          provider: "opcua-adapter",
+          renderer: "descriptor",
+          defaultView: "overview",
+          views: [{ id: "overview", title: "Overview" }],
+        },
+      },
+    });
+  });
+
+  it("answers descriptor-unavailable honestly when the command seam is absent", () => {
+    const { gateway, calls } = rig(false);
+    const t = new FakeTransport("c1");
+    const session = gateway.connect(t, "viewer");
+    session.onMessage(hello());
+    session.onMessage(descriptor());
+
+    expect(calls).toHaveLength(0);
+    expect(descriptorFrames(t)[0]).toMatchObject({
+      type: "descriptor-unavailable",
+      key: KEY,
+      code: "UNAVAILABLE",
+    });
+    expect(t.closed).toBeUndefined();
+  });
+
+  it("maps component describe failures and malformed replies to descriptor-unavailable", async () => {
+    const { gateway, calls } = rig();
+    const t = new FakeTransport("c1");
+    const session = gateway.connect(t, "viewer");
+    session.onMessage(hello());
+
+    session.onMessage(descriptor("refresh-descriptor"));
+    calls[0]!.resolve(reply("describe", { ok: false, error: { code: "TIMEOUT", message: "no reply" } }));
+    await flush();
+    expect(descriptorFrames(t).at(-1)).toMatchObject({
+      type: "descriptor-unavailable",
+      code: "TIMEOUT",
+      reason: "no reply",
+    });
+
+    session.onMessage(descriptor());
+    calls[1]!.resolve(reply("describe", { ok: true, result: "not a manifest" }));
+    await flush();
+    expect(descriptorFrames(t).at(-1)).toMatchObject({
+      type: "descriptor-unavailable",
+      code: "MALFORMED_DESCRIBE",
+    });
   });
 });
 

@@ -18,11 +18,16 @@ describe("ConfigRbacPolicy", () => {
     }
   });
 
-  it("the default viewer role is read-only (the two non-mutating built-ins)", () => {
+  it("the default viewer role is read-only (discovery/status verbs)", () => {
     const p = new ConfigRbacPolicy(DEFAULT_RBAC_CONFIG);
     expect(p.can("viewer", "ping")).toBe(true);
+    expect(p.can("viewer", "describe")).toBe(true);
     expect(p.can("viewer", "get-configuration")).toBe(true);
+    expect(p.can("viewer", "sb/status")).toBe(true);
+    expect(p.can("viewer", "sb/browse")).toBe(true);
+    expect(p.can("viewer", "sb/read")).toBe(true);
     expect(p.can("viewer", "reload-config")).toBe(false);
+    expect(p.can("viewer", "sb/write")).toBe(false);
     expect(p.can("viewer", "restart-pipeline")).toBe(false);
   });
 

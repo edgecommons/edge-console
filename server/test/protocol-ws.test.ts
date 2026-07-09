@@ -138,6 +138,43 @@ describe("parseClientMessage - the C5 config family", () => {
   });
 });
 
+describe("parseClientMessage - the Phase 3 descriptor family", () => {
+  const KEY = { device: "gw-01", component: "opcua-adapter" };
+
+  it.each(["get-descriptor", "refresh-descriptor"] as const)(
+    "accepts %s with a full component key (extras stripped)",
+    (type) => {
+      const result = parseClientMessage(
+        JSON.stringify({
+          type,
+          protocolVersion: PROTOCOL_VERSION,
+          key: { ...KEY, extra: "ignored" },
+          somethingElse: true,
+        }),
+      );
+      expect(result).toEqual({
+        ok: true,
+        message: { type, protocolVersion: PROTOCOL_VERSION, key: KEY },
+      });
+    },
+  );
+
+  it.each([
+    ["missing key", { type: "get-descriptor", protocolVersion: PROTOCOL_VERSION }],
+    ["array key", { type: "get-descriptor", protocolVersion: PROTOCOL_VERSION, key: [1] }],
+    [
+      "partial key",
+      { type: "refresh-descriptor", protocolVersion: PROTOCOL_VERSION, key: { device: "gw-01" } },
+    ],
+    [
+      "empty component",
+      { type: "refresh-descriptor", protocolVersion: PROTOCOL_VERSION, key: { device: "gw-01", component: "" } },
+    ],
+  ])("rejects descriptor frame: %s", (_label, frame) => {
+    expect(parseClientMessage(JSON.stringify(frame)).ok).toBe(false);
+  });
+});
+
 describe("parseClientMessage - the C6 activity family", () => {
   it("accepts subscribe-events bare and with a positive limit (extras ignored)", () => {
     expect(

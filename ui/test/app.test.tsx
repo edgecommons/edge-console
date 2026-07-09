@@ -66,7 +66,7 @@ describe("App shell", () => {
     expect(within(row).getByText("Healthy")).toBeTruthy();
   });
 
-  it("navigates Overview <-> Configuration over the ONE shared client (no socket churn)", () => {
+  it("does not expose a separate Configuration page; component config lives inline on the shared client", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({
       url: "ws://console.test/ws",
@@ -89,19 +89,20 @@ describe("App shell", () => {
       sockets[0]!.onmessage?.(JSON.stringify(msg));
     });
 
-    // To the config view: the second nav destination renders the C5 screen.
-    fireEvent.click(screen.getByRole("link", { name: /Configuration/ }));
-    expect(screen.getByText("Configuration review")).toBeTruthy();
-    expect(screen.getByTestId("config-picker")).toBeTruthy();
+    // Configuration is not a top-level page anymore.
+    expect(screen.queryByRole("link", { name: /^Configuration$/ })).toBeNull();
 
-    // Selecting a component issues get-config on the SAME socket (no second dial).
-    fireEvent.click(screen.getByTestId("config-pick-gw-01/opcua-adapter"));
+    // Components owns the component-level config workflow on the same socket.
+    fireEvent.click(screen.getByRole("link", { name: /Components/ }));
+    fireEvent.click(screen.getByTestId("tree-node-gw-01/opcua-adapter"));
     expect(sockets).toHaveLength(1);
     const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
-    expect(frames.at(-1)).toMatchObject({
+    expect(frames.find((f) => f.type === "get-config")).toMatchObject({
       type: "get-config",
       key: { device: "gw-01", component: "opcua-adapter" },
     });
+    fireEvent.click(screen.getByTestId("tab-config"));
+    expect(screen.getByTestId("config-loading")).toBeTruthy();
 
     // And back: the health view returns, the socket still lives.
     fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
@@ -196,7 +197,7 @@ describe("App shell", () => {
     expect(sockets[0]!.closed).toBe(false);
   });
 
-  it("navigates to Components (R2): the dynamic tree renders, and Open detail shows the detail breadcrumb", () => {
+  it("navigates to Components (R2): the dynamic tree renders, and selecting a leaf shows inline detail", () => {
     const sockets: FakeSocket[] = [];
     const client = new FleetClient({
       url: "ws://console.test/ws",
@@ -224,19 +225,17 @@ describe("App shell", () => {
     expect(screen.getByText("Browse the site inventory and drill into any component.")).toBeTruthy();
     expect(screen.getByTestId("component-tree")).toBeTruthy();
 
-    // Select the component leaf → its summary → Open detail: same shared socket, no second dial.
+    // Select the component leaf: the real detail tabs render inline on the same screen/socket.
     fireEvent.click(screen.getByTestId("tree-node-gw-01/opcua-adapter"));
-    fireEvent.click(screen.getByTestId("open-detail"));
     expect(sockets).toHaveLength(1);
-    const crumbs = screen.getByTestId("detail-crumbs");
-    expect(within(crumbs).getByText("opcua-adapter")).toBeTruthy();
-    // The detail requested this component's cfg on the SAME socket (embedded Configuration tab).
+    expect(screen.queryByTestId("open-detail")).toBeNull();
+    expect(screen.queryByTestId("detail-crumbs")).toBeNull();
+    expect(screen.getByTestId("tab-health")).toBeTruthy();
+    expect(screen.getByTestId("tab-config")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /opcua-adapter/i })).toBeTruthy();
+    // The inline detail requested this component's cfg on the SAME socket.
     const frames = sockets[0]!.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
     expect(frames.some((f) => f.type === "get-config")).toBe(true);
-
-    // Back to Components via the breadcrumb.
-    fireEvent.click(screen.getByTestId("crumb-components"));
-    expect(screen.getByTestId("component-tree")).toBeTruthy();
     expect(sockets[0]!.closed).toBe(false);
   });
 

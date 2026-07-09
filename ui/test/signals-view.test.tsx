@@ -254,10 +254,9 @@ describe("App — Signals screen (R5) integration", () => {
       sockets[0]!.onmessage?.(JSON.stringify(sig));
     });
 
-    // Components → select the leaf → open detail → click the "Signals" deep-link.
+    // Components → select the leaf → inline detail → click the "Signals" deep-link.
     fireEvent.click(screen.getByRole("link", { name: /Components/ }));
     fireEvent.click(screen.getByTestId("tree-node-press-gw-01/opcua-adapter"));
-    fireEvent.click(screen.getByTestId("open-detail"));
     fireEvent.click(screen.getByTestId("detail-open-signals"));
 
     // Scoped to press-gw-01/opcua-adapter: only its three signals, not pack-gw-01's Flow_A.

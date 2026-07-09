@@ -7,23 +7,20 @@
  *                     threads·files·fds / uptime) + the console-computed health checks;
  *   - **Instances** — every instance of the (device, component) from the identity `instance`
  *                     token;
- *   - **Configuration** — an embedded read-only view of the component's effective `cfg`
- *                     (from the ConfigStore), with a link to the full Configuration screen;
- *   - **Events**    — this component's filtered `evt`/alarm slice, with a link to Events & Alarms.
+ *   - **Configuration** — the full structured/raw effective `cfg` inspector from the
+ *                     ConfigStore, mounted in place;
+ *   - **Events**    — this component's filtered `evt`/alarm slice, with a link to Events & Alarms;
+ *   - **Metrics**   — this component's custom non-system metric series published over the bus.
  *
- * The component-specific tabs the mockup also shows depend on the DEFERRED `describe`/panels
- * capability manifest, so they are rendered as an honest present-but-pending state, never
- * fabricated:
- *   - **Panel** (+ the opcua **Overview / Address Space / Signals / Diagnostics** sub-tabs);
- *   - **Logs** (the UNS `log` class — no LogStore ships yet);
- *   - the component's implementation **language** + app **version** (subtitle) and its custom
- *     command surface / **Capabilities** — all need the manifest.
+ * The component-specific Panel tab is descriptor-driven: the console asks the component for
+ * `cmd/describe`, then renders the advertised panel views without fabricating OPC UA-only UI.
+ * Logs remain pending because the UNS `log` class has no LogStore yet.
  *
  * `ComponentDetailView` is purely presentational (state in, DOM out — component-testable
  * without a socket); `ConnectedComponentDetailView` binds it to the shared {@link FleetClient}
  * and owns the config request / event subscription lifecycle.
  */
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   InlineLoading,
@@ -35,10 +32,20 @@ import {
   Tag,
   Tile,
 } from "@carbon/react";
-import { ArrowRight, CircleFilled } from "@carbon/react/icons";
-import type { ComponentKey, InstanceStatus } from "@edgecommons/edge-console-protocol";
+import { ArrowRight, ChevronDown, ChevronRight, CircleFilled } from "@carbon/react/icons";
+import type {
+  CommandCapability,
+  CommandError,
+  ComponentDescribeManifest,
+  ComponentKey,
+  InstanceStatus,
+  MetricSeriesSnapshot,
+  PanelViewDescriptor,
+  PanelWidgetDescriptor,
+} from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
+import type { DescriptorEntryView } from "../fleet/description-store";
 import type { ComponentView } from "../fleet/store";
 import { formatDurationMs, formatDurationSecs } from "../fleet/selectors";
 import { useFleetState, useNowTick } from "../fleet/useFleet";
@@ -48,11 +55,12 @@ import { CommandToasts } from "../health/CommandToasts";
 import type { InvokeCommand } from "../health/EdgeHealthView";
 import { SeverityTag } from "../events/EventsView";
 import { formatClockTime, summarizeBody } from "../events/selectors";
-import { effectiveConfig, flattenConfig, redactionCounts } from "../configreview/selectors";
+import { ConfigInspector } from "../configreview/ConfigInspector";
 import type { HealthCheck } from "./detail-selectors";
 import {
   alarmsForComponent,
   componentDetailPath,
+  connectionStateCheck,
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
@@ -62,8 +70,8 @@ import { findComponent } from "./components-tree";
 /** A no-op command seam (presentational tests without a live client). */
 const NO_INVOKE: InvokeCommand = () => undefined;
 
-/** The honest Phase-2 pending panel for the describe/panels-dependent surfaces. */
-function PhaseTwoPending({
+/** A pending surface for capabilities whose backing store is not shipped yet. */
+function PendingSurface({
   feature,
   needs,
   testId,
@@ -76,12 +84,11 @@ function PhaseTwoPending({
 }): React.JSX.Element {
   return (
     <div className="ec-pending" data-testid={testId}>
-      <div className="ec-pending__badge">Available in Phase 2</div>
+      <div className="ec-pending__badge">Not yet available</div>
       <h3 className="ec-pending__title">{feature}</h3>
       <p className="ec-dim">
-        This surface is driven by the component&apos;s <code>{needs}</code>, which is deferred to
-        Phase 2. The console does not fabricate it — it lights up once components advertise the
-        manifest over the bus.
+        This surface is driven by <code>{needs}</code>. The console does not fabricate it — it
+        lights up once the backing bus surface is available.
       </p>
       {children}
     </div>
@@ -91,7 +98,7 @@ function PhaseTwoPending({
 /** The Health tab's console-computed "health checks" structured list. */
 function HealthChecks({ checks }: { checks: HealthCheck[] }): React.JSX.Element {
   const toneTag = (c: HealthCheck) => {
-    if (c.tone === "plain") return <span className="ec-mono">{c.value}</span>;
+    if (c.tone === "plain") return <span className={c.pending === true ? "ec-dim" : "ec-mono"}>{c.value}</span>;
     const type = c.tone === "ok" ? "green" : c.tone === "err" ? "red" : c.tone === "unknown" ? "gray" : undefined;
     const className = c.tone === "warn" ? "ec-tag ec-tag--warn" : "ec-tag";
     return (
@@ -103,15 +110,41 @@ function HealthChecks({ checks }: { checks: HealthCheck[] }): React.JSX.Element 
   return (
     <div className="ec-slist" data-testid="health-checks">
       <div className="ec-slist__r ec-slist__r--hd">
-        <span className="ec-slist__k">Health checks</span>
-        <span className="ec-slist__v ec-dim">computed by console</span>
+        <span className="ec-slist__k">Operational checks</span>
+        <span className="ec-slist__v ec-dim">Status</span>
       </div>
       {checks.map((c) => (
         <div className="ec-slist__r" key={c.label} data-testid={`health-check-${c.label.replace(/[^a-z]/gi, "-")}`}>
           <span className="ec-slist__k">{c.label}</span>
-          <span className="ec-slist__v">{toneTag(c)}</span>
+          <span className="ec-slist__v">
+            {toneTag(c)}
+            {c.detail !== undefined && <span className="ec-dim">{c.detail}</span>}
+          </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function HealthStateStrip({
+  label,
+  value,
+  tone,
+  detail,
+  testId,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: HealthCheck["tone"];
+  detail: string;
+  testId: string;
+}): React.JSX.Element {
+  const toneClass = tone !== undefined && tone !== "plain" ? ` ec-health-state--${tone}` : "";
+  return (
+    <div className={`ec-health-state${toneClass}`} data-testid={testId}>
+      <div className="ec-health-state__label">{label}</div>
+      <div className="ec-health-state__value">{value}</div>
+      <div className="ec-health-state__detail">{detail}</div>
     </div>
   );
 }
@@ -122,6 +155,951 @@ function countOrDash(value: number | undefined): string {
 
 function gbOrDash(value: number | undefined): string {
   return value !== undefined ? String(Math.round(value)) : "—";
+}
+
+function commandCapabilities(manifest: ComponentDescribeManifest | undefined): CommandCapability[] {
+  return Array.isArray(manifest?.commands) ? manifest.commands : [];
+}
+
+function hasCommand(manifest: ComponentDescribeManifest | undefined, verb: string | undefined): verb is string {
+  return verb !== undefined && commandCapabilities(manifest).some((c) => c.verb === verb);
+}
+
+function viewTitle(view: PanelViewDescriptor): string {
+  return view.title ?? view.label ?? view.id;
+}
+
+function viewWidgets(view: PanelViewDescriptor): PanelWidgetDescriptor[] {
+  return Array.isArray(view.widgets) ? view.widgets : Array.isArray(view.descriptor) ? view.descriptor : [];
+}
+
+function stringProp(obj: PanelWidgetDescriptor, key: string): string | undefined {
+  const value = obj[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function arrayProp(obj: PanelWidgetDescriptor, key: string): unknown[] {
+  const value = obj[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function firstInstanceArg(comp: ComponentView, scoped: boolean): Record<string, unknown> {
+  if (!scoped) return {};
+  const first = comp.instances?.[0]?.instance;
+  return first !== undefined && first !== "main" ? { instance: first } : {};
+}
+
+function latestCommand(
+  commands: ClientState["commands"],
+  key: ComponentKey,
+  verb: string | undefined,
+) {
+  if (verb === undefined) return undefined;
+  return commands.latestByComponentVerb[`${componentKeyId(key)}::${verb}`];
+}
+
+type LatestCommandEntry = ReturnType<typeof latestCommand>;
+
+function errorText(error: CommandError | undefined): string {
+  return error !== undefined ? `${error.code}${error.message !== "" ? `: ${error.message}` : ""}` : "Command failed";
+}
+
+function CapabilityUnavailable({ verb, reason }: { verb?: string; reason?: string }): React.JSX.Element {
+  return (
+    <div className="ec-panel-unavailable" data-testid="panel-capability-unavailable">
+      <Tag size="sm" type="gray" className="ec-tag">
+        Unavailable
+      </Tag>
+      <span>
+        {verb !== undefined ? <span className="ec-mono">cmd/{verb}</span> : "This binding"}{" "}
+        {reason ?? "is not advertised by this component."}
+      </span>
+    </div>
+  );
+}
+
+function CommandResultPreview({
+  entry,
+  empty,
+}: {
+  entry: LatestCommandEntry;
+  empty: string;
+}): React.JSX.Element {
+  if (entry === undefined) return <p className="ec-dim">{empty}</p>;
+  if (entry.phase === "pending") return <InlineLoading description="Waiting for reply..." />;
+  if (entry.phase === "error") return <p className="ec-panel-error">{errorText(entry.error)}</p>;
+  return (
+    <pre className="ec-panel-json" data-testid="panel-command-result">
+      {JSON.stringify(entry.result ?? {}, null, 2)}
+    </pre>
+  );
+}
+
+function commandResultGate(entry: LatestCommandEntry, empty: string): React.JSX.Element | undefined {
+  if (entry === undefined) return <p className="ec-dim">{empty}</p>;
+  if (entry.phase === "pending") return <InlineLoading description="Waiting for reply..." />;
+  if (entry.phase === "error") return <p className="ec-panel-error">{errorText(entry.error)}</p>;
+  return undefined;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function recordsFromProp(obj: Record<string, unknown> | undefined, key: string): Record<string, unknown>[] {
+  const value = obj?.[key];
+  return Array.isArray(value) ? value.map(objectRecord).filter((v): v is Record<string, unknown> => v !== undefined) : [];
+}
+
+function propString(obj: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return undefined;
+}
+
+function propNumber(obj: Record<string, unknown> | undefined, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function propBoolean(obj: Record<string, unknown> | undefined, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+function displayValue(value: unknown): string {
+  if (typeof value === "string" && value !== "") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return "—";
+}
+
+function nodeNamespace(row: Record<string, unknown>): string {
+  const namespace = row["namespace"];
+  return typeof namespace === "number" || typeof namespace === "string" ? `ns=${namespace}` : "ns=?";
+}
+
+function nodeId(row: Record<string, unknown>): string {
+  return propString(row, "signalId", "nodeId", "id") ?? "—";
+}
+
+function addressNodeId(row: Record<string, unknown>): string {
+  return propString(row, "nodeId", "id", "signalId") ?? "—";
+}
+
+function nodeName(row: Record<string, unknown>): string {
+  return propString(row, "name", "displayName", "browseName", "signalId", "nodeId", "id") ?? "Unnamed node";
+}
+
+interface AddressTreeRow {
+  id: string;
+  pathKey: string;
+  node: Record<string, unknown>;
+  depth: number;
+  referenceType?: string;
+  referenceTypeId?: string;
+}
+
+function nodeReferences(node: Record<string, unknown>): Record<string, unknown>[] {
+  return recordsFromProp(node, "refs");
+}
+
+function referenceTarget(ref: Record<string, unknown>): Record<string, unknown> {
+  const target = objectRecord(ref["target"]) ?? objectRecord(ref["node"]);
+  if (target !== undefined) return target;
+  const targetNodeId = propString(ref, "targetNodeId", "nodeId") ?? "unresolved";
+  return { nodeId: targetNodeId, name: targetNodeId };
+}
+
+function hasAddressRefs(node: Record<string, unknown>): boolean {
+  return Array.isArray(node["refs"]);
+}
+
+function addressNodeMightHaveChildren(node: Record<string, unknown>): boolean {
+  if (nodeReferences(node).length > 0) return true;
+  if (hasAddressRefs(node)) return false;
+  const nodeClass = propString(node, "nodeClass")?.toLowerCase();
+  return nodeClass === undefined || nodeClass === "object" || nodeClass === "method" || nodeClass === "view";
+}
+
+function mergeAddressNode(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  if (existing === undefined) return incoming;
+  const merged = { ...existing, ...incoming };
+  if (!hasAddressRefs(incoming) && hasAddressRefs(existing)) {
+    merged["refs"] = existing["refs"];
+  }
+  return merged;
+}
+
+function collectAddressNodes(root: Record<string, unknown>): Record<string, Record<string, unknown>> {
+  const collected: Record<string, Record<string, unknown>> = {};
+  const walk = (node: Record<string, unknown>, path: Set<string>) => {
+    const id = addressNodeId(node);
+    if (id !== "—") {
+      collected[id] = mergeAddressNode(collected[id], node);
+      if (path.has(id)) return;
+      path = new Set(path);
+      path.add(id);
+    }
+    for (const childRef of nodeReferences(node)) {
+      walk(referenceTarget(childRef), path);
+    }
+  };
+  walk(root, new Set());
+  return collected;
+}
+
+function mergeAddressTree(
+  previous: Record<string, Record<string, unknown>>,
+  root: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  const next = { ...previous };
+  const collected = collectAddressNodes(root);
+  for (const [id, node] of Object.entries(collected)) {
+    next[id] = mergeAddressNode(next[id], node);
+  }
+  return next;
+}
+
+function flattenAddressHierarchy(
+  rootId: string | undefined,
+  nodesById: Record<string, Record<string, unknown>>,
+  expanded: ReadonlySet<string>,
+): AddressTreeRow[] {
+  if (rootId === undefined) return [];
+  const root = nodesById[rootId];
+  if (root === undefined) return [];
+  const rows: AddressTreeRow[] = [];
+  const walk = (
+    node: Record<string, unknown>,
+    depth: number,
+    ref: Record<string, unknown> | undefined,
+    path: Set<string>,
+    pathKey: string,
+  ) => {
+    const id = addressNodeId(node);
+    const row: AddressTreeRow = { id, pathKey, node, depth };
+    if (ref !== undefined) {
+      const referenceType = propString(ref, "referenceType");
+      const referenceTypeId = propString(ref, "referenceTypeId");
+      if (referenceType !== undefined) row.referenceType = referenceType;
+      if (referenceTypeId !== undefined) row.referenceTypeId = referenceTypeId;
+    }
+    rows.push(row);
+    if (id === "—" || !expanded.has(id)) return;
+    if (id !== "—" && path.has(id)) return;
+    const nextPath = new Set(path);
+    if (id !== "—") nextPath.add(id);
+    const duplicateRefs = new Map<string, number>();
+    for (const childRef of nodeReferences(node)) {
+      const target = referenceTarget(childRef);
+      const targetId = addressNodeId(target);
+      const loaded = targetId !== "—" ? nodesById[targetId] : undefined;
+      const referenceKey = propString(childRef, "referenceTypeId", "referenceType") ?? "ref";
+      const childKeyBase = `${referenceKey}>${targetId}`;
+      const duplicateIndex = duplicateRefs.get(childKeyBase) ?? 0;
+      duplicateRefs.set(childKeyBase, duplicateIndex + 1);
+      const childPathKey = `${pathKey}/${childKeyBase}${duplicateIndex === 0 ? "" : `#${duplicateIndex}`}`;
+      walk(loaded !== undefined ? mergeAddressNode(target, loaded) : target, depth + 1, childRef, nextPath, childPathKey);
+    }
+  };
+  walk(root, 0, undefined, new Set(), `root:${rootId}`);
+  return rows;
+}
+
+function addressReferenceLabel(row: AddressTreeRow): string {
+  return row.referenceType ?? row.referenceTypeId ?? "—";
+}
+
+function addressNodeActionLabel(row: AddressTreeRow, isExpanded: boolean): string {
+  const action = isExpanded ? "Collapse" : "Expand";
+  return `${action} ${nodeName(row.node)} (${addressNodeId(row.node)})`;
+}
+
+function metricValue(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs >= 100_000 || abs < 0.01)) return value.toExponential(2);
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function isCustomMetric(series: MetricSeriesSnapshot): boolean {
+  const metric = series.metric.trim().toLowerCase();
+  return (
+    metric !== "" &&
+    metric !== "sys" &&
+    metric !== "southbound_health" &&
+    !metric.startsWith("sys.") &&
+    !metric.startsWith("sys/") &&
+    !metric.startsWith("sys_")
+  );
+}
+
+function customMetricsForComponent(series: MetricSeriesSnapshot[], detailKey: ComponentKey): MetricSeriesSnapshot[] {
+  const id = componentKeyId(detailKey);
+  return series
+    .filter((s) => componentKeyId(s.key) === id && isCustomMetric(s))
+    .sort(
+      (a, b) =>
+        a.instance.localeCompare(b.instance) ||
+        a.metric.localeCompare(b.metric) ||
+        a.measure.localeCompare(b.measure),
+    );
+}
+
+function AddressSpaceResult({
+  entry,
+  empty,
+  onBrowseNode,
+}: {
+  entry: LatestCommandEntry;
+  empty: string;
+  onBrowseNode: (ref: string) => void;
+}): React.JSX.Element {
+  const [rootId, setRootId] = useState<string | undefined>(undefined);
+  const [nodesById, setNodesById] = useState<Record<string, Record<string, unknown>>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [loadStatusById, setLoadStatusById] = useState<Record<string, "pending" | "error">>({});
+
+  useEffect(() => {
+    if (entry?.phase === "ok") {
+      const result = objectRecord(entry.result);
+      const root = objectRecord(result?.["root"]);
+      if (root === undefined || propString(result, "mode") !== "hierarchical") return;
+      const loadedId = addressNodeId(root);
+      if (loadedId === "—") return;
+      setNodesById((previous) => mergeAddressTree(previous, root));
+      setRootId((previous) => previous ?? loadedId);
+      setExpanded((previous) => {
+        if (previous.has(loadedId)) return previous;
+        const next = new Set(previous);
+        next.add(loadedId);
+        return next;
+      });
+      setLoadStatusById((previous) => {
+        if (previous[loadedId] === undefined) return previous;
+        const next = { ...previous };
+        delete next[loadedId];
+        return next;
+      });
+    } else if (entry?.phase === "error") {
+      setLoadStatusById((previous) => {
+        let changed = false;
+        const next = { ...previous };
+        for (const [id, status] of Object.entries(previous)) {
+          if (status === "pending") {
+            next[id] = "error";
+            changed = true;
+          }
+        }
+        return changed ? next : previous;
+      });
+    }
+  }, [entry?.phase, entry?.requestId, entry?.result]);
+
+  const hasRoot = rootId !== undefined && nodesById[rootId] !== undefined;
+  if (!hasRoot) {
+    const gate = commandResultGate(entry, empty);
+    if (gate !== undefined) return gate;
+
+    const result = objectRecord(entry?.result);
+    if (result === undefined) return <CommandResultPreview entry={entry} empty={empty} />;
+
+    const root = objectRecord(result["root"]);
+    if (root === undefined || propString(result, "mode") !== "hierarchical") {
+      const instance = propString(result, "id", "instance") ?? "default";
+      return (
+        <div className="ec-panel-result" data-testid="panel-address-tree">
+          <div className="ec-panel-result-meta">
+            <span>
+              Instance <span className="ec-mono">{instance}</span>
+            </span>
+          </div>
+          <p className="ec-panel-error">Browse reply did not include hierarchical refs.</p>
+        </div>
+      );
+    }
+  }
+
+  const result = objectRecord(entry?.result);
+  const instance = propString(result, "id", "instance") ?? "default";
+  const truncated = propBoolean(result, "truncated") === true;
+  const rows = flattenAddressHierarchy(rootId, nodesById, expanded);
+  const loadedRefCount = Math.max(0, rows.length - 1);
+  const latestRefCount = propNumber(result, "refCount");
+  const depth = propNumber(result, "depth");
+  const pendingRow = rows.find((row) => loadStatusById[row.id] === "pending");
+  const failedRow = rows.find((row) => loadStatusById[row.id] === "error");
+  const loadingLabel =
+    pendingRow !== undefined
+      ? `Loading ${nodeName(pendingRow.node)}...`
+      : entry?.phase === "pending" && hasRoot
+        ? "Loading address space..."
+        : undefined;
+  const failureLabel = failedRow !== undefined ? `Could not load ${nodeName(failedRow.node)}.` : undefined;
+
+  const toggleNode = (row: AddressTreeRow) => {
+    if (row.id === "—" || !addressNodeMightHaveChildren(row.node)) return;
+    const isExpanded = expanded.has(row.id);
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (isExpanded) next.delete(row.id);
+      else next.add(row.id);
+      return next;
+    });
+    if (!isExpanded && !hasAddressRefs(row.node)) {
+      setLoadStatusById((previous) => ({ ...previous, [row.id]: "pending" }));
+      onBrowseNode(row.id);
+    }
+  };
+
+  return (
+    <div className="ec-panel-result" data-testid="panel-address-tree">
+      <div className="ec-panel-result-meta ec-panel-result-meta--address-tree">
+        <div className="ec-panel-result-meta__items">
+          <span>
+            Instance <span className="ec-mono">{instance}</span>
+          </span>
+          <span>{loadedRefCount} hierarchical refs loaded</span>
+          {latestRefCount !== undefined && latestRefCount !== loadedRefCount && <span>{latestRefCount} refs in latest browse</span>}
+          {depth !== undefined && <span>Depth {depth}</span>}
+          {truncated && (
+            <Tag size="sm" type="gray" className="ec-tag">
+              More available
+            </Tag>
+          )}
+        </div>
+        <div className="ec-panel-tree-status" aria-live="polite" data-testid="panel-tree-status">
+          {loadingLabel !== undefined ? (
+            <InlineLoading className="ec-panel-tree-status__loading" description={loadingLabel} />
+          ) : failureLabel !== undefined ? (
+            <span className="ec-panel-error">{failureLabel}</span>
+          ) : (
+            <span className="ec-panel-tree-status__idle" aria-hidden="true">
+              &nbsp;
+            </span>
+          )}
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p className="ec-dim">Browse returned no hierarchical address-space refs.</p>
+      ) : (
+        <div className="ec-panel-tree" role="treegrid" aria-label="Address space browse results">
+          <div className="ec-panel-tree__row ec-panel-tree__row--head" role="row">
+            <span role="columnheader">Node</span>
+            <span role="columnheader">Node ID</span>
+            <span role="columnheader">Namespace</span>
+            <span role="columnheader">Class</span>
+            <span role="columnheader">Reference</span>
+            <span role="columnheader">Data type</span>
+          </div>
+          {rows.map((row) => {
+            const refs = nodeReferences(row.node);
+            const expandable = addressNodeMightHaveChildren(row.node);
+            const isExpanded = expanded.has(row.id);
+            return (
+              <div className="ec-panel-tree__group" key={row.pathKey}>
+                <div
+                  className="ec-panel-tree__row"
+                  role="row"
+                  aria-level={row.depth + 1}
+                  aria-expanded={expandable ? isExpanded : undefined}
+                  data-testid="panel-address-node"
+                >
+                  <span
+                    className="ec-panel-tree__cell ec-panel-tree__name"
+                    role="gridcell"
+                    style={{ paddingLeft: `${0.5 + row.depth * 1.25}rem` }}
+                  >
+                    <button
+                      type="button"
+                      className={`ec-panel-tree__twisty${expandable ? "" : " ec-panel-tree__twisty--leaf"}`}
+                      aria-label={addressNodeActionLabel(row, isExpanded)}
+                      aria-expanded={expandable ? isExpanded : undefined}
+                      disabled={!expandable}
+                      onClick={() => toggleNode(row)}
+                    >
+                      {expandable ? (
+                        isExpanded ? (
+                          <ChevronDown size={16} />
+                        ) : (
+                          <ChevronRight size={16} />
+                        )
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
+                    </button>
+                    <span>{nodeName(row.node)}</span>
+                    {refs.length > 0 && <span className="ec-dim">{refs.length} refs</span>}
+                  </span>
+                  <span className="ec-panel-tree__cell ec-mono" role="gridcell">
+                    {addressNodeId(row.node)}
+                  </span>
+                  <span className="ec-panel-tree__cell" role="gridcell">
+                    {nodeNamespace(row.node)}
+                  </span>
+                  <span className="ec-panel-tree__cell" role="gridcell">
+                    {displayValue(row.node["nodeClass"])}
+                  </span>
+                  <span className="ec-panel-tree__cell" role="gridcell">
+                    {addressReferenceLabel(row)}
+                  </span>
+                  <span className="ec-panel-tree__cell" role="gridcell">
+                    {displayValue(row.node["dataType"])}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignalGridResult({
+  entry,
+  empty,
+}: {
+  entry: LatestCommandEntry;
+  empty: string;
+}): React.JSX.Element {
+  const gate = commandResultGate(entry, empty);
+  if (gate !== undefined) return gate;
+
+  const result = objectRecord(entry?.result);
+  const signals = recordsFromProp(result, "signals");
+  if (result === undefined) return <CommandResultPreview entry={entry} empty={empty} />;
+
+  const instance = propString(result, "id", "instance") ?? "default";
+  return (
+    <div className="ec-panel-result" data-testid="panel-signal-grid">
+      <div className="ec-panel-result-meta">
+        <span>
+          Instance <span className="ec-mono">{instance}</span>
+        </span>
+        <span>{signals.length} subscribed signals</span>
+      </div>
+      {signals.length === 0 ? (
+        <p className="ec-dim">No subscribed signals were reported.</p>
+      ) : (
+        <div className="ec-panel-table-wrap">
+          <table className="ec-panel-table">
+            <thead>
+              <tr>
+                <th scope="col">Signal</th>
+                <th scope="col">Namespace</th>
+                <th scope="col">ID type</th>
+                <th scope="col">Match</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signals.map((signal, index) => (
+                <tr key={`${nodeId(signal)}-${index}`} data-testid="panel-signal-row">
+                  <td className="ec-mono">{nodeId(signal)}</td>
+                  <td>
+                    <div>{nodeNamespace(signal)}</div>
+                    {propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl") !== undefined && (
+                      <div className="ec-dim">{propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl")}</div>
+                    )}
+                  </td>
+                  <td>{displayValue(signal["idType"])}</td>
+                  <td>{displayValue(signal["match"])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryWidget({ widget }: { widget: PanelWidgetDescriptor }): React.JSX.Element {
+  const rows = arrayProp(widget, "rows").filter(
+    (row): row is { label: string; value: unknown } =>
+      typeof row === "object" &&
+      row !== null &&
+      !Array.isArray(row) &&
+      typeof (row as { label?: unknown }).label === "string",
+  );
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "summary"}`}>
+      <h4>{widget.title ?? "Summary"}</h4>
+      {rows.length === 0 ? (
+        <p className="ec-dim">{typeof widget.description === "string" ? widget.description : "Descriptor summary"}</p>
+      ) : (
+        <div className="ec-slist ec-panel-kv">
+          {rows.map((row) => (
+            <div className="ec-slist__r" key={row.label}>
+              <span className="ec-slist__k">{row.label}</span>
+              <span className="ec-slist__v">{String(row.value ?? "—")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommandSummaryWidget({
+  widget,
+  manifest,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+}): React.JSX.Element {
+  const listed = arrayProp(widget, "verbs")
+    .map((v) => (typeof v === "string" ? v : undefined))
+    .filter((v): v is string => v !== undefined);
+  const verbs = listed.length > 0 ? listed : commandCapabilities(manifest).map((c) => c.verb);
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "commands"}`}>
+      <h4>{widget.title ?? "Command availability"}</h4>
+      <div className="ec-panel-command-list">
+        {verbs.map((verb) => {
+          const available = hasCommand(manifest, verb);
+          return (
+            <div className="ec-panel-command" key={verb}>
+              <span className="ec-mono">cmd/{verb}</span>
+              <Tag size="sm" type={available ? "green" : "gray"} className="ec-tag">
+                {available ? "Available" : "Unavailable"}
+              </Tag>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TreeBrowserWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  commands,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  commands: ClientState["commands"];
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const browseVerb = stringProp(widget, "browseVerb") ?? stringProp(widget, "verb");
+  const readVerb = stringProp(widget, "readVerb");
+  const writeVerb = stringProp(widget, "writeVerb");
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const entry = latestCommand(commands, detailKey, browseVerb);
+  const rootRef = stringProp(widget, "rootRef") ?? "root";
+  const depth = propNumber(widget, "depth", "defaultDepth") ?? 1;
+  const maxRefs = propNumber(widget, "maxRefs");
+  const canBrowse = hasCommand(manifest, browseVerb);
+  const browseArgs = (ref: string): Record<string, unknown> => ({
+    ...firstInstanceArg(comp, scoped),
+    ref,
+    depth,
+    ...(maxRefs !== undefined ? { maxRefs } : {}),
+  });
+  return (
+    <div className="ec-panel-widget ec-panel-widget--tree" data-testid={`panel-widget-${widget.id ?? "tree"}`}>
+      <div className="ec-panel-widget__head">
+        <div>
+          <h4>{widget.title ?? "Address space"}</h4>
+          <p className="ec-dim">
+            Bound to <span className="ec-mono">{browseVerb !== undefined ? `cmd/${browseVerb}` : "no browse verb"}</span>
+            {" · hierarchical refs"}
+          </p>
+        </div>
+        <Button
+          kind="tertiary"
+          size="sm"
+          disabled={!canBrowse}
+          data-testid="panel-browse-load"
+          onClick={() => {
+            if (browseVerb !== undefined) {
+              onInvoke(detailKey, browseVerb, browseArgs(rootRef));
+            }
+          }}
+        >
+          Load
+        </Button>
+      </div>
+      {!canBrowse ? (
+        <CapabilityUnavailable verb={browseVerb} />
+      ) : (
+        <AddressSpaceResult
+          key={`${componentKeyId(detailKey)}::${browseVerb ?? "browse"}::${rootRef}`}
+          entry={entry}
+          empty="Load the address-space root to inspect hierarchical refs."
+          onBrowseNode={(ref) => {
+            if (browseVerb !== undefined) onInvoke(detailKey, browseVerb, browseArgs(ref));
+          }}
+        />
+      )}
+      <div className="ec-panel-binding-row">
+        {hasCommand(manifest, readVerb) ? (
+          <Tag size="sm" type="blue" className="ec-tag">
+            Read enabled
+          </Tag>
+        ) : (
+          <Tag size="sm" type="gray" className="ec-tag">
+            Read unavailable
+          </Tag>
+        )}
+        {hasCommand(manifest, writeVerb) ? (
+          <Tag size="sm" type="gray" className="ec-tag" title="Write safety modal and pre-dispatch audit are not wired yet">
+            Write guarded
+          </Tag>
+        ) : (
+          <Tag size="sm" type="gray" className="ec-tag">
+            Write unavailable
+          </Tag>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SignalGridWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  commands,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  commands: ClientState["commands"];
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const subscriptionsVerb = stringProp(widget, "subscriptionsVerb") ?? stringProp(widget, "verb") ?? "sb/subscriptions";
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const entry = latestCommand(commands, detailKey, subscriptionsVerb);
+  const available = hasCommand(manifest, subscriptionsVerb);
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "signals"}`}>
+      <div className="ec-panel-widget__head">
+        <div>
+          <h4>{widget.title ?? "Signals"}</h4>
+          <p className="ec-dim">
+            Bound to <span className="ec-mono">cmd/{subscriptionsVerb}</span>
+          </p>
+        </div>
+        <Button
+          kind="tertiary"
+          size="sm"
+          disabled={!available}
+          data-testid="panel-signals-load"
+          onClick={() => onInvoke(detailKey, subscriptionsVerb, firstInstanceArg(comp, scoped))}
+        >
+          Load
+        </Button>
+      </div>
+      {!available ? (
+        <CapabilityUnavailable verb={subscriptionsVerb} />
+      ) : (
+        <SignalGridResult entry={entry} empty="Load subscriptions to inspect configured signals." />
+      )}
+    </div>
+  );
+}
+
+function DescriptorWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  commands,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  commands: ClientState["commands"];
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  switch (widget.kind) {
+    case "summary":
+    case "keyValueList":
+    case "metricStrip":
+      return <SummaryWidget widget={widget} />;
+    case "commandSummary":
+      return <CommandSummaryWidget widget={widget} manifest={manifest} />;
+    case "treeBrowser":
+      return (
+        <TreeBrowserWidget
+          widget={widget}
+          manifest={manifest}
+          comp={comp}
+          detailKey={detailKey}
+          commands={commands}
+          onInvoke={onInvoke}
+        />
+      );
+    case "signalGrid":
+      return (
+        <SignalGridWidget
+          widget={widget}
+          manifest={manifest}
+          comp={comp}
+          detailKey={detailKey}
+          commands={commands}
+          onInvoke={onInvoke}
+        />
+      );
+    default:
+      return (
+        <div className="ec-panel-widget ec-panel-widget--unsupported" data-testid="panel-widget-unsupported">
+          <Tag size="sm" type="gray" className="ec-tag">
+            Unsupported widget
+          </Tag>
+          <span className="ec-mono">{widget.kind}</span>
+        </div>
+      );
+  }
+}
+
+function DescriptorPanel({
+  entry,
+  detailKey,
+  comp,
+  commands,
+  onRefreshDescriptor,
+  onInvoke,
+}: {
+  entry: DescriptorEntryView | undefined;
+  detailKey: ComponentKey;
+  comp: ComponentView;
+  commands: ClientState["commands"];
+  onRefreshDescriptor?: (key: ComponentKey) => void;
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const manifest = entry?.manifest;
+  const orderedViews = useMemo(() => {
+    const views = manifest?.panels?.views ?? [];
+    return [...views].sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000) || viewTitle(a).localeCompare(viewTitle(b)));
+  }, [manifest]);
+  const defaultView = manifest?.panels?.defaultView;
+  const [selectedView, setSelectedView] = useState<string | undefined>(undefined);
+  const active =
+    orderedViews.find((v) => v.id === selectedView) ??
+    orderedViews.find((v) => v.id === defaultView) ??
+    orderedViews[0];
+
+  if (entry === undefined || (entry.phase === "loading" && manifest === undefined)) {
+    return (
+      <div className="ec-pending" data-testid="descriptor-loading">
+        <InlineLoading description="Discovering component panels..." />
+        <p className="ec-dim">
+          The console is requesting <span className="ec-mono">cmd/describe</span> through the gateway.
+        </p>
+      </div>
+    );
+  }
+
+  if (entry.phase === "unavailable" && manifest === undefined) {
+    return (
+      <div className="ec-pending" data-testid="descriptor-unavailable">
+        <div className="ec-pending__badge">Descriptor unavailable</div>
+        <h3 className="ec-pending__title">Component panels</h3>
+        <p className="ec-dim">
+          <span className="ec-mono">cmd/describe</span> did not return a panel manifest
+          {entry.code !== undefined ? ` (${entry.code})` : ""}: {entry.reason ?? "not reported"}.
+        </p>
+        {onRefreshDescriptor !== undefined && (
+          <Button kind="tertiary" size="sm" onClick={() => onRefreshDescriptor(detailKey)}>
+            Reload panel
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (manifest === undefined || active === undefined) {
+    return (
+      <div className="ec-pending" data-testid="descriptor-empty">
+        <div className="ec-pending__badge">No panel views</div>
+        <h3 className="ec-pending__title">Component panels</h3>
+        <p className="ec-dim">
+          The component answered <span className="ec-mono">cmd/describe</span>, but did not advertise
+          descriptor panel views.
+        </p>
+      </div>
+    );
+  }
+
+  const provider = manifest.panels?.provider ?? manifest.component?.component ?? manifest.component?.name ?? comp.key.component;
+  const widgets = viewWidgets(active);
+  return (
+    <div className="ec-panel" data-testid="descriptor-panel">
+      <div className="ec-panel-cap">
+        <span>
+          provided by {provider} · {manifest.panels?.renderer ?? "descriptor"} · v2
+          {entry.phase === "unavailable"
+            ? ` · refresh failed${entry.code !== undefined ? ` (${entry.code})` : ""}`
+            : entry.refreshing
+              ? " · refreshing"
+              : ""}
+        </span>
+        {onRefreshDescriptor !== undefined && (
+          <Button kind="ghost" size="sm" onClick={() => onRefreshDescriptor(detailKey)} data-testid="reload-panel">
+            Reload panel
+          </Button>
+        )}
+      </div>
+      <div className="ec-panel-subtabs" role="tablist" aria-label="Component-provided panel views" data-testid="panel-subtabs">
+        {orderedViews.map((view) => (
+          <button
+            key={view.id}
+            type="button"
+            role="tab"
+            aria-selected={view.id === active.id}
+            className={`ec-panel-subtab${view.id === active.id ? " ec-panel-subtab--active" : ""}`}
+            onClick={() => setSelectedView(view.id)}
+          >
+            {viewTitle(view)}
+          </button>
+        ))}
+      </div>
+      <div className="ec-panel-body" data-testid={`panel-view-${active.id}`}>
+        {widgets.length === 0 ? (
+          <p className="ec-dim">This descriptor view has no console-owned widgets.</p>
+        ) : (
+          widgets.map((widget, i) => (
+            <DescriptorWidget
+              key={widget.id ?? `${widget.kind}-${i}`}
+              widget={widget}
+              manifest={manifest}
+              comp={comp}
+              detailKey={detailKey}
+              commands={commands}
+              onInvoke={onInvoke}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** The Health tab. */
@@ -148,15 +1126,46 @@ function HealthTab({
     comp.lastStateAt !== undefined
       ? `${formatDurationMs(Math.max(0, nowServerMs - comp.lastStateAt))} ago`
       : "no state yet";
+  const checks = healthChecks(comp, attrs, openAlarms);
+  const connection = connectionStateCheck(comp, attrs);
   return (
     <>
-      <div className="ec-tiles" data-testid="health-tiles">
+      <div className="ec-health-summary">
+        <HealthStateStrip
+          label="Liveness"
+          value={<StatusTag liveness={comp.liveness} size="md" />}
+          detail={`Last state ${lastState}; expected every ${comp.expectedIntervalSecs}s (${comp.cadenceSource})`}
+          testId="liveness-state"
+        />
+        <HealthStateStrip
+          label="Connection state"
+          value={
+            connection.tone === "plain" ? (
+              <span className={connection.pending === true ? "ec-dim" : undefined}>{connection.value}</span>
+            ) : (
+              <Tag
+                size="md"
+                {...(connection.tone === "ok" ? { type: "green" as const } : connection.tone === "err" ? { type: "red" as const } : connection.tone === "unknown" ? { type: "gray" as const } : {})}
+                className={connection.tone === "warn" ? "ec-tag ec-tag--warn" : "ec-tag"}
+                renderIcon={CircleFilled}
+              >
+                {connection.value}
+              </Tag>
+            )
+          }
+          tone={connection.tone}
+          detail={connection.detail ?? "Instance state not reported"}
+          testId="health-connection-state"
+        />
+      </div>
+
+      <div className="ec-tiles ec-health-tiles" data-testid="health-tiles">
         <Tile className="ec-tile">
           <div className="ec-tile__label">
             CPU{" "}
             {attrs?.cpuPercent !== undefined && (
               <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled}>
-                live
+                Live
               </Tag>
             )}
           </div>
@@ -201,7 +1210,7 @@ function HealthTab({
             )}
           </div>
           <div className="ec-tile__foot">
-            {attrs?.diskFreeGb !== undefined ? `${Math.round(attrs.diskFreeGb)} GB free` : "free space —"}
+            {attrs?.diskFreeGb !== undefined ? `${Math.round(attrs.diskFreeGb)} GB free` : "Free space not reported"}
           </div>
         </Tile>
         <Tile className="ec-tile">
@@ -213,7 +1222,7 @@ function HealthTab({
               <span className="ec-dim">—</span>
             )}
           </div>
-          <div className="ec-tile__foot">files/fds n/a on some platforms</div>
+          <div className="ec-tile__foot">File counts vary by platform</div>
         </Tile>
         <Tile className="ec-tile">
           <div className="ec-tile__label">Uptime</div>
@@ -221,33 +1230,12 @@ function HealthTab({
             {uptimeSecs !== undefined ? formatDurationSecs(uptimeSecs) : <span className="ec-dim">—</span>}
           </div>
           <div className="ec-tile__foot">
-            {comp.restarts > 0 ? `${comp.restarts} restart${comp.restarts === 1 ? "" : "s"} observed` : "no restarts observed"}
+            {comp.restarts > 0 ? `${comp.restarts} restart${comp.restarts === 1 ? "" : "s"} observed` : "No restarts observed"}
           </div>
         </Tile>
       </div>
 
-      <div className="ec-detail-2col">
-        <div className="ec-chartbox">
-          <div className="ec-chartbox__ct">
-            Liveness{" "}
-            <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled}>
-              live
-            </Tag>
-          </div>
-          <div className="ec-liveness-state" data-testid="liveness-state">
-            <StatusTag liveness={comp.liveness} size="md" />
-            <span className="ec-dim">
-              last state {lastState} · expected ~{comp.expectedIntervalSecs}s ({comp.cadenceSource})
-            </span>
-          </div>
-          <p className="ec-dim ec-detail-note">
-            The console tracks liveness from the <code>state</code> keepalive miss-detection
-            ladder. The full per-arrival heartbeat timeline the mockup sketches needs a retained
-            arrival history the console does not keep — the current liveness is the honest datum.
-          </p>
-        </div>
-        <HealthChecks checks={healthChecks(comp, attrs, openAlarms)} />
-      </div>
+      <HealthChecks checks={checks} />
     </>
   );
 }
@@ -297,86 +1285,29 @@ function InstancesTab({ instances }: { instances: InstanceStatus[] }): React.JSX
   );
 }
 
-/** The embedded read-only Configuration tab. */
+/** The embedded full Configuration inspector. */
 function ConfigTab({
+  comp,
+  detailKey,
   entry,
-  onViewConfig,
+  nowServerMs,
+  onRefreshConfig,
 }: {
+  comp: ComponentView;
+  detailKey: ComponentKey;
   entry: ClientState["configs"]["entriesById"][string] | undefined;
-  onViewConfig?: () => void;
+  nowServerMs: number;
+  onRefreshConfig?: (key: ComponentKey) => void;
 }): React.JSX.Element {
-  const link = onViewConfig !== undefined && (
-    <Button kind="ghost" size="sm" renderIcon={ArrowRight} data-testid="view-full-config" onClick={onViewConfig}>
-      Open in Configuration review
-    </Button>
-  );
-
-  if (entry === undefined || entry.phase === "loading") {
-    return (
-      <div data-testid="config-embed">
-        <Tile className="ec-empty">
-          <InlineLoading description="Requesting effective configuration…" />
-        </Tile>
-        {link}
-      </div>
-    );
-  }
-  if (entry.phase === "unavailable") {
-    return (
-      <div data-testid="config-embed">
-        <Tile className="ec-empty" data-testid="config-embed-unavailable">
-          <h3>No configuration received</h3>
-          <p className="ec-dim">
-            The console holds no <code>cfg</code> announcement for this component yet.{" "}
-            <b>Refresh</b> from the full Configuration screen asks its device to re-announce.
-          </p>
-        </Tile>
-        {link}
-      </div>
-    );
-  }
-  const rows = flattenConfig(effectiveConfig(entry.body));
-  const counts = redactionCounts(rows);
   return (
     <div data-testid="config-embed">
-      <div className="ec-detail-head__actions ec-detail-head__actions--right">
-        {counts.redacted > 0 && (
-          <span className="ec-dim">
-            {counts.redacted} value{counts.redacted === 1 ? "" : "s"} redacted at the source
-          </span>
-        )}
-        {link}
-      </div>
-      {rows.length === 0 ? (
-        <p className="ec-dim">The announced configuration is empty.</p>
-      ) : (
-        <div className="ec-cfg-rows" data-testid="config-embed-rows">
-          {rows.map((row) => (
-            <div className="ec-cfg-row" key={row.path}>
-              <span className="ec-cfg-row__k ec-mono">{row.path}</span>
-              <span className="ec-cfg-row__v ec-mono">
-                {row.kind === "redacted" ? (
-                  <span className="ec-redacted">
-                    ●●●●●●
-                    <Tag size="sm" type="red" className="ec-tag">
-                      redacted
-                    </Tag>
-                  </span>
-                ) : row.kind === "secret-ref" ? (
-                  <>
-                    {row.display}
-                    <Tag size="sm" type="outline" className="ec-tag">
-                      secret ref
-                    </Tag>
-                  </>
-                ) : (
-                  row.display
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      <ConfigInspector
+        comp={comp}
+        selectedKey={detailKey}
+        entry={entry}
+        nowServerMs={nowServerMs}
+        {...(onRefreshConfig !== undefined ? { onRefresh: onRefreshConfig } : {})}
+      />
     </div>
   );
 }
@@ -441,21 +1372,95 @@ function EventsTab({
   );
 }
 
+function MetricsTab({
+  series,
+  detailKey,
+  nowServerMs,
+}: {
+  series: MetricSeriesSnapshot[];
+  detailKey: ComponentKey;
+  nowServerMs: number;
+}): React.JSX.Element {
+  const mine = customMetricsForComponent(series, detailKey);
+  return (
+    <div data-testid="metrics-tab">
+      <div className="ec-detail-head__actions ec-detail-head__actions--right">
+        <span className="ec-dim">
+          {mine.length} custom metric series
+        </span>
+      </div>
+      {mine.length === 0 ? (
+        <Tile className="ec-empty" data-testid="metrics-empty">
+          <p className="ec-dim">
+            No custom component metrics have been published on the bus. System metrics stay in Health.
+          </p>
+        </Tile>
+      ) : (
+        <div className="ec-panel-table-wrap" data-testid="metrics-table">
+          <table className="ec-panel-table ec-metrics-table">
+            <thead>
+              <tr>
+                <th scope="col">Metric</th>
+                <th scope="col">Measure</th>
+                <th scope="col">Latest</th>
+                <th scope="col">Instance</th>
+                <th scope="col">Updated</th>
+                <th scope="col">Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mine.map((m) => (
+                <tr key={`${m.instance}/${m.metric}/${m.measure}`} data-testid="metrics-row">
+                  <td className="ec-mono">{m.metric}</td>
+                  <td>{m.measure}</td>
+                  <td className="ec-tnum">{metricValue(m.latest)}</td>
+                  <td className="ec-mono">{m.instance}</td>
+                  <td>
+                    <div>{formatDurationMs(Math.max(0, nowServerMs - m.receivedAt))} ago</div>
+                    {m.sourceTimestamp !== undefined && <div className="ec-dim">{m.sourceTimestamp}</div>}
+                  </td>
+                  <td>
+                    {m.points.length > 1 ? (
+                      <Sparkline
+                        points={m.points}
+                        width={88}
+                        height={28}
+                        ariaLabel={`${m.metric} ${m.measure} trend`}
+                        formatValue={metricValue}
+                      />
+                    ) : (
+                      <span className="ec-dim">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export interface ComponentDetailViewProps {
   state: ClientState;
   now: number;
   detailKey: ComponentKey;
+  /** Render inside another screen's pane; hides breadcrumb/toasts and tightens spacing. */
+  embedded?: boolean;
   /** Back to the Components screen (breadcrumb "Components"). */
   onBack?: () => void;
   /** To the Overview screen (breadcrumb "Overview"). */
   onOpenOverview?: () => void;
-  /** To the full Configuration screen (header "View config" + the config tab link). */
-  onViewConfig?: () => void;
+  /** Refresh/re-announce the selected component's effective configuration. */
+  onRefreshConfig?: (key: ComponentKey) => void;
+  /** Refresh the selected component's descriptor/panel manifest. */
+  onRefreshDescriptor?: (key: ComponentKey) => void;
   /** To the Events & Alarms screen (the events tab link). */
   onOpenEvents?: () => void;
   /** To the Signals screen, scoped to this component (the header "Signals" deep-link). */
   onOpenSignals?: () => void;
-  /** Fire a C4 command (the header Ping / Query status); defaults to a no-op. */
+  /** Fire a C4 command (the header Ping / Get config); defaults to a no-op. */
   onInvoke?: InvokeCommand;
 }
 
@@ -463,9 +1468,11 @@ export function ComponentDetailView({
   state,
   now,
   detailKey,
+  embedded = false,
   onBack,
   onOpenOverview,
-  onViewConfig,
+  onRefreshConfig,
+  onRefreshDescriptor,
   onOpenEvents,
   onOpenSignals,
   onInvoke = NO_INVOKE,
@@ -497,8 +1504,8 @@ export function ComponentDetailView({
 
   if (comp === undefined) {
     return (
-      <div className="ec-detail">
-        {crumbs}
+      <div className={`ec-detail${embedded ? " ec-detail--embedded" : ""}`}>
+        {!embedded && crumbs}
         <h1 className="ec-ph">{detailKey.component}</h1>
         <Tile className="ec-empty" data-testid="detail-not-found">
           <h3>Component no longer in the fleet</h3>
@@ -519,11 +1526,19 @@ export function ComponentDetailView({
   const openAlarms = alarmsForComponent(alarms.active, detailKey);
   const attrs = attributes.byId[id];
   const configEntry = state.configs.entriesById[id];
+  const descriptorEntry = state.descriptions.entriesById[id];
+  const descriptorManifest = descriptorEntry?.manifest;
+  const panelViewCount = descriptorManifest?.panels?.views.length ?? 0;
+  const metricSeries = customMetricsForComponent(state.metrics.series, detailKey);
+  const implementationParts = [
+    descriptorManifest?.component?.implementation,
+    descriptorManifest?.component?.version,
+  ].filter((part): part is string => typeof part === "string" && part !== "");
   const subtitle = detailSubtitleParts(comp, attrs, Math.max(1, instances.length), nowServerMs);
 
   return (
-    <div className="ec-detail">
-      {crumbs}
+    <div className={`ec-detail${embedded ? " ec-detail--embedded" : ""}`}>
+      {!embedded && crumbs}
       <div className="ec-detail-head">
         <div>
           <h1 className="ec-ph">
@@ -531,8 +1546,17 @@ export function ComponentDetailView({
           </h1>
           <div className="ec-ph-sub">
             <span>{subtitle.join(" · ")}</span>
-            <Tag size="sm" type="outline" className="ec-tag" title="needs the deferred describe/panels manifest">
-              language · version pending (describe)
+            <Tag
+              size="sm"
+              type="outline"
+              className="ec-tag"
+              title={
+                implementationParts.length > 0
+                  ? "Advertised by cmd/describe"
+                  : "Component did not advertise implementation metadata"
+              }
+            >
+              {implementationParts.length > 0 ? implementationParts.join(" · ") : "implementation pending (describe)"}
             </Tag>
           </div>
         </div>
@@ -540,8 +1564,13 @@ export function ComponentDetailView({
           <Button kind="ghost" size="sm" onClick={() => onInvoke(comp.key, "ping")}>
             Ping
           </Button>
-          <Button kind="ghost" size="sm" onClick={() => onInvoke(comp.key, "get-configuration")}>
-            Query status
+          <Button
+            kind="ghost"
+            size="sm"
+            title="Ask the component for its effective configuration over the command path."
+            onClick={() => onInvoke(comp.key, "get-configuration")}
+          >
+            Get config
           </Button>
           <Button
             kind="ghost"
@@ -551,19 +1580,17 @@ export function ComponentDetailView({
           >
             Signals
           </Button>
-          <Button kind="secondary" size="sm" data-testid="detail-view-config" onClick={() => onViewConfig?.()}>
-            View config
-          </Button>
         </div>
       </div>
 
       <Tabs>
         <TabList aria-label="Component detail" className="ec-detail-tabs">
           <Tab data-testid="tab-health">Health</Tab>
-          <Tab data-testid="tab-panel">Panel</Tab>
+          <Tab data-testid="tab-panel">Panel{panelViewCount > 0 ? ` · ${panelViewCount} views` : ""}</Tab>
           <Tab data-testid="tab-instances">Instances{instances.length > 1 ? ` · ${instances.length}` : ""}</Tab>
           <Tab data-testid="tab-config">Configuration</Tab>
           <Tab data-testid="tab-events">Events</Tab>
+          <Tab data-testid="tab-metrics">Metrics{metricSeries.length > 0 ? ` · ${metricSeries.length}` : ""}</Tab>
           <Tab data-testid="tab-logs">Logs</Tab>
         </TabList>
         <TabPanels>
@@ -571,26 +1598,26 @@ export function ComponentDetailView({
             <HealthTab comp={comp} attrs={attrs} openAlarms={openAlarms.length} nowServerMs={nowServerMs} />
           </TabPanel>
           <TabPanel>
-            <PhaseTwoPending feature="Component panels" needs="describe / panels manifest" testId="phase2-panel">
-              <div className="ec-subtabs ec-subtabs--pending" data-testid="panel-subtabs" aria-disabled="true">
-                <span>Overview</span>
-                <span>Address Space</span>
-                <span>Signals</span>
-                <span>Diagnostics</span>
-              </div>
-              <p className="ec-dim">
-                The mockup&apos;s opcua sub-tabs (Overview / Address Space / Signals / Diagnostics)
-                are descriptor-driven panels bound to component command verbs (e.g.{" "}
-                <span className="ec-mono">cmd/sb.browse</span>). They render here once the component
-                advertises its panel descriptors.
-              </p>
-            </PhaseTwoPending>
+            <DescriptorPanel
+              entry={descriptorEntry}
+              detailKey={detailKey}
+              comp={comp}
+              commands={state.commands}
+              onRefreshDescriptor={onRefreshDescriptor}
+              onInvoke={onInvoke}
+            />
           </TabPanel>
           <TabPanel>
             <InstancesTab instances={instances} />
           </TabPanel>
           <TabPanel>
-            <ConfigTab entry={configEntry} {...(onViewConfig !== undefined ? { onViewConfig } : {})} />
+            <ConfigTab
+              comp={comp}
+              detailKey={detailKey}
+              entry={configEntry}
+              nowServerMs={nowServerMs}
+              {...(onRefreshConfig !== undefined ? { onRefreshConfig } : {})}
+            />
           </TabPanel>
           <TabPanel>
             <EventsTab
@@ -602,25 +1629,28 @@ export function ComponentDetailView({
             />
           </TabPanel>
           <TabPanel>
-            <PhaseTwoPending feature="Log tail" needs="log class surface" testId="phase2-logs">
+            <MetricsTab series={metricSeries} detailKey={detailKey} nowServerMs={nowServerMs} />
+          </TabPanel>
+          <TabPanel>
+            <PendingSurface feature="Log tail" needs="the log class surface" testId="phase2-logs">
               <p className="ec-dim">
                 The UNS <code>log</code> class is one of the six consumer classes, but the console
                 ships no LogStore yet — the mockup&apos;s <span className="ec-mono">cmd/get-log-tail</span>{" "}
                 live-follow lands with the log surface in a later slice.
               </p>
-            </PhaseTwoPending>
+            </PendingSurface>
           </TabPanel>
         </TabPanels>
       </Tabs>
-      <CommandToasts commands={state.commands} />
+      {!embedded && <CommandToasts commands={state.commands} />}
     </div>
   );
 }
 
 /**
  * The live container: binds the detail to the shared {@link FleetClient}. It requests the
- * component's effective cfg (the embedded Configuration tab) and subscribes the event stream
- * (the Events tab) while mounted — both keyed on the connection status, so a reconnect
+ * component's effective cfg (the embedded Configuration tab) and subscribes the event/metric streams
+ * while mounted — all keyed on the connection status, so a reconnect
  * re-issues them (server-side interest is per-connection). Unmounting unsubscribes events.
  */
 export function ConnectedComponentDetailView({
@@ -628,7 +1658,6 @@ export function ConnectedComponentDetailView({
   detailKey,
   onBack,
   onOpenOverview,
-  onViewConfig,
   onOpenEvents,
   onOpenSignals,
 }: {
@@ -636,7 +1665,6 @@ export function ConnectedComponentDetailView({
   detailKey: ComponentKey;
   onBack?: () => void;
   onOpenOverview?: () => void;
-  onViewConfig?: () => void;
   onOpenEvents?: () => void;
   onOpenSignals?: () => void;
 }): React.JSX.Element {
@@ -651,9 +1679,17 @@ export function ConnectedComponentDetailView({
   }, [client, keyId, status, detailKey]);
 
   useEffect(() => {
+    if (status === "connected") client.requestDescriptor(detailKey);
+  }, [client, keyId, status, detailKey]);
+
+  useEffect(() => {
     if (status === "connected") client.subscribeEvents();
   }, [client, status]);
   useEffect(() => () => client.unsubscribeEvents(), [client]);
+  useEffect(() => {
+    if (status === "connected") client.subscribeMetrics();
+  }, [client, status]);
+  useEffect(() => () => client.unsubscribeMetrics(), [client]);
 
   return (
     <ComponentDetailView
@@ -661,9 +1697,10 @@ export function ConnectedComponentDetailView({
       now={now}
       detailKey={detailKey}
       onInvoke={(key, verb, args) => client.invokeCommand(key, verb, args)}
+      onRefreshConfig={(key) => client.refreshConfig(key)}
+      onRefreshDescriptor={(key) => client.refreshDescriptor(key)}
       {...(onBack !== undefined ? { onBack } : {})}
       {...(onOpenOverview !== undefined ? { onOpenOverview } : {})}
-      {...(onViewConfig !== undefined ? { onViewConfig } : {})}
       {...(onOpenEvents !== undefined ? { onOpenEvents } : {})}
       {...(onOpenSignals !== undefined ? { onOpenSignals } : {})}
     />

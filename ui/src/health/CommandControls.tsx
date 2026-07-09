@@ -1,15 +1,13 @@
 /**
  * CommandControls (slice C4) — the per-component command affordance surfaced inside an
  * expanded fleet row. Faithful to the hi-fi mockup's component-detail button row
- * (`Ping` / `Query status` / …): a button group for the three UNIVERSAL built-in verbs
- * every edgecommons component answers (`ping`, `reload-config`, `get-configuration` —
- * uns-test-vectors/commands.json), plus a generic "Send command…" form for custom/
- * advanced verbs.
+ * (`Ping` / `Get config` / …): a button group for the operator-facing universal verbs
+ * (`ping`, `reload-config`, `get-configuration`), plus a generic "Send command…" form for
+ * custom/advanced verbs. The fourth universal built-in, `describe`, is reserved for
+ * descriptor discovery and is surfaced through the Component Detail Panel tab.
  *
- * The custom-verb DISCOVERY gap (documented): the console cannot yet ENUMERATE a
- * component's custom verbs — that rides the Phase-2 capability manifest (`describe`) /
- * panels. So the built-ins are offered as buttons and everything else through the generic
- * verb+args form (the operator must know the verb name).
+ * Capability discovery now rides the `describe` manifest. This compact control still keeps the
+ * generic verb+args form because not every advertised command has a dedicated UI affordance.
  *
  * State handling (pending / success / error / FORBIDDEN / timeout): each button reads its
  * latest command entry from the store (`latestByComponentVerb`) — pending disables +
@@ -211,9 +209,9 @@ export function CommandControls({ comp, commands, onInvoke }: CommandControlsPro
       )}
 
       <p className="ec-cmd__note ec-dim">
-        Only the three universal built-in verbs are listed — a component&apos;s CUSTOM verbs
-        are not yet discoverable (that arrives with the Phase-2 capability manifest). Use
-        <b> Send command…</b> to invoke a known custom verb by name.
+        Operational buttons stay limited to safe universal commands. Component-specific
+        capabilities appear in the Panel tab when advertised; use <b> Send command…</b> to invoke a
+        known verb by name.
       </p>
 
       <Modal

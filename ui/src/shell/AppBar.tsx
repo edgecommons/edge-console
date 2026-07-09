@@ -3,22 +3,23 @@
  * (`docs/mockups-hifi.html` lines 251-259): burger · `EdgeCommons / Edge Console` name ·
  * global search · theme toggle · notifications (alarm-count badge) · account (RBAC role).
  *
- * The console previously shipped only `<Header><HeaderName>` — no search, no theme switch
- * (hard-pinned dark), no alert count, no identity. This restores the four app-bar
- * affordances, all over data the R0 foundation now carries: the notifications badge is the
- * live active-alarm count (AlarmTracker → `alarms` frame), the account indicator is the
- * connection's resolved RBAC role (the `welcome` frame). Purely presentational — state in,
- * DOM out — so it is component-testable without a socket.
+ * The app bar uses the canonical EdgeCommons horizontal logo lockup from `brand/logos/`
+ * and keeps "Edge Console" as the product label beside it. The remaining affordances are
+ * driven by live R0 data: the notifications badge is the active-alarm count
+ * (AlarmTracker → `alarms` frame), and the account indicator is the connection's
+ * resolved RBAC role (the `welcome` frame). Purely presentational — state in, DOM out —
+ * so it is component-testable without a socket.
  */
 import {
   Header,
   HeaderGlobalAction,
   HeaderGlobalBar,
   HeaderMenuButton,
-  HeaderName,
   SkipToContent,
 } from "@carbon/react";
 import { Asleep, Light, Notification, Search as SearchIcon, UserAvatar } from "@carbon/react/icons";
+import logoHorizontalUrl from "../assets/edgecommons-logo-horizontal.svg";
+import logoHorizontalReversedUrl from "../assets/edgecommons-logo-horizontal-reversed.svg";
 import type { EcTheme } from "./theme";
 
 export interface AppBarProps {
@@ -36,6 +37,10 @@ export interface AppBarProps {
   /** Side-rail collapse toggle (the burger). */
   navExpanded: boolean;
   onToggleNav: () => void;
+  /** Open the global alarms surface. */
+  onOpenNotifications?: () => void;
+  /** Open the account/policy surface. */
+  onOpenAccount?: () => void;
 }
 
 export function AppBar({
@@ -48,8 +53,11 @@ export function AppBar({
   onSearchChange,
   navExpanded,
   onToggleNav,
+  onOpenNotifications,
+  onOpenAccount,
 }: AppBarProps): React.JSX.Element {
   const roleLabel = role ?? (connected ? "unknown" : "offline");
+  const logoUrl = theme === "g100" ? logoHorizontalReversedUrl : logoHorizontalUrl;
   return (
     <Header aria-label="EdgeCommons Edge Console" className="ec-appbar">
       <SkipToContent />
@@ -59,9 +67,12 @@ export function AppBar({
         isActive={navExpanded}
         isCollapsible
       />
-      <HeaderName href="#" prefix="EdgeCommons">
+      <a className="ec-appbar__brand" href="#" aria-label="EdgeCommons home">
+        <img className="ec-appbar__logo" src={logoUrl} alt="EdgeCommons" data-testid="appbar-logo" />
+      </a>
+      <span className="ec-appbar__product" data-testid="appbar-product">
         Edge Console
-      </HeaderName>
+      </span>
 
       <div className="ec-appbar__search" role="search">
         <SearchIcon size={16} className="ec-appbar__search-icon" aria-hidden="true" />
@@ -88,7 +99,7 @@ export function AppBar({
 
         <HeaderGlobalAction
           aria-label={`Notifications: ${alarmCount} active alarm${alarmCount === 1 ? "" : "s"}`}
-          onClick={() => undefined}
+          onClick={() => onOpenNotifications?.()}
           tooltipAlignment="center"
           className="ec-appbar__notif"
           data-testid="appbar-notifications"
@@ -105,7 +116,7 @@ export function AppBar({
 
         <HeaderGlobalAction
           aria-label={`Account · role: ${roleLabel}`}
-          onClick={() => undefined}
+          onClick={() => onOpenAccount?.()}
           tooltipAlignment="end"
           data-testid="appbar-account"
         >

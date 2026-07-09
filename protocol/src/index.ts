@@ -54,8 +54,11 @@
  * additive precedent as the `self`/`busMsgsPerSec` heartbeat fields: an old client ignores
  * the unknown `settings` frame, and a new client against an old gateway simply never
  * receives it (the view degrades honestly).
+ * v6 (Phase 3 descriptor panels): client `get-descriptor`/`refresh-descriptor`, server
+ * `descriptor`/`descriptor-unavailable`. Breaking because a v5 gateway rejects the new
+ * client frames; the exact-match handshake turns that into a clean reload.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -771,11 +774,11 @@ export interface AlarmSnapshot {
  * args), awaits the reply (the uns-bridge rewrites `reply_to` so a site→device
  * request/reply is transparent), and answers with exactly one `command-result`.
  *
- * The built-in verbs every edgecommons component answers (uns-test-vectors/commands.json,
- * DESIGN-uns §9.5): `ping`, `reload-config`, `get-configuration`. Custom-verb DISCOVERY
- * is a Phase-2 concern (the `describe` capability manifest / panels), so the console
- * cannot enumerate a component's custom verbs yet — it offers the built-ins plus a
- * generic verb+args form.
+ * The built-in verbs every descriptor-capable edgecommons component answers
+ * (uns-test-vectors/commands.json, DESIGN-uns §9.5): `ping`, `describe`,
+ * `reload-config`, `get-configuration`. Custom component verbs are discovered through
+ * `describe`; the UI must treat unadvertised verbs as unavailable rather than inventing
+ * a command surface from component type names.
  * --------------------------------------------------------------------------- */
 
 /**
@@ -807,9 +810,66 @@ export type ConsoleCommandErrorCode =
   | "MALFORMED_REPLY"
   | "UNAVAILABLE";
 
-/** The three universal built-in verbs every edgecommons component answers. */
-export const BUILTIN_COMMAND_VERBS = ["ping", "reload-config", "get-configuration"] as const;
+/** The four universal built-in verbs every descriptor-capable edgecommons component answers. */
+export const BUILTIN_COMMAND_VERBS = ["ping", "describe", "reload-config", "get-configuration"] as const;
 export type BuiltinCommandVerb = (typeof BUILTIN_COMMAND_VERBS)[number];
+
+/* -----------------------------------------------------------------------------
+ * M10 / Phase 3 — descriptor-driven component panels.
+ * --------------------------------------------------------------------------- */
+
+/** A command capability advertised by a component's `describe` response. */
+export interface CommandCapability {
+  /** Exact cmd verb remainder, e.g. `sb/browse`; UI must not invent aliases. */
+  verb: string;
+  title?: string;
+  scope?: "component" | "instance";
+  kind?: "read" | "write" | "diagnostic" | "control";
+  builtIn?: boolean;
+  requestSchema?: unknown;
+  responseSchema?: unknown;
+  danger?: "none" | "physical-write";
+  availability?: { state: "available" | "disabled" | "unsupported"; reason?: string };
+}
+
+/** One console-owned descriptor widget inside a panel view. */
+export interface PanelWidgetDescriptor {
+  kind: string;
+  id?: string;
+  title?: string;
+  [key: string]: unknown;
+}
+
+/** One component-provided panel view rendered as a sub-tab inside Component Detail's Panel tab. */
+export interface PanelViewDescriptor {
+  id: string;
+  title?: string;
+  label?: string;
+  order?: number;
+  scope?: "component" | "instance";
+  requires?: string[];
+  optional?: string[];
+  widgets?: PanelWidgetDescriptor[];
+  descriptor?: PanelWidgetDescriptor[];
+}
+
+/** The descriptor-rendered panel manifest from `cmd/describe`. */
+export interface PanelManifest {
+  schema?: "edgecommons.panels.v2" | string;
+  provider?: string;
+  renderer?: "descriptor" | string;
+  defaultView?: string;
+  views: PanelViewDescriptor[];
+}
+
+/** The component manifest returned by `cmd/describe`. */
+export interface ComponentDescribeManifest {
+  schema?: "edgecommons.component.describe.v1" | string;
+  component?: { name?: string; component?: string; implementation?: string; version?: string; kind?: string };
+  digest?: string;
+  commands?: CommandCapability[];
+  panels?: PanelManifest;
+}
 
 /* -----------------------------------------------------------------------------
  * C2 — the WS gateway wire envelope: snapshot-then-deltas.
@@ -866,6 +926,8 @@ export type ClientMessage =
   | { type: "hello"; protocolVersion: number; resumeSeq?: number }
   | { type: "get-config"; protocolVersion: number; key: ComponentKey }
   | { type: "refresh-config"; protocolVersion: number; device: string }
+  | { type: "get-descriptor"; protocolVersion: number; key: ComponentKey }
+  | { type: "refresh-descriptor"; protocolVersion: number; key: ComponentKey }
   | { type: "subscribe-events"; protocolVersion: number; limit?: number }
   | { type: "unsubscribe-events"; protocolVersion: number }
   | { type: "subscribe-metrics"; protocolVersion: number }
@@ -954,6 +1016,20 @@ export type ServerMessage =
   // Optional/additive (a gateway with no settings source omits it; old clients ignore the
   // unknown frame, new clients against an old gateway degrade honestly), so no version bump.
   | { type: "settings"; protocolVersion: number; settings: ConsoleSettings }
+  | {
+      type: "descriptor";
+      protocolVersion: number;
+      key: ComponentKey;
+      manifest: ComponentDescribeManifest;
+      receivedAt: number;
+    }
+  | {
+      type: "descriptor-unavailable";
+      protocolVersion: number;
+      key: ComponentKey;
+      reason: string;
+      code?: string;
+    }
   | {
       type: "config";
       protocolVersion: number;
@@ -1081,6 +1157,26 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
         ok: true,
         message: { type: "refresh-config", protocolVersion, device: obj.device },
       };
+    }
+    case "get-descriptor": {
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return {
+          ok: false,
+          reason: "get-descriptor key must be {device, component} non-empty strings",
+        };
+      }
+      return { ok: true, message: { type: "get-descriptor", protocolVersion, key } };
+    }
+    case "refresh-descriptor": {
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return {
+          ok: false,
+          reason: "refresh-descriptor key must be {device, component} non-empty strings",
+        };
+      }
+      return { ok: true, message: { type: "refresh-descriptor", protocolVersion, key } };
     }
     case "subscribe-events": {
       if (obj.limit !== undefined) {

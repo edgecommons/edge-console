@@ -169,3 +169,53 @@ describe("FleetClient - invokeCommand", () => {
     client.stop();
   });
 });
+
+describe("FleetClient - descriptor discovery", () => {
+  it("sends get-descriptor / refresh-descriptor frames and folds descriptor replies", () => {
+    const { client, sockets } = rig();
+    sockets[0]!.open();
+
+    client.requestDescriptor(KEY);
+    expect(sockets[0]!.frames().at(-1)).toMatchObject({ type: "get-descriptor", key: KEY });
+    expect(client.getState().descriptions.entriesById["gw-01/opcua-adapter"]?.phase).toBe("loading");
+
+    sockets[0]!.frame({
+      type: "descriptor",
+      protocolVersion: PROTOCOL_VERSION,
+      key: KEY,
+      receivedAt: T0 - 10,
+      manifest: {
+        schema: "edgecommons.component.describe.v1",
+        commands: [{ verb: "describe", builtIn: true }],
+        panels: { schema: "edgecommons.panels.v2", provider: "opcua-adapter", renderer: "descriptor", views: [] },
+      },
+    });
+    expect(client.getState().descriptions.entriesById["gw-01/opcua-adapter"]).toMatchObject({
+      phase: "ready",
+      receivedAt: T0 - 10,
+      manifest: { panels: { provider: "opcua-adapter" } },
+    });
+
+    client.refreshDescriptor(KEY);
+    expect(sockets[0]!.frames().at(-1)).toMatchObject({ type: "refresh-descriptor", key: KEY });
+    expect(client.getState().descriptions.entriesById["gw-01/opcua-adapter"]).toMatchObject({
+      phase: "ready",
+      refreshing: true,
+    });
+
+    sockets[0]!.frame({
+      type: "descriptor-unavailable",
+      protocolVersion: PROTOCOL_VERSION,
+      key: KEY,
+      code: "REQUEST_FAILED",
+      reason: "describe timed out",
+    });
+    expect(client.getState().descriptions.entriesById["gw-01/opcua-adapter"]).toMatchObject({
+      phase: "unavailable",
+      code: "REQUEST_FAILED",
+      reason: "describe timed out",
+      manifest: { panels: { provider: "opcua-adapter" } },
+    });
+    client.stop();
+  });
+});

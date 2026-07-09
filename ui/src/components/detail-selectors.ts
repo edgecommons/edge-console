@@ -88,30 +88,32 @@ export function detailSubtitleParts(
 /** One row of the Health tab's "health checks" structured list. */
 export interface HealthCheck {
   label: string;
-  /** The rendered value (a liveness label, a connection state, a number, or "—"/"?"). */
+  /** The rendered value: a liveness label, connection state, count, or unavailable text. */
   value: string;
+  /** Optional supporting text shown beside the value. */
+  detail?: string;
   /** A severity hint the view colors the value chip with; `plain` = no chip. */
   tone: "ok" | "warn" | "err" | "unknown" | "plain";
-  /** True when the datum is not available at all (the honest "?"/"—" state). */
+  /** True when the datum is not available at all. */
   pending?: boolean;
 }
 
 /** Liveness → the freshness check's value + tone. */
 function freshnessCheck(liveness: Liveness): HealthCheck {
-  const label = "heartbeat freshness";
+  const label = "Heartbeat freshness";
   switch (liveness) {
     case "FRESH":
-      return { label, value: "fresh", tone: "ok" };
+      return { label, value: "Fresh", tone: "ok" };
     case "WARN":
-      return { label, value: "warn", tone: "warn" };
+      return { label, value: "Warning", tone: "warn" };
     case "STALE":
-      return { label, value: "stale", tone: "warn" };
+      return { label, value: "Stale", tone: "warn" };
     case "OFFLINE":
-      return { label, value: "offline", tone: "err" };
+      return { label, value: "Offline", tone: "err" };
     case "STOPPED":
-      return { label, value: "stopped", tone: "plain" };
+      return { label, value: "Stopped", tone: "plain" };
     case "UNREACHABLE":
-      return { label, value: "unreachable", tone: "unknown" };
+      return { label, value: "Unreachable", tone: "unknown" };
   }
 }
 
@@ -122,11 +124,66 @@ const CONN_TONE: Record<ConnLevel, HealthCheck["tone"]> = {
   unknown: "unknown",
 };
 
+function pluralInstance(n: number): string {
+  return `${n} instance${n === 1 ? "" : "s"}`;
+}
+
+function humanConnectionState(state: string): string {
+  const normalized = state.trim().toUpperCase();
+  if (normalized === "CONNECTED" || normalized === "OK" || normalized === "UP" || normalized === "GOOD" || normalized === "ONLINE") {
+    return "Connected";
+  }
+  if (normalized === "DISCONNECTED" || normalized === "DOWN" || normalized === "ERROR" || normalized === "FAULTED" || normalized === "FAILED" || normalized === "LOST") {
+    return "Disconnected";
+  }
+  return normalized
+    .toLowerCase()
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0]!.toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+/** Aggregate connection state from per-instance state, falling back to runtime attributes. */
+export function connectionStateCheck(
+  comp: ComponentView,
+  attrs: RuntimeAttributes | undefined,
+): HealthCheck {
+  const instances = comp.instances ?? [];
+  if (instances.length > 0) {
+    const connected = instances.filter((inst) => inst.connected).length;
+    const detail = `${connected} of ${pluralInstance(instances.length)} connected`;
+    if (connected === instances.length) {
+      return { label: "Connection state", value: "Connected", detail, tone: "ok" };
+    }
+    if (connected > 0) {
+      return { label: "Connection state", value: "Partially connected", detail, tone: "warn" };
+    }
+    return { label: "Connection state", value: "Disconnected", detail, tone: "err" };
+  }
+
+  if (attrs?.connectionState !== undefined && attrs.connectionState !== "") {
+    return {
+      label: "Connection state",
+      value: humanConnectionState(attrs.connectionState),
+      detail: "Reported by component telemetry",
+      tone: CONN_TONE[connLevel(attrs.connectionState)],
+    };
+  }
+
+  return {
+    label: "Connection state",
+    value: "Not reported",
+    detail: "No instance status is available",
+    tone: "plain",
+    pending: true,
+  };
+}
+
 /**
- * The Health tab's console-computed health checks (mockup slist): heartbeat freshness,
- * messaging/ready (a component self-report the console does not receive yet — honest "?"),
- * the southbound connection state, cumulative read errors, and this component's open-alarm
- * count. Everything is derived from data the console actually holds.
+ * The Health tab's operational checks: heartbeat freshness, messaging readiness
+ * (not reported yet), aggregate connection state, cumulative read errors, and this
+ * component's open-alarm count. Everything is derived from data the console holds.
  */
 export function healthChecks(
   comp: ComponentView,
@@ -136,27 +193,18 @@ export function healthChecks(
   const checks: HealthCheck[] = [freshnessCheck(comp.liveness)];
 
   // messaging/ready is a component-reported readiness the console has no surface for yet.
-  checks.push({ label: "messaging / ready", value: "?", tone: "unknown", pending: true });
-
-  if (attrs?.connectionState !== undefined && attrs.connectionState !== "") {
-    checks.push({
-      label: "connectionState",
-      value: attrs.connectionState,
-      tone: CONN_TONE[connLevel(attrs.connectionState)],
-    });
-  } else {
-    checks.push({ label: "connectionState", value: "—", tone: "plain", pending: true });
-  }
+  checks.push({ label: "Messaging readiness", value: "Not reported", tone: "unknown", pending: true });
+  checks.push(connectionStateCheck(comp, attrs));
 
   checks.push({
-    label: "readErrors",
-    value: attrs?.readErrors !== undefined ? String(attrs.readErrors) : "—",
+    label: "Read errors",
+    value: attrs?.readErrors !== undefined ? String(attrs.readErrors) : "Not reported",
     tone: attrs?.readErrors !== undefined && attrs.readErrors > 0 ? "warn" : "plain",
     ...(attrs?.readErrors === undefined ? { pending: true } : {}),
   });
 
   checks.push({
-    label: "open alerts",
+    label: "Open alarms",
     value: String(openAlarms),
     tone: openAlarms > 0 ? "err" : "plain",
   });

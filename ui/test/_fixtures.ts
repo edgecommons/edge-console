@@ -13,6 +13,8 @@ import type {
   DeviceSnapshot,
   FleetDelta,
   FleetSnapshot,
+  MetricPoint,
+  MetricSeriesSnapshot,
   RuntimeAttributes,
   SignalPoint,
   SignalSeriesSnapshot,
@@ -24,6 +26,7 @@ import { EMPTY_ALARM_COUNTS } from "../src/fleet/alarm-store";
 import type { AttributesView } from "../src/fleet/attribute-store";
 import type { CommandEntry, CommandView } from "../src/fleet/command-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
+import type { MetricsView } from "../src/fleet/metric-store";
 
 /** The pinned server-clock base for all fixtures (ms epoch). */
 export const T0 = 1_750_000_000_000;
@@ -163,6 +166,41 @@ export function signalSeries(
   };
 }
 
+/** A bounded recent series of metric points (ascending time). */
+export function metricPoints(
+  values: number[],
+  opts: { startAt?: number; stepMs?: number } = {},
+): MetricPoint[] {
+  const { startAt = T0, stepMs = 1000 } = opts;
+  return values.map((value, i) => ({ at: startAt + i * stepMs, value }));
+}
+
+/** A {@link MetricSeriesSnapshot} for one `(component, instance, metric, measure)` series. */
+export function metricSeries(
+  k: ComponentKey,
+  metric: string,
+  measure: string,
+  overrides: Partial<MetricSeriesSnapshot> = {},
+): MetricSeriesSnapshot {
+  const points = overrides.points ?? metricPoints([1, 2, 3]);
+  const last = points[points.length - 1];
+  return {
+    key: k,
+    instance: overrides.instance ?? "main",
+    metric,
+    measure,
+    latest: overrides.latest ?? last?.value ?? 0,
+    receivedAt: overrides.receivedAt ?? last?.at ?? T0,
+    ...(overrides.sourceTimestamp !== undefined ? { sourceTimestamp: overrides.sourceTimestamp } : {}),
+    points,
+    ...overrides,
+  };
+}
+
+export function metricsView(series: MetricSeriesSnapshot[]): MetricsView {
+  return { series };
+}
+
 /** An {@link AttributesView} keyed by component id, from a list of attributes. */
 export function attributesView(list: RuntimeAttributes[]): AttributesView {
   const byId: Record<string, RuntimeAttributes> = {};
@@ -181,7 +219,12 @@ export function consoleSettings(overrides: Partial<ConsoleSettings> = {}): Conso
       defaultRole: "operator",
       roles: [
         { name: "operator", allow: ["*"], deny: ["reboot"], isDefault: true },
-        { name: "viewer", allow: ["ping", "get-configuration"], deny: [], isDefault: false },
+        {
+          name: "viewer",
+          allow: ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"],
+          deny: [],
+          isDefault: false,
+        },
       ],
     },
     connection: {
@@ -228,10 +271,12 @@ export function clientState(
     hasSnapshot: true,
     fleet,
     configs: { entriesById: {} },
+    descriptions: { entriesById: {} },
     events: { entries: [] },
     alarms: { active: [], counts: EMPTY_ALARM_COUNTS },
     attributes: { byId: {} },
     signals: { series: [] },
+    metrics: { series: [] },
     commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,

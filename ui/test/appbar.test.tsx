@@ -29,6 +29,7 @@ function renderBar(overrides: Partial<AppBarProps> = {}) {
 describe("AppBar", () => {
   it("renders the product name and the search box, and reports input changes", () => {
     const { props } = renderBar();
+    expect((screen.getByTestId("appbar-logo") as HTMLImageElement).alt).toBe("EdgeCommons");
     expect(screen.getByText("Edge Console")).toBeTruthy();
     const search = screen.getByTestId("appbar-search") as HTMLInputElement;
     expect(search.placeholder).toContain("Search components");
@@ -72,6 +73,18 @@ describe("AppBar", () => {
     cleanup();
     renderBar({ role: undefined, connected: false });
     expect(screen.getByTestId("appbar-role").textContent).toBe("offline");
+  });
+
+  it("routes the notifications and account actions when callbacks are provided", () => {
+    const onOpenNotifications = vi.fn();
+    const onOpenAccount = vi.fn();
+    renderBar({ onOpenNotifications, onOpenAccount });
+
+    fireEvent.click(screen.getByTestId("appbar-notifications"));
+    fireEvent.click(screen.getByTestId("appbar-account"));
+
+    expect(onOpenNotifications).toHaveBeenCalled();
+    expect(onOpenAccount).toHaveBeenCalled();
   });
 
   it("toggles the nav from the burger", () => {

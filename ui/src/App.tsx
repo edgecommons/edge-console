@@ -1,7 +1,7 @@
 /**
  * The Edge Console UI shell — IBM Carbon, realigned to the signed-off hi-fi mockup (R0).
  *
- * The shell hosts the shipped screens (edge-health / config-review / events), all fed by
+ * The shell hosts the shipped screens (edge-health / components / topology / events), all fed by
  * ONE shared {@link FleetClient} (one WS connection for the whole app — the shell owns its
  * lifecycle so switching views never drops the socket). R0 adds the mockup's application
  * bar ({@link AppBar}: global search, working g10↔g100 theme toggle, a notifications badge
@@ -22,7 +22,7 @@ import {
   SideNavLink,
   Theme,
 } from "@carbon/react";
-import { Activity, Catalog, ChartLine, ChartNetwork, Dashboard, Settings, TreeView } from "@carbon/react/icons";
+import { Activity, ChartLine, ChartNetwork, Dashboard, Settings, TreeView } from "@carbon/react/icons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import { defaultWsUrl } from "./config";
 import { FleetClient } from "./fleet/client";
@@ -30,7 +30,6 @@ import { useFleetLifecycle, useFleetState } from "./fleet/useFleet";
 import { ConnectedEdgeHealthView } from "./health/EdgeHealthView";
 import { ConnectedComponentsView } from "./components/ComponentsView";
 import { ConnectedComponentDetailView } from "./components/ComponentDetailView";
-import { ConnectedConfigReviewView } from "./configreview/ConfigReviewView";
 import { ConnectedTopologyView } from "./topology/TopologyView";
 import { ConnectedEventsView } from "./events/EventsView";
 import { ConnectedSignalsView, scopeIdFor } from "./signals/SignalsView";
@@ -52,7 +51,6 @@ type Route =
   | "components"
   | "detail"
   | "topology"
-  | "config"
   | "events"
   | "signals"
   | "settings";
@@ -66,10 +64,8 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const [route, setRoute] = useState<Route>("overview");
   const [query, setQuery] = useState("");
   const [navExpanded, setNavExpanded] = useState(() => hasPersistentNav());
-  // The Component Detail target (set by the Components screen / a detail link), and the
-  // component the Configuration screen should open pre-selected (set by a detail "View config").
+  // The Component Detail target (set by the Components screen / a detail link).
   const [detailKey, setDetailKey] = useState<ComponentKey | undefined>(undefined);
-  const [configInitial, setConfigInitial] = useState<ComponentKey | undefined>(undefined);
   // The component the Signals screen should open scoped to (set by a Component-Detail
   // "Signals" deep-link); cleared when the side rail opens Signals fleet-wide.
   const [signalsScope, setSignalsScope] = useState<ComponentKey | undefined>(undefined);
@@ -77,10 +73,6 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   const openDetail = (key: ComponentKey) => {
     setDetailKey(key);
     setRoute("detail");
-  };
-  const viewConfig = (key: ComponentKey) => {
-    setConfigInitial(key);
-    setRoute("config");
   };
   const openSignals = (key: ComponentKey) => {
     setSignalsScope(key);
@@ -118,7 +110,10 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
   };
 
   return (
-    <Theme theme={theme} className={`ec-app${navExpanded ? "" : " ec-app--nav-collapsed"}`}>
+    <Theme
+      theme={theme}
+      className={`ec-app ec-app--${theme === "g100" ? "dark" : "light"}${navExpanded ? "" : " ec-app--nav-collapsed"}`}
+    >
       <SearchContext.Provider value={search}>
         <AppBar
           theme={theme}
@@ -130,6 +125,8 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
           onSearchChange={setQuery}
           navExpanded={navExpanded}
           onToggleNav={() => setNavExpanded((v) => !v)}
+          onOpenNotifications={() => setRoute("events")}
+          onOpenAccount={() => setRoute("settings")}
         />
         <SideNav aria-label="Console navigation" isFixedNav expanded isChildOfHeader={false}>
           <SideNavItems>
@@ -158,14 +155,6 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
               Site Topology
             </SideNavLink>
             <SideNavLink
-              renderIcon={Catalog}
-              href="#"
-              isActive={route === "config"}
-              onClick={navigate("config")}
-            >
-              Configuration
-            </SideNavLink>
-            <SideNavLink
               renderIcon={Activity}
               href="#"
               isActive={route === "events"}
@@ -191,28 +180,26 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
             </SideNavLink>
           </SideNavItems>
         </SideNav>
-        <Content id="main-content" className="ec-content">
+        <Content id="main-content" className={`ec-content ec-content--${route}`}>
           {route === "overview" ? (
             <ConnectedEdgeHealthView client={fleetClient} onOpenEvents={() => setRoute("events")} />
           ) : route === "components" ? (
-            <ConnectedComponentsView client={fleetClient} onOpenDetail={openDetail} />
+            <ConnectedComponentsView
+              client={fleetClient}
+              onOpenEvents={() => setRoute("events")}
+              onOpenSignals={openSignals}
+            />
           ) : route === "detail" && detailKey !== undefined ? (
             <ConnectedComponentDetailView
               client={fleetClient}
               detailKey={detailKey}
               onBack={() => setRoute("components")}
               onOpenOverview={() => setRoute("overview")}
-              onViewConfig={() => viewConfig(detailKey)}
               onOpenEvents={() => setRoute("events")}
               onOpenSignals={() => openSignals(detailKey)}
             />
           ) : route === "topology" ? (
             <ConnectedTopologyView client={fleetClient} onOpenDetail={openDetail} />
-          ) : route === "config" ? (
-            <ConnectedConfigReviewView
-              client={fleetClient}
-              {...(configInitial !== undefined ? { initialSelected: configInitial } : {})}
-            />
           ) : route === "signals" ? (
             <ConnectedSignalsView
               client={fleetClient}
