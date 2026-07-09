@@ -2,10 +2,14 @@
  * VENDORED from the EdgeCommons brand system: brand/tokens/edgecommons.css
  *
  * The brand package is an umbrella-local folder, not a published dependency, so this repo
- * carries a verbatim copy. Do not hand-edit: change brand/tokens/edgecommons.css and re-copy.
+ * carries a verbatim copy. Do not hand-edit. Change brand/tokens/edgecommons.tokens.json,
+ * run `npm run build` then `npm run sync` in brand/.
  * Everything below this header is byte-for-byte the source file.
  */
 /*
+ * GENERATED FILE — do not edit.
+ * Source: tokens/edgecommons.tokens.json   Build: npm run build
+ *
  * EdgeCommons design tokens.
  *
  * Contrast rule: text tokens are derived against the *worst-case* surface they can
@@ -109,8 +113,10 @@
    * Categorical chart slots. Assign in order, never cycled; a 9th series folds into
    * "Other" or small multiples. The order is the colorblind-safety mechanism and is
    * not cosmetic — reordering degrades separation. Validated on the chart surface
-   * (Paper in light, Night Iris in dark) for protanopia, deuteranopia, and
-   * tritanopia: worst all-pairs dE 13.2, worst adjacent dE 29.2, every slot >= 3:1.
+   * (Paper in light, Night Iris in dark) for protanopia and deuteranopia: worst
+   * all-pairs dE 13.38, every slot >= 3:1 against its surface. Tritanopia is not
+   * separable at eight slots — slots 5 and 7 converge (dE 1.8). A chart carrying 7
+   * or more series must carry direct labels or distinct markers.
    */
   --ec-chart-1: #a46e00;
   --ec-chart-2: #684799;
@@ -186,6 +192,7 @@
   --ec-color-text-muted: #a2a5bb;
   --ec-color-primary: #9ca1e4;
   --ec-color-primary-hover: #b5baff;
+  /* White on the dark primary is 2.43:1 — the ink must be Night Iris. */
   --ec-color-on-primary: var(--ec-night-iris);
   --ec-color-link: #9ca1e4;
   --ec-color-accent: #ed8e62;
