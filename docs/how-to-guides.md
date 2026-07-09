@@ -181,7 +181,9 @@ Every store is bounded and drop-oldest, so a noisy fleet can't grow the console 
 "console": {
   "cache":   { "maxChannelsPerComponent": 1024 },   // distinct (class, channel) values per component
   "events":  { "maxEvents": 1000, "maxPerComponent": 100 },  // fleet-wide ring + per-component ring
-  "metrics": { "maxSeriesPoints": 60, "maxSeries": 2000 }    // points per series; distinct series
+  "metrics": { "maxSeriesPoints": 60, "maxSeries": 2000 },   // points per series; distinct series
+  "logs":    { "maxRecords": 5000, "maxPerComponent": 1000,
+               "defaultTail": 500, "maxTail": 2000 }         // fleet/per-component log tails
 }
 ```
 
@@ -195,11 +197,12 @@ component's history. See [reference — configuration](reference/configuration.m
 | To… | Go to |
 |-----|-------|
 | See fleet health at a glance (liveness, alarms, the console's own bus rate) | **Overview** |
-| Browse the site as a tree and drill into one component | **Components** → a leaf → **Open detail** |
-| See a component's Health / Instances / effective Config / Events | **Component Detail** tabs |
+| Browse the site as a tree and drill into one component | **Components** → a leaf |
+| See a component's Health / Metrics / Instances / effective Config / Events / Logs | **Components** detail tabs |
 | See the connectivity graph (who talks to what) | **Site Topology** |
 | Read a component's effective, redacted running config | **Configuration** (pick + Structured/Raw JSON + Refresh) |
 | Triage alarms with a real Ack lifecycle | **Events & Alarms** (Ack an active alarm) |
+| Browse schema-free component metrics | **Metrics** |
 | Browse live telemetry values + trends | **Signals** (filter, Read on demand) |
 | See the console's own policy | **Settings** (read-only) |
 

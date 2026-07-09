@@ -18,7 +18,6 @@ import {
   SkipToContent,
 } from "@carbon/react";
 import { Asleep, Light, Notification, Search as SearchIcon, UserAvatar } from "@carbon/react/icons";
-import logoHorizontalUrl from "../assets/edgecommons-logo-horizontal.svg";
 import logoHorizontalReversedUrl from "../assets/edgecommons-logo-horizontal-reversed.svg";
 import type { EcTheme } from "./theme";
 
@@ -57,7 +56,9 @@ export function AppBar({
   onOpenAccount,
 }: AppBarProps): React.JSX.Element {
   const roleLabel = role ?? (connected ? "unknown" : "offline");
-  const logoUrl = theme === "g100" ? logoHorizontalReversedUrl : logoHorizontalUrl;
+  // The app bar is Night Iris in both themes, and the brand reserves the reversed lockup for
+  // dark surfaces — the full-colour wordmark's "Edge" is #23233D and vanishes against it.
+  const logoUrl = logoHorizontalReversedUrl;
   return (
     <Header aria-label="EdgeCommons Edge Console" className="ec-appbar">
       <SkipToContent />

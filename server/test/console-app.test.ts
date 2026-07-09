@@ -231,8 +231,20 @@ describe("startConsole - the C1 composition", () => {
       "ecv1/gw-02/opcua-adapter/main/metric/sys",
       wireEnvelope("Metric", identity, { coreName: "gw-02", cpu_usage: 12.5, memory_usage: 40, _aws: {} }),
     );
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/log/info",
+      wireEnvelope("log", identity, {
+        schema: "edgecommons.log.v1",
+        timestamp: "2026-07-03T00:00:00.000Z",
+        level: "INFO",
+        logger: "opcua.session",
+        message: "adapter ready",
+        sequence: 1,
+      }),
+    );
     expect(app.events.recent()).toHaveLength(1);
     expect(app.metrics.seriesCount()).toBe(2); // cpu_usage + memory_usage
+    expect(app.logs.recentFor(KEY)).toHaveLength(1);
 
     const sent: ServerMessage[] = [];
     const transport: ClientTransport = {
@@ -268,7 +280,16 @@ describe("startConsole - the C1 composition", () => {
     expect(snap.series.map((s) => s.measure)).toEqual(["cpu_usage", "memory_usage"]);
     expect(snap.series[0]).toMatchObject({ key: KEY, metric: "sys", latest: 12.5 });
 
-    // 3. Later bus arrivals stream live to the subscribed client.
+    // 3. subscribe-logs answers this component's retained tail.
+    session.onMessage(
+      JSON.stringify({ type: "subscribe-logs", protocolVersion: PROTOCOL_VERSION, key: KEY }),
+    );
+    const logSnap = sent.at(-1)!;
+    expect(logSnap).toMatchObject({ type: "logs" });
+    if (logSnap.type !== "logs") throw new Error("unreachable");
+    expect(logSnap.records[0]).toMatchObject({ key: KEY, level: "info", message: "adapter ready" });
+
+    // 4. Later bus arrivals stream live to the subscribed client.
     await bus.emitWire(
       "ecv1/gw-02/opcua-adapter/main/evt/critical/overtemp",
       wireEnvelope("evt", identity, { valueC: 91 }),
@@ -288,8 +309,23 @@ describe("startConsole - the C1 composition", () => {
         { metric: "sys", measure: "memory_usage", point: { value: 41 } },
       ],
     });
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/log/error",
+      wireEnvelope("log", identity, {
+        schema: "edgecommons.log.v1",
+        timestamp: "2026-07-03T00:00:01.000Z",
+        level: "ERROR",
+        logger: "opcua.session",
+        message: "browse failed",
+        sequence: 2,
+      }),
+    );
+    expect(sent.at(-1)).toMatchObject({
+      type: "log",
+      records: [{ level: "error", message: "browse failed" }],
+    });
 
-    // 4. Unsubscribing stops the streams (the connection stays up; the C2 delta
+    // 5. Unsubscribing stops the streams (the connection stays up; the C2 delta
     //    stream continues — the same arrivals still tick the liveness cache, so
     //    only the ACTIVITY frames must stop).
     session.onMessage(
@@ -298,7 +334,10 @@ describe("startConsole - the C1 composition", () => {
     session.onMessage(
       JSON.stringify({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION }),
     );
-    const activityCount = sent.filter((m) => m.type === "event" || m.type === "metric").length;
+    session.onMessage(
+      JSON.stringify({ type: "unsubscribe-logs", protocolVersion: PROTOCOL_VERSION, key: KEY }),
+    );
+    const activityCount = sent.filter((m) => m.type === "event" || m.type === "metric" || m.type === "log").length;
     await bus.emitWire(
       "ecv1/gw-02/opcua-adapter/main/evt/info/x",
       wireEnvelope("evt", identity, {}),
@@ -307,9 +346,17 @@ describe("startConsole - the C1 composition", () => {
       "ecv1/gw-02/opcua-adapter/main/metric/sys",
       wireEnvelope("Metric", identity, { cpu_usage: 1 }),
     );
-    expect(sent.filter((m) => m.type === "event" || m.type === "metric")).toHaveLength(
-      activityCount,
+    await bus.emitWire(
+      "ecv1/gw-02/opcua-adapter/main/log/info",
+      wireEnvelope("log", identity, {
+        schema: "edgecommons.log.v1",
+        timestamp: "2026-07-03T00:00:02.000Z",
+        logger: "opcua.session",
+        message: "quiet",
+        sequence: 3,
+      }),
     );
+    expect(sent.filter((m) => m.type === "event" || m.type === "metric" || m.type === "log")).toHaveLength(activityCount);
 
     await app.stop();
   });

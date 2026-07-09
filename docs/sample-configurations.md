@@ -178,7 +178,8 @@ any one component evict others.
 
         "cache":   { "maxChannelsPerComponent": 4096 },
         "events":  { "maxEvents": 5000, "maxPerComponent": 250 },
-        "metrics": { "maxSeriesPoints": 120, "maxSeries": 8000 }
+        "metrics": { "maxSeriesPoints": 120, "maxSeries": 8000 },
+        "logs": { "maxRecords": 10000, "maxPerComponent": 2000, "defaultTail": 500, "maxTail": 2000 }
       }
     },
     "instances": [{ "id": "main" }]

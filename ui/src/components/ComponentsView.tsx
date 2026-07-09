@@ -370,13 +370,24 @@ export function ConnectedComponentsView({
     if (status === "connected" && selectedComponent !== undefined) {
       client.requestConfig(selectedComponent);
       client.requestDescriptor(selectedComponent);
+      client.subscribeLogs(selectedComponent, { limit: 500 });
     }
   }, [client, selectedId, selectedComponent, status]);
+  useEffect(
+    () => () => {
+      if (selectedComponent !== undefined) client.unsubscribeLogs(selectedComponent);
+    },
+    [client, selectedId, selectedComponent],
+  );
 
   useEffect(() => {
     if (status === "connected") client.subscribeEvents();
   }, [client, status]);
   useEffect(() => () => client.unsubscribeEvents(), [client]);
+  useEffect(() => {
+    if (status === "connected") client.subscribeMetrics();
+  }, [client, status]);
+  useEffect(() => () => client.unsubscribeMetrics(), [client]);
 
   return (
     <ComponentsView

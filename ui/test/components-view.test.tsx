@@ -5,7 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { ComponentsView } from "../src/components/ComponentsView";
+import { ComponentsView, ConnectedComponentsView } from "../src/components/ComponentsView";
+import type { FleetClient } from "../src/fleet/client";
 import {
   T0,
   alarmSnapshot,
@@ -65,6 +66,40 @@ function stateWith(overrides = {}) {
 }
 
 describe("ComponentsView", () => {
+  it("keeps metric frames subscribed while the embedded page is connected", () => {
+    const state = stateWith();
+    const subscribe = vi.fn(() => () => undefined);
+    const subscribeEvents = vi.fn();
+    const unsubscribeEvents = vi.fn();
+    const subscribeMetrics = vi.fn();
+    const unsubscribeMetrics = vi.fn();
+    const subscribeLogs = vi.fn();
+    const unsubscribeLogs = vi.fn();
+    const client = {
+      subscribe,
+      getState: vi.fn(() => state),
+      requestConfig: vi.fn(),
+      requestDescriptor: vi.fn(),
+      refreshConfig: vi.fn(),
+      refreshDescriptor: vi.fn(),
+      subscribeEvents,
+      unsubscribeEvents,
+      subscribeMetrics,
+      unsubscribeMetrics,
+      subscribeLogs,
+      unsubscribeLogs,
+      invokeCommand: vi.fn(),
+    } as unknown as FleetClient;
+
+    const { unmount } = render(<ConnectedComponentsView client={client} />);
+
+    expect(subscribeEvents).toHaveBeenCalledOnce();
+    expect(subscribeMetrics).toHaveBeenCalledOnce();
+    unmount();
+    expect(unsubscribeEvents).toHaveBeenCalledOnce();
+    expect(unsubscribeMetrics).toHaveBeenCalledOnce();
+  });
+
   it("renders the DYNAMIC hierarchy tree (site → line → device → component)", () => {
     render(<ComponentsView state={stateWith()} now={T0} />);
     const tree = screen.getByTestId("component-tree");

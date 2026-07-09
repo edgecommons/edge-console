@@ -7,6 +7,8 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import {
   DEFAULT_THEME,
   THEME_STORAGE_KEY,
+  applyBrandTheme,
+  brandTheme,
   isEcTheme,
   loadTheme,
   otherTheme,
@@ -17,6 +19,7 @@ import {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  delete document.documentElement.dataset["theme"];
 });
 
 /** A throwing storage (private-mode / quota) — the helpers must tolerate it. */
@@ -81,5 +84,32 @@ describe("theme helpers", () => {
     act(() => result.current[1]());
     expect(result.current[0]).toBe("g100");
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("g100");
+  });
+
+  it("brandTheme maps the Carbon theme onto the brand tokens' data-theme value", () => {
+    expect(brandTheme("g100")).toBe("dark");
+    expect(brandTheme("g10")).toBe("light");
+  });
+
+  it("applyBrandTheme stamps data-theme on the given root (defaulting to the document)", () => {
+    const el = document.createElement("div");
+    applyBrandTheme("g10", el);
+    expect(el.dataset["theme"]).toBe("light");
+    applyBrandTheme("g100", el);
+    expect(el.dataset["theme"]).toBe("dark");
+
+    applyBrandTheme("g10");
+    expect(document.documentElement.dataset["theme"]).toBe("light");
+  });
+
+  it("useTheme stamps data-theme on the document and keeps it in step with the toggle", () => {
+    const { result } = renderHook(() => useTheme());
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
+
+    act(() => result.current[1]());
+    expect(document.documentElement.dataset["theme"]).toBe("light");
+
+    act(() => result.current[1]());
+    expect(document.documentElement.dataset["theme"]).toBe("dark");
   });
 });

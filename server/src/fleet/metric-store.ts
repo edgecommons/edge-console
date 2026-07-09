@@ -8,6 +8,8 @@
  * `metrics/emf.ts`), but the store is payload-lenient: every top-level finite
  * number folds as a measure (non-numerics and `_`-prefixed keys — the `_aws`
  * block — are skipped), and a bare numeric body folds as the measure `"value"`.
+ * When an EMF body carries an `instance` dimension, that dimension owns the
+ * series grouping; the UNS metric topic itself is library-owned under `main`.
  *
  * Same side-store reasoning as C5's ConfigStore / C6's EventStore: the liveness
  * stream carries no bodies; the WS gateway serves this store's `snapshot()` to a
@@ -76,6 +78,12 @@ export function extractMeasures(body: unknown): Array<[string, number]> {
   return measures;
 }
 
+function stringDimension(body: unknown, key: string): string | undefined {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
 /** The metric surface: `metric` ingest tee + bounded series + snapshot/update fanout. */
 export class MetricStore {
   private readonly opts: MetricStoreOptions;
@@ -108,7 +116,7 @@ export class MetricStore {
       device,
       component: event.identity.component,
     };
-    const instance = event.identity.instance;
+    const instance = stringDimension(event.body, "instance") ?? event.identity.instance;
     // Series key includes the source instance so filler1's and kep2's same-named metric don't collide.
     const componentId = `${componentKeyId(key)}/${instance}`;
     const at = this.clock();

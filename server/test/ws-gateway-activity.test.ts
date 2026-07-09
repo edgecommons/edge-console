@@ -11,6 +11,7 @@ import type { ComponentKey, ServerMessage } from "@edgecommons/edge-console-prot
 
 import { EventStore } from "../src/fleet/event-store";
 import { MetricStore } from "../src/fleet/metric-store";
+import { LogStore } from "../src/fleet/log-store";
 import { FleetModel } from "../src/fleet/fleet-model";
 import type { IngressEvent } from "../src/ingress/normalizer";
 import { FleetWsGateway } from "../src/ws/gateway";
@@ -27,6 +28,7 @@ class TestClock {
 class FakeTransport implements ClientTransport {
   readonly sent: string[] = [];
   closed: { code: number; reason: string } | undefined;
+  buffered = 0;
 
   constructor(readonly id: string) {}
 
@@ -34,7 +36,7 @@ class FakeTransport implements ClientTransport {
     this.sent.push(data);
   }
   bufferedAmount(): number {
-    return 0;
+    return this.buffered;
   }
   close(code: number, reason: string): void {
     this.closed = { code, reason };
@@ -71,6 +73,27 @@ function metricEvent(name: string, body: unknown): IngressEvent {
   };
 }
 
+function logEvent(level: string, message: string, sequence: number, key: ComponentKey = KEY): IngressEvent {
+  return {
+    ...evtEvent(level, {
+      schema: "edgecommons.log.v1",
+      timestamp: "2026-07-03T00:00:00.000Z",
+      logger: "opcua.session",
+      message,
+      sequence,
+    }),
+    cls: "log",
+    channel: level,
+    identity: {
+      hier: [{ level: "device", value: key.device }],
+      path: key.device,
+      component: key.component,
+      instance: key.instance ?? "main",
+    },
+    topic: `ecv1/${key.device}/${key.component}/${key.instance ?? "main"}/log/${level}`,
+  };
+}
+
 function frame(msg: Record<string, unknown>): string {
   return JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...msg });
 }
@@ -81,8 +104,9 @@ function rig() {
   const model = new FleetModel(clock.fn);
   const events = new EventStore(clock.fn);
   const metrics = new MetricStore(clock.fn);
-  const gateway = new FleetWsGateway(model, { clock: clock.fn }, undefined, { events, metrics });
-  return { clock, model, events, metrics, gateway };
+  const logs = new LogStore(clock.fn);
+  const gateway = new FleetWsGateway(model, { clock: clock.fn }, undefined, { events, metrics, logs });
+  return { clock, model, events, metrics, logs, gateway };
 }
 
 function connectReady(gateway: FleetWsGateway, id: string) {
@@ -197,6 +221,74 @@ describe("FleetWsGateway - subscribe-metrics", () => {
   });
 });
 
+describe("FleetWsGateway - subscribe-logs", () => {
+  it("answers a component log tail snapshot and streams later matching records", () => {
+    const { logs, gateway } = rig();
+    logs.ingest(logEvent("info", "adapter ready", 1));
+    logs.ingest(logEvent("warn", "browse slow", 2));
+
+    const { t, session } = connectReady(gateway, "c1");
+    session.onMessage(
+      frame({ type: "subscribe-logs", key: KEY, limit: 5, levels: ["warn", "error"] }),
+    );
+
+    const snap = t.messages().at(-1)!;
+    expect(snap.type).toBe("logs");
+    if (snap.type !== "logs") throw new Error("unreachable");
+    expect(snap.key).toEqual({ device: KEY.device, component: KEY.component });
+    expect(snap.records.map((r) => r.message)).toEqual(["browse slow"]);
+
+    const afterSnap = t.sent.length;
+    logs.ingest(logEvent("info", "filtered out", 3));
+    expect(t.sent.length).toBe(afterSnap);
+
+    logs.ingest(logEvent("error", "live failure", 4));
+    const push = t.messages().at(-1)!;
+    expect(push).toMatchObject({
+      type: "log",
+      key: { device: KEY.device, component: KEY.component },
+      records: [{ level: "error", message: "live failure" }],
+    });
+  });
+
+  it("streams only to subscribed component keys; unsubscribe stops the stream", () => {
+    const { logs, gateway } = rig();
+    const a = connectReady(gateway, "a");
+    const b = connectReady(gateway, "b");
+    a.session.onMessage(frame({ type: "subscribe-logs", key: KEY }));
+
+    const beforeB = b.t.sent.length;
+    logs.ingest(logEvent("info", "one", 1));
+    expect(a.t.messages().at(-1)!.type).toBe("log");
+    expect(b.t.sent.length).toBe(beforeB);
+
+    a.session.onMessage(frame({ type: "unsubscribe-logs", key: KEY }));
+    const afterUnsub = a.t.sent.length;
+    logs.ingest(logEvent("info", "two", 2));
+    expect(a.t.sent.length).toBe(afterUnsub);
+  });
+
+  it("refreshes a skipped live log subscription with a snapshot on heartbeat", () => {
+    const { logs, gateway } = rig();
+    const { t, session } = connectReady(gateway, "c1");
+    session.onMessage(frame({ type: "subscribe-logs", key: KEY }));
+    const afterSnapshot = t.sent.length;
+
+    t.buffered = 2_000_000;
+    logs.ingest(logEvent("error", "missed while buffered", 1));
+    expect(t.sent.length).toBe(afterSnapshot);
+
+    t.buffered = 0;
+    gateway.tick();
+    const messages = t.messages();
+    expect(messages.at(-2)).toMatchObject({ type: "heartbeat" });
+    expect(messages.at(-1)).toMatchObject({
+      type: "logs",
+      records: [{ message: "missed while buffered" }],
+    });
+  });
+});
+
 describe("FleetWsGateway - activity handshake and degraded modes", () => {
   it("rejects subscribe-events before hello", () => {
     const { gateway } = rig();
@@ -244,6 +336,13 @@ describe("FleetWsGateway - activity handshake and degraded modes", () => {
 
     session.onMessage(frame({ type: "unsubscribe-events" })); // must not throw
     session.onMessage(frame({ type: "unsubscribe-metrics" }));
+    session.onMessage(frame({ type: "subscribe-logs", key: KEY }));
+    expect(t.messages().at(-1)).toMatchObject({
+      type: "logs-unavailable",
+      key: { device: KEY.device, component: KEY.component },
+      code: "UNAVAILABLE",
+    });
+    session.onMessage(frame({ type: "unsubscribe-logs", key: KEY }));
     expect(t.closed).toBeUndefined();
   });
 });

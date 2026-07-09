@@ -60,6 +60,10 @@ describe("consoleSettings projector", () => {
       maxPerComponent: 100,
       maxSeriesPoints: 60,
       maxSeries: 2000,
+      maxLogRecords: 5000,
+      maxLogsPerComponent: 1000,
+      defaultLogTail: 500,
+      maxLogTail: 2000,
     });
   });
 

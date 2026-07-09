@@ -27,6 +27,7 @@ import type { AttributesView } from "../src/fleet/attribute-store";
 import type { CommandEntry, CommandView } from "../src/fleet/command-store";
 import type { ComponentView, DeviceView, FleetView } from "../src/fleet/store";
 import type { MetricsView } from "../src/fleet/metric-store";
+import type { LogsView } from "../src/fleet/log-store";
 
 /** The pinned server-clock base for all fixtures (ms epoch). */
 export const T0 = 1_750_000_000_000;
@@ -201,6 +202,10 @@ export function metricsView(series: MetricSeriesSnapshot[]): MetricsView {
   return { series };
 }
 
+export function logsView(byId: LogsView["byId"]): LogsView {
+  return { byId };
+}
+
 /** An {@link AttributesView} keyed by component id, from a list of attributes. */
 export function attributesView(list: RuntimeAttributes[]): AttributesView {
   const byId: Record<string, RuntimeAttributes> = {};
@@ -277,6 +282,7 @@ export function clientState(
     attributes: { byId: {} },
     signals: { series: [] },
     metrics: { series: [] },
+    logs: { byId: {} },
     commands: { byId: {}, latestByComponentVerb: {}, recent: [] },
     wsUrl: "ws://console.test/ws",
     ...overrides,

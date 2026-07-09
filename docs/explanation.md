@@ -169,15 +169,10 @@ render correctly with no code change. The topology graph derives its nodes from 
 from each component's `cfg`.
 
 A discipline runs through every screen: **surface what is not derivable rather than fake it.** The
-topology's component-to-component dataflow edges are not drawn (there is no flow metadata on the wire); a
-component's custom command surface, the Component-Detail *Panel*/*Logs* tabs, and per-signal engineering
-units/limits are not populated (they require a `describe` capability the console does not consume). The UI
-marks these as unavailable rather than inventing values.
-
-> **On the missing Metrics screen.** There is no standalone Metrics page. The UNS `metric` class is
-> consumed and streamable over the WebSocket, and the UI surfaces metrics *in context* — the Overview CPU
-> sparkline and connection-state columns (a projection over the metric class) and the Signals trends —
-> rather than as its own page.
+topology's component-to-component dataflow edges are not drawn when there is no flow metadata on the
+wire; a component's custom command surface, custom panels, and per-signal engineering units/limits depend
+on descriptor data from the component. The Logs tab likewise depends on actual `log/{level}` records on
+the bus. The UI marks unavailable data honestly rather than inventing values.
 
 ## A note on security
 

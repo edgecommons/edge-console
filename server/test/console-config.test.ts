@@ -33,6 +33,7 @@ describe("consoleConfigFromGlobal", () => {
         cache: { maxChannelsPerComponent: 64 },
         events: { maxEvents: 200, maxPerComponent: 20 },
         metrics: { maxSeriesPoints: 30, maxSeries: 500 },
+        logs: { maxRecords: 800, maxPerComponent: 80, defaultTail: 40, maxTail: 400 },
         rbac: {
           defaultRole: "viewer",
           roles: {
@@ -59,6 +60,7 @@ describe("consoleConfigFromGlobal", () => {
       cache: { maxChannelsPerComponent: 64 },
       events: { maxEvents: 200, maxPerComponent: 20 },
       metrics: { maxSeriesPoints: 30, maxSeries: 500 },
+      logs: { maxRecords: 800, maxPerComponent: 80, defaultTail: 40, maxTail: 400 },
       rbac: {
         defaultRole: "viewer",
         roles: {

@@ -74,8 +74,11 @@ component returns **TIMEOUT**.
 ### 7. Explore the rest
 
 - **Events & Alarms** — the live, newest-first feed; alarms carry an Active/Ack lifecycle (try **Ack**).
+- **Metrics** — schema-free component metrics with latest values and trends.
 - **Signals** — the data-plane table: latest value, quality, a trend sparkline, and how long ago each
   updated.
+- **Components** — select a component and use the embedded Health / Metrics / Configuration / Events /
+  Logs tabs. Logs appear when the component publishes `edgecommons.log.v1` records on the UNS `log` class.
 - **Site Topology** — a derived connectivity graph.
 - **Settings** — the console's own policy (RBAC, staleness ladder, command deadlines), read-only.
 - The **app bar**: global search filters the fleet, the theme toggle flips **g10 ↔ g100**, and the bell

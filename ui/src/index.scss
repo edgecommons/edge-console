@@ -1,26 +1,9 @@
 // Carbon Design System styles (full bundle; trimmed per-view later) + the console's own
-// classes. The EdgeCommons brand layer below maps the canonical brand tokens from
-// `../brand/tokens/edgecommons.css` onto the Carbon variables the screens already use.
+// classes. The EdgeCommons brand layer below maps the canonical brand tokens onto the Carbon
+// variables the screens already use. The tokens themselves are vendored verbatim in
+// `styles/edgecommons-tokens.css` (imported from `main.tsx`, ahead of this file) — the shell
+// stamps `data-theme` on the document so their dark values apply.
 @use "@carbon/react";
-
-:root {
-  /* EdgeCommons brand primitives (source: brand/tokens/edgecommons.css). */
-  --ec-night-iris: #23233d;
-  --ec-iris-deep: #3f407a;
-  --ec-iris: #6f7fbd;
-  --ec-iris-mist: #afc7c8;
-  --ec-source-copper: #d67a4e;
-  --ec-paper: #fbfaf6;
-  --ec-porcelain: #f2f4f1;
-  --ec-veil: #e4e9ea;
-  --ec-slate: #686b7f;
-  --ec-white: #ffffff;
-  --ec-success: #4e9e74;
-  --ec-warning: #c88a35;
-  --ec-danger: #c95a61;
-  --ec-font-sans: "Manrope", "Avenir Next", "Segoe UI", Arial, sans-serif;
-  --ec-font-mono: "JetBrains Mono", "Geist Mono", Consolas, monospace;
-}
 
 *,
 *::before,
@@ -40,7 +23,8 @@ body,
 
 body {
   font-family: var(--ec-font-sans);
-  background: var(--ec-night-iris);
+  // The semantic token, not a primitive: the page behind the shell follows the active theme.
+  background: var(--ec-color-background);
 }
 
 /* ============ shell ============ */
@@ -54,46 +38,46 @@ body {
   color: var(--cds-text-primary);
 }
 
+// Surfaces, text, primary, and focus come straight from the brand semantic tokens, which the
+// vendored token file swaps per `data-theme`. Only the values the brand layer has no token for
+// (the app header, field/accent fills, the strong border) are stated per mode.
+.ec-app--light,
+.ec-app--dark {
+  --ec-app-bg: var(--ec-color-background);
+  --ec-app-surface: var(--ec-color-surface);
+  --ec-app-surface-2: var(--ec-color-surface-subtle);
+  --ec-app-field: var(--ec-color-surface-subtle);
+  --ec-app-text: var(--ec-color-text);
+  --ec-app-muted: var(--ec-color-text-muted);
+  --ec-app-border: var(--ec-color-border);
+  --ec-app-brand-primary: var(--ec-color-primary);
+  --ec-app-brand-link: var(--ec-color-link);
+  --ec-app-brand-link-hover: var(--ec-color-primary-hover);
+  --ec-app-focus: var(--ec-color-focus);
+}
+
 .ec-app--light {
-  --ec-app-bg: var(--ec-paper);
-  --ec-app-surface: var(--ec-white);
-  --ec-app-surface-2: var(--ec-porcelain);
   --ec-app-accent-surface: #eef2f1;
-  --ec-app-field: var(--ec-porcelain);
-  --ec-app-text: var(--ec-night-iris);
-  --ec-app-muted: var(--ec-slate);
   --ec-app-helper: #76798a;
   --ec-app-placeholder: #9ba0ab;
-  --ec-app-border: var(--ec-veil);
   --ec-app-border-strong: #9aa6ad;
   --ec-app-header: var(--ec-night-iris);
   --ec-app-header-hover: #303052;
   --ec-app-header-border: rgb(175 199 200 / 0.22);
-  --ec-app-brand-primary: var(--ec-iris-deep);
-  --ec-app-brand-link: var(--ec-iris-deep);
-  --ec-app-brand-link-hover: var(--ec-night-iris);
-  --ec-app-focus: var(--ec-iris);
 }
 
 .ec-app--dark {
-  --ec-app-bg: #19192f;
-  --ec-app-surface: #262743;
-  --ec-app-surface-2: #20213a;
-  --ec-app-accent-surface: #303153;
-  --ec-app-field: #252642;
-  --ec-app-text: var(--ec-paper);
-  --ec-app-muted: var(--ec-iris-mist);
-  --ec-app-helper: #9daab8;
-  --ec-app-placeholder: #747f95;
-  --ec-app-border: rgb(175 199 200 / 0.18);
-  --ec-app-border-strong: rgb(175 199 200 / 0.42);
-  --ec-app-header: #15162a;
-  --ec-app-header-hover: #242548;
+  // The lightest elevation that muted text still clears 4.5:1 on.
+  --ec-app-accent-surface: #393955;
+  --ec-app-helper: var(--ec-color-text-muted);
+  // Fields take the darker surface, not the subtle one: on subtle there is no headroom for a
+  // placeholder that is both dimmer than helper text and still legible.
+  --ec-app-field: var(--ec-color-surface);
+  --ec-app-placeholder: #9597ad;
+  --ec-app-border-strong: #8284a4;
+  --ec-app-header: #1b1b30;
+  --ec-app-header-hover: #313152;
   --ec-app-header-border: rgb(175 199 200 / 0.18);
-  --ec-app-brand-primary: var(--ec-iris);
-  --ec-app-brand-link: #c3d2f2;
-  --ec-app-brand-link-hover: var(--ec-white);
-  --ec-app-focus: var(--ec-iris);
 }
 
 .ec-app--light,
@@ -120,32 +104,40 @@ body {
   --cds-link-primary-hover: var(--ec-app-brand-link-hover);
   --cds-focus: var(--ec-app-focus);
   --cds-highlight: color-mix(in srgb, var(--ec-iris) 18%, transparent);
+  // Support colors fill shapes — dots, left-accent bars, tag backgrounds. Where one carries a
+  // glyph the rule below reaches for the matching *-text token instead: the fill hexes sit
+  // between 2.8:1 and 4.5:1 and are not legible as text.
   --cds-support-success: var(--ec-success);
   --cds-support-warning: var(--ec-warning);
   --cds-support-error: var(--ec-danger);
   --cds-support-info: var(--ec-iris);
-  --cds-button-primary: var(--ec-iris-deep);
-  --cds-button-primary-hover: #333466;
+  --cds-text-error: var(--ec-color-danger-text);
+  --cds-button-primary: var(--ec-color-primary);
+  --cds-button-primary-hover: var(--ec-color-primary-hover);
   --cds-button-secondary: var(--ec-night-iris);
   --cds-button-secondary-hover: #303052;
   --cds-tag-background-blue: color-mix(in srgb, var(--ec-iris) 18%, var(--ec-app-surface));
-  --cds-tag-color-blue: var(--ec-app-brand-link);
+  --cds-tag-color-blue: var(--ec-color-info-text);
   --cds-tag-background-purple: color-mix(in srgb, var(--ec-iris-deep) 18%, var(--ec-app-surface));
-  --cds-tag-color-purple: var(--ec-iris-mist);
+  --cds-tag-color-purple: var(--ec-color-primary);
   --cds-tag-background-red: color-mix(in srgb, var(--ec-danger) 14%, var(--ec-app-surface));
-  --cds-tag-color-red: var(--ec-danger);
-}
-
-.ec-app--light {
-  --cds-button-secondary: var(--ec-night-iris);
-  --cds-button-secondary-hover: #303052;
+  --cds-tag-color-red: var(--ec-color-danger-text);
 }
 
 .ec-app--dark {
-  --cds-button-primary: var(--ec-iris);
-  --cds-button-primary-hover: #8491d0;
   --cds-button-secondary: #3a3b62;
   --cds-button-secondary-hover: #454672;
+}
+
+// Against Night Iris no primary fill can satisfy both a 3:1 boundary and a 4.5:1 white label —
+// the fill must be light, so the label must be dark. Scoped to the primary button so the
+// dark-filled secondary keeps Carbon's light ink.
+.ec-app--dark .cds--btn--primary {
+  color: var(--ec-color-on-primary);
+
+  svg {
+    fill: var(--ec-color-on-primary);
+  }
 }
 
 .ec-content {
@@ -403,7 +395,7 @@ body {
   font-weight: 500;
 }
 .ec-overdue {
-  color: var(--cds-support-error);
+  color: var(--ec-color-danger-text);
 }
 
 /* ============ summary tiles (mockup .row.c4 + .tile) ============ */
@@ -543,18 +535,18 @@ body {
 // and UNREACHABLE as the mockup's dashed-outline gray, over the stock gray tag.
 .ec-tag--warn {
   background-color: color-mix(in srgb, var(--cds-support-warning) 18%, transparent);
-  color: var(--cds-support-warning);
+  color: var(--ec-color-warning-text);
 
   svg {
-    fill: var(--cds-support-warning);
+    fill: var(--ec-color-warning-text);
   }
 }
 .ec-tag--stale {
   background-color: color-mix(in srgb, var(--cds-support-warning) 14%, transparent);
-  color: color-mix(in srgb, var(--cds-support-warning) 65%, var(--cds-text-primary));
+  color: color-mix(in srgb, var(--ec-color-warning-text) 65%, var(--cds-text-primary));
 
   svg {
-    fill: color-mix(in srgb, var(--cds-support-warning) 65%, var(--cds-text-primary));
+    fill: color-mix(in srgb, var(--ec-color-warning-text) 65%, var(--cds-text-primary));
   }
 }
 .ec-tag--unreach {
@@ -1088,7 +1080,7 @@ body {
   overflow-wrap: anywhere;
 }
 .ec-redacted {
-  color: var(--cds-support-error);
+  color: var(--ec-color-danger-text);
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
@@ -1223,13 +1215,13 @@ body {
   }
 }
 .ec-json--key {
-  color: var(--cds-support-info, #4589ff);
+  color: var(--ec-color-info-text);
 }
 .ec-json--string {
-  color: var(--cds-support-success, #42be65);
+  color: var(--ec-color-success-text);
 }
 .ec-json--number {
-  color: var(--cds-support-warning, #f1c21b);
+  color: var(--ec-color-warning-text);
 }
 .ec-json--literal {
   color: var(--cds-text-secondary);
@@ -1238,11 +1230,11 @@ body {
   color: var(--cds-text-primary);
 }
 .ec-json--redacted {
-  color: var(--cds-support-error);
+  color: var(--ec-color-danger-text);
   font-weight: 600;
 }
 .ec-json--secret-ref {
-  color: var(--cds-support-info, #4589ff);
+  color: var(--ec-color-info-text);
   font-style: italic;
 }
 .ec-cfg-tabs {
@@ -1358,7 +1350,7 @@ body {
 }
 .ec-feed-state--active {
   background-color: color-mix(in srgb, var(--cds-support-warning) 16%, transparent);
-  color: var(--cds-support-warning);
+  color: var(--ec-color-warning-text);
 }
 .ec-feed-dot {
   width: 6px;
@@ -1398,11 +1390,11 @@ body {
   overflow-x: auto;
 }
 
-// The sparkline mark: the validated single-series hue (Carbon g100 support-info
-// blue #4589ff — passes the lightness/chroma/3:1 checks on the g100 surface).
+// The sparkline mark: one series, so it takes categorical slot 1. Slots are assigned in order
+// and never cycled; a status color would wrongly imply the trend means good or bad.
 // currentColor inside the SVG inherits this, so the color lives in ONE place.
 .ec-spark {
-  color: var(--cds-support-info, #4589ff);
+  color: var(--ec-chart-1);
   display: block;
 }
 .ec-metric-latest {
@@ -1489,7 +1481,7 @@ body {
   color: var(--cds-text-primary);
 }
 .ec-cmd-result--error .ec-cmd-result__msg {
-  color: var(--cds-support-error);
+  color: var(--ec-color-danger-text);
 }
 .ec-cmd-json {
   flex-basis: 100%;
@@ -1905,6 +1897,20 @@ body {
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+.ec-detail-panel--logs {
+  min-height: 0;
+  overflow: hidden;
+}
+.ec-detail-panel--logs:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+.ec-detail-panel--logs[hidden] {
+  display: none;
+}
+.ec-detail--embedded > .cds--tab-content.ec-detail-panel--logs {
+  overflow: hidden;
 }
 @media (max-width: 42rem) {
   .ec-detail-head {
@@ -2384,6 +2390,103 @@ body {
 .ec-metrics-table {
   min-width: 56rem;
 }
+.ec-logs {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  gap: 0.75rem;
+}
+.ec-logs > .ec-empty {
+  flex: 1 1 auto;
+}
+.ec-log-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ec-log-toolbar__group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ec-log-toolbar__group--right {
+  margin-left: auto;
+}
+.ec-log-control,
+.ec-log-filter {
+  min-height: 2rem;
+  border: 1px solid var(--cds-border-strong);
+  background: var(--cds-field);
+  color: var(--cds-text-primary);
+  font: inherit;
+}
+.ec-log-control {
+  padding: 0 1.75rem 0 0.5rem;
+}
+.ec-log-filter {
+  width: min(18rem, 48vw);
+  padding: 0 0.625rem;
+}
+.ec-log-tail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  max-height: none;
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-log-row {
+  border-bottom: 1px solid var(--cds-border-subtle);
+}
+.ec-log-row:last-child {
+  border-bottom: 0;
+}
+.ec-log-row > summary {
+  display: grid;
+  grid-template-columns: 6.5rem 4.25rem minmax(9rem, 0.8fr) minmax(14rem, 2fr);
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+.ec-log-row > summary::-webkit-details-marker {
+  display: none;
+}
+.ec-log-row > summary:focus-visible {
+  outline: 2px solid var(--cds-focus);
+  outline-offset: -2px;
+}
+.ec-log-row__time,
+.ec-log-row__logger,
+.ec-log-row__message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ec-log-row__message {
+  color: var(--cds-text-primary);
+}
+.ec-log-row__detail {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0.75rem 0.75rem 11.5rem;
+}
+.ec-log-row--error,
+.ec-log-row--fatal {
+  border-left: 3px solid var(--cds-support-error);
+}
+.ec-log-row--warn {
+  border-left: 3px solid var(--cds-support-warning);
+}
 .ec-panel-json {
   max-height: 18rem;
   overflow: auto;
@@ -2405,6 +2508,19 @@ body {
   .ec-panel-widget__head {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 54rem) {
+  .ec-log-row > summary {
+    grid-template-columns: 5.75rem 4rem minmax(0, 1fr);
+  }
+  .ec-log-row__message {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+  .ec-log-row__detail {
+    padding-left: 0.75rem;
   }
 }
 

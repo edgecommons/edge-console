@@ -42,10 +42,11 @@ screens, all fed live from one WebSocket connection:
 | Screen | What it shows |
 |---|---|
 | **Overview** (Edge health) | fleet-health rollup, active-alarm rollup, the console's own bus throughput + self vitals, and a fleet table dynamically grouped by each component's identity hierarchy |
-| **Components** (+ Detail) | a navigable identity tree and per-component detail (Health / Instances / Configuration / Events tabs) |
+| **Components** (+ Detail) | a navigable identity tree and per-component detail (Health / Metrics / Instances / Configuration / Events / Logs tabs) |
 | **Site Topology** | a derived connectivity graph — cloud/northbound → site bus → components → field/southbound |
 | **Configuration** | a component picker beside its effective, source-redacted running config (Structured / Raw JSON), live, with a Refresh |
 | **Events & Alarms** | the merged, newest-first alarm + event feed with a real Active/Ack/Contained alarm lifecycle |
+| **Metrics** | the generic UNS `metric` stream as latest values and trend sparklines |
 | **Signals** | a data-plane browser over the UNS `data` class — latest value, quality, trend sparkline, age, on-demand Read |
 | **Settings** | the console's own effective policy (RBAC, connection, staleness ladder, command deadlines, retention caps), read-only |
 
@@ -61,11 +62,11 @@ The console surfaces each of these in the product as well as here:
   [Explanation → Security](explanation.md#a-note-on-security).
 - **No Kubernetes chart is included.** The server runs under the library's `KUBERNETES` platform, but you
   provide the Service + Ingress that reaches its WebSocket port.
-- **The console does not consume a `describe` capability manifest**, so it does not populate a component's
-  custom-verb surface, the Component-Detail *Panel* / *Logs* tabs, or per-signal engineering units/limits.
-- **There is no standalone Metrics page.** The UNS `metric` class is consumed and streamable over the
-  WebSocket; the UI surfaces metrics through the Overview columns (CPU sparkline, connection state) and the
-  Signals trends rather than a dedicated screen.
+- **The console consumes component panel descriptors where advertised**, but a component that does not
+  publish a descriptor still shows only the generic tabs. Custom verbs and per-signal engineering
+  units/limits remain descriptor/component responsibilities.
+- **Logs require bus-published records.** The Logs tab reads the reserved UNS `log` class; a component
+  must enable `logging.publish` (or otherwise publish `edgecommons.log.v1`) for records to appear.
 
 ## Audience
 

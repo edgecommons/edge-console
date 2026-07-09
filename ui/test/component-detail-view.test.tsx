@@ -1,11 +1,11 @@
 /**
  * The Component Detail screen (R2) — presentational tests: the breadcrumb, the tab set, the
- * real Health / Panel / Instances / Configuration / Events tabs (built from live data), plus the
- * honest pending Logs state. State in, DOM out, callbacks observed.
+ * real Health / Panel / Instances / Configuration / Events / Logs tabs (built from live data).
+ * State in, DOM out, callbacks observed.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentDescribeManifest } from "@edgecommons/edge-console-protocol";
+import type { ComponentDescribeManifest, ConsoleLogRecord } from "@edgecommons/edge-console-protocol";
 import type { ConfigEntryView } from "../src/fleet/config-store";
 import { ComponentDetailView } from "../src/components/ComponentDetailView";
 import {
@@ -22,6 +22,7 @@ import {
   fleetView,
   hier,
   key,
+  logsView,
   metricSeries,
   metricsView,
   runtimeAttrs,
@@ -132,6 +133,31 @@ function descriptorReady() {
     manifest: opcuaManifest(),
     receivedAt: T0 - 1000,
     refreshing: false,
+  };
+}
+
+function descriptorReadyWithLogLevel() {
+  const entry = descriptorReady();
+  return {
+    ...entry,
+    manifest: {
+      ...entry.manifest,
+      commands: [...(entry.manifest.commands ?? []), { verb: "set-log-level", builtIn: true }],
+    },
+  };
+}
+
+function logRecord(overrides: Partial<ConsoleLogRecord> = {}): ConsoleLogRecord {
+  return {
+    id: 1,
+    key: DKEY,
+    instance: "main",
+    level: "info",
+    logger: "opcua.session",
+    message: "adapter ready",
+    receivedAt: T0 - 500,
+    sourceTimestamp: "2026-07-03T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -336,9 +362,10 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(within(table).getByText("packaging.throughput")).toBeTruthy();
     expect(within(table).getByText("bottlesPerMin")).toBeTruthy();
     expect(within(table).getByText("142.25")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Metrics · 1" })).toBeTruthy();
+    expect(within(table).getByText("southbound_health")).toBeTruthy();
+    expect(within(table).getByText("readErrors")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Metrics · 2" })).toBeTruthy();
     expect(within(table).queryByText("sys")).toBeNull();
-    expect(within(table).queryByText("southbound_health")).toBeNull();
     expect(within(table).queryByText("50")).toBeNull();
   });
 });
@@ -619,10 +646,95 @@ describe("ComponentDetailView — descriptor-driven panel + pending surfaces", (
     expect(cbs.onRefreshDescriptor).toHaveBeenCalledWith(DKEY);
   });
 
-  it("Logs: renders a pending state (no log-class surface ships yet)", () => {
-    renderDetail();
+  it("Logs: renders retained records with filters and a descriptor-gated runtime level action", () => {
+    const cbs = renderDetail({
+      state: detailState({
+        logs: logsView({
+          [ID]: {
+            key: DKEY,
+            records: [
+              logRecord({
+                id: 2,
+                level: "error",
+                logger: "opcua.browse",
+                message: "browse failed",
+                receivedAt: T0 - 100,
+                sequence: 42,
+                thread: "worker-1",
+                fields: { endpoint: "opc.tcp://kep:49320" },
+                error: { type: "TimeoutError", message: "browse timed out" },
+                truncated: true,
+              }),
+              logRecord({ id: 1, level: "info", message: "adapter ready", receivedAt: T0 - 500 }),
+            ],
+            dropped: 3,
+          },
+        }),
+      }),
+    });
+    const hiddenLogsPanel = screen.getByTestId("logs-tab").closest('[role="tabpanel"]');
+    expect(hiddenLogsPanel?.hasAttribute("hidden")).toBe(true);
+
     fireEvent.click(screen.getByTestId("tab-logs"));
-    expect(within(screen.getByTestId("phase2-logs")).getByText(/Not yet available/i)).toBeTruthy();
+    const logs = screen.getByTestId("logs-tab");
+    expect(logs.closest('[role="tabpanel"]')?.hasAttribute("hidden")).toBe(false);
+    expect(screen.getByRole("tab", { name: "Logs · 2" })).toBeTruthy();
+    expect(within(logs).getByText("browse failed")).toBeTruthy();
+    expect(within(logs).getByText("adapter ready")).toBeTruthy();
+    const rows = within(screen.getByTestId("logs-tail")).getAllByTestId("logs-row");
+    expect(within(rows[0]!).getByText("browse failed")).toBeTruthy();
+    expect(within(rows[1]!).getByText("adapter ready")).toBeTruthy();
+    expect(within(logs).getByText("3 dropped")).toBeTruthy();
+    expect((screen.getByTestId("logs-apply-level") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("logs-apply-level"));
+    expect(cbs.onInvoke).not.toHaveBeenCalledWith(DKEY, "set-log-level", expect.anything());
+
+    fireEvent.change(screen.getByTestId("logs-text-filter"), { target: { value: "ready" } });
+    expect(within(logs).getByText("adapter ready")).toBeTruthy();
+    expect(within(logs).queryByText("browse failed")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("logs-text-filter"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("logs-level-filter"), { target: { value: "error" } });
+    expect(within(logs).getByText("browse failed")).toBeTruthy();
+    expect(within(logs).queryByText("adapter ready")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("logs-clear"));
+    expect(screen.getByTestId("logs-filter-empty")).toBeTruthy();
+  });
+
+  it("Logs: invokes set-log-level only when the descriptor advertises it", () => {
+    const cbs = renderDetail({
+      state: detailState({
+        descriptions: { entriesById: { [ID]: descriptorReadyWithLogLevel() } },
+        logs: logsView({ [ID]: { key: DKEY, records: [logRecord()] } }),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-logs"));
+    expect((screen.getByTestId("logs-apply-level") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByTestId("logs-runtime-level"), { target: { value: "debug" } });
+    fireEvent.click(screen.getByTestId("logs-apply-level"));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "set-log-level", {
+      level: "DEBUG",
+      ttlSecs: 300,
+      publish: true,
+    });
+  });
+
+  it("Logs: shows an unavailable state from the gateway", () => {
+    renderDetail({
+      state: detailState({
+        logs: logsView({
+          [ID]: {
+            key: DKEY,
+            records: [],
+            unavailable: { code: "UNAVAILABLE", reason: "the console log store is not configured" },
+          },
+        }),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-logs"));
+    expect(screen.getByTestId("logs-unavailable")).toBeTruthy();
+    expect(screen.getByText("the console log store is not configured")).toBeTruthy();
   });
 });
 

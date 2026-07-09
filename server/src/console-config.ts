@@ -67,6 +67,18 @@ export interface MetricsConfig {
   maxSeries: number;
 }
 
+/** The component log-tail bounds. */
+export interface LogsConfig {
+  /** Fleet-wide recent-log ring capacity. Default 5000. */
+  maxRecords: number;
+  /** Per-component recent-log ring capacity. Default 1000. */
+  maxPerComponent: number;
+  /** Default rows requested by a component detail tail. Default 500. */
+  defaultTail: number;
+  /** Maximum rows a client may request in one tail snapshot. Default 2000. */
+  maxTail: number;
+}
+
 /** The C4 command-gateway timeout policy (all ms; every value ≤ the bridge reply-map TTL). */
 export interface CommandsConfig {
   /** Default per-command deadline when a verb has no specific override. Default 30000. */
@@ -84,6 +96,7 @@ export interface ConsoleConfig {
   cache: CacheConfig;
   events: EventsConfig;
   metrics: MetricsConfig;
+  logs: LogsConfig;
   /** The C4 command authorization policy (`console.rbac`). */
   rbac: RbacConfig;
   /** The C4 command timeout policy (`console.commands`). */
@@ -116,6 +129,7 @@ export const DEFAULT_CONSOLE_CONFIG: ConsoleConfig = {
   cache: { maxChannelsPerComponent: 1024 },
   events: { maxEvents: 1000, maxPerComponent: 100 },
   metrics: { maxSeriesPoints: 60, maxSeries: 2000 },
+  logs: { maxRecords: 5000, maxPerComponent: 1000, defaultTail: 500, maxTail: 2000 },
   rbac: DEFAULT_RBAC_CONFIG,
   commands: DEFAULT_COMMANDS_CONFIG,
 };
@@ -231,6 +245,7 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
   const cache = obj(console_.cache);
   const events = obj(console_.events);
   const metrics = obj(console_.metrics);
+  const logs = obj(console_.logs);
   const rbac = parseRbac(console_.rbac);
   const commands = parseCommands(console_.commands);
 
@@ -294,6 +309,18 @@ export function consoleConfigFromGlobal(global: unknown): ConsoleConfig {
         DEFAULT_CONSOLE_CONFIG.metrics.maxSeriesPoints,
       ),
       maxSeries: positiveInt(metrics.maxSeries, DEFAULT_CONSOLE_CONFIG.metrics.maxSeries),
+    },
+    logs: {
+      maxRecords: positiveInt(logs.maxRecords, DEFAULT_CONSOLE_CONFIG.logs.maxRecords),
+      maxPerComponent: positiveInt(
+        logs.maxPerComponent,
+        DEFAULT_CONSOLE_CONFIG.logs.maxPerComponent,
+      ),
+      defaultTail: Math.min(
+        positiveInt(logs.defaultTail, DEFAULT_CONSOLE_CONFIG.logs.defaultTail),
+        positiveInt(logs.maxTail, DEFAULT_CONSOLE_CONFIG.logs.maxTail),
+      ),
+      maxTail: positiveInt(logs.maxTail, DEFAULT_CONSOLE_CONFIG.logs.maxTail),
     },
     rbac,
     commands,

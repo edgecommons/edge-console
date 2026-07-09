@@ -75,6 +75,15 @@ library's own `HeartbeatConfig` parsing), else `defaultIntervalSecs`.
 | `maxSeriesPoints` | number | `60` | Recent points kept per `(component, metric, measure)` series (drop-oldest). |
 | `maxSeries` | number | `2000` | Max distinct series overall; overflow dropped and counted. |
 
+## `component.global.console.logs` — the log tail bounds
+
+| Key | Type | Default | Definition |
+|-----|------|---------|-----------|
+| `maxRecords` | number | `5000` | Fleet-wide recent `log/{level}` record capacity (drop-oldest). |
+| `maxPerComponent` | number | `1000` | Independent per-component log tail capacity, so a noisy component cannot evict every other component's logs. |
+| `defaultTail` | number | `500` | Default `subscribe-logs` response size when the client does not ask for a limit. |
+| `maxTail` | number | `2000` | Hard cap on a single `subscribe-logs` response. |
+
 ## `component.global.console.rbac` — command authorization
 
 | Key | Type | Default | Definition |
@@ -163,6 +172,8 @@ keep it out of the fleet it watches. The console's dynamic grouping renders **wh
         "cache":     { "maxChannelsPerComponent": 1024 },
         "events":    { "maxEvents": 1000, "maxPerComponent": 100 },
         "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 },
+        "logs":      { "maxRecords": 5000, "maxPerComponent": 1000,
+                       "defaultTail": 500, "maxTail": 2000 },
         "rbac":      { "defaultRole": "viewer",
                        "roles": { "operator": { "allow": ["*"], "deny": ["reboot"] },
                                   "viewer":   { "allow": ["ping", "get-configuration"] } } },

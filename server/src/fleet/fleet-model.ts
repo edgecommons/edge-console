@@ -51,12 +51,16 @@ function parseInstanceStatuses(raw: unknown): InstanceStatus[] | undefined {
   for (const e of raw) {
     if (e === null || typeof e !== "object") continue;
     const o = e as Record<string, unknown>;
-    if (typeof o.instance !== "string" || o.instance === "" || typeof o.connected !== "boolean") {
+    if (typeof o.instance !== "string" || o.instance === "") {
       continue;
     }
+    if ("connected" in o && typeof o.connected !== "boolean") {
+      continue;
+    }
+    const connected = typeof o.connected === "boolean" ? o.connected : false;
     out.push({
       instance: o.instance,
-      connected: o.connected,
+      connected,
       ...(typeof o.detail === "string" && o.detail !== "" ? { detail: o.detail } : {}),
     });
   }
@@ -305,7 +309,9 @@ export class FleetModel {
 
     const comp = this.ensureComponent(device, event, now, deltas);
 
-    this.cacheValue(comp, event, now, deltas);
+    // Logs are high-rate tail data. Retain and stream them through LogStore only;
+    // folding every line into the generic LKV cache would flood the fleet delta stream.
+    if (event.cls !== "log") this.cacheValue(comp, event, now, deltas);
 
     if (event.cls === "state") {
       this.applyState(device, comp, event, now, deltas);

@@ -36,6 +36,7 @@ import type { Clock } from "./fleet/fleet-model";
 import { ConfigStore } from "./fleet/config-store";
 import { EventStore } from "./fleet/event-store";
 import { MetricStore } from "./fleet/metric-store";
+import { LogStore } from "./fleet/log-store";
 import { SignalStore } from "./fleet/signal-store";
 import { AttributeStore } from "./fleet/attribute-store";
 import { AlarmTracker } from "./fleet/alarm-tracker";
@@ -79,6 +80,8 @@ export interface ConsoleApp {
   readonly events: EventStore;
   /** The metric surface (latest + bounded series) behind the C6 `subscribe-metrics` stream. */
   readonly metrics: MetricStore;
+  /** The per-component log tails behind the C6 `subscribe-logs` stream. */
+  readonly logs: LogStore;
   /** The DATA-plane signal surface (latest + quality + series) behind R0 `subscribe-signals`. */
   readonly signals: SignalStore;
   /** The runtime-attribute projection behind R0 `subscribe-attributes`. */
@@ -120,6 +123,10 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     maxSeriesPoints: config.metrics.maxSeriesPoints,
     maxSeries: config.metrics.maxSeries,
   });
+  const logs = new LogStore(clock, {
+    maxRecords: config.logs.maxRecords,
+    maxPerComponent: config.logs.maxPerComponent,
+  });
   // The R0 foundation stores (server-defaults; the screens R1-R6 consume them):
   //  - signals: the DATA plane (`data` class) — latest value + quality + bounded series;
   //  - attributes: the runtime-attribute projection off the `metric` class (sys.* + conn);
@@ -143,6 +150,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       configs.ingest(event);
       events.ingest(event);
       metrics.ingest(event);
+      logs.ingest(event);
       signals.ingest(event);
       attributes.ingest(event);
       alarms.ingest(event);
@@ -209,7 +217,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
       refreshDevice: (device) => void ingress.broadcastRepublish(device),
     },
     // The activity seam: C6 events/metrics + the R0 signals/attributes/alarms surfaces.
-    { events, metrics, signals, attributes, alarms },
+    { events, metrics, logs, signals, attributes, alarms },
     // The C4 command seam: invoke-command → request/reply, RBAC-gated.
     { gateway: commandGateway, rbac },
   );
@@ -232,6 +240,7 @@ export async function startConsole(deps: ConsoleAppDeps): Promise<ConsoleApp> {
     configs,
     events,
     metrics,
+    logs,
     signals,
     attributes,
     alarms,

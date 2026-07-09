@@ -29,6 +29,7 @@ import type {
   ComponentKey,
   ConsoleSelf,
   ConsoleSettings,
+  LogLevel,
   ServerMessage,
 } from "@edgecommons/edge-console-protocol";
 import type { LadderOptions } from "./store";
@@ -46,6 +47,8 @@ import { SignalStore } from "./signal-store";
 import type { SignalsView } from "./signal-store";
 import { MetricStore } from "./metric-store";
 import type { MetricsView } from "./metric-store";
+import { LogStore } from "./log-store";
+import type { LogsView } from "./log-store";
 import { CommandStore } from "./command-store";
 import type { CommandView } from "./command-store";
 import { DescriptionStore } from "./description-store";
@@ -130,6 +133,8 @@ export interface ClientState {
   signals: SignalsView;
   /** The C6 metric surface (component-published non-data numeric series), consumed by component Metrics tabs. */
   metrics: MetricsView;
+  /** The C6 component log tails, populated while component detail subscribes. */
+  logs: LogsView;
   /** The console's own bus-ingest throughput (msgs/sec, from the heartbeat) — the Overview "Edge bus" tile. Undefined until a heartbeat carries it. */
   busMsgsPerSec?: number;
   /** The console's own recent per-second bus rates (from the heartbeat) — the "Edge bus" tile sparkline. */
@@ -159,6 +164,8 @@ export class FleetClient {
   readonly signalStore: SignalStore;
   /** The C6 metric fold core (pure; this client is its IO shell). */
   readonly metricStore: MetricStore;
+  /** The C6 log-tail fold core (pure; this client is its IO shell). */
+  readonly logStore: LogStore;
   /** The C4 command fold core (pure; this client is its IO shell). */
   readonly commandStore: CommandStore;
   /** The Phase 3 descriptor fold core (pure; this client is its IO shell). */
@@ -208,6 +215,7 @@ export class FleetClient {
     this.attributeStore = new AttributeStore();
     this.signalStore = new SignalStore();
     this.metricStore = new MetricStore();
+    this.logStore = new LogStore();
     this.commandStore = new CommandStore();
     this.descriptionStore = new DescriptionStore();
   }
@@ -391,6 +399,23 @@ export class FleetClient {
     this.sendFrame({ type: "unsubscribe-metrics", protocolVersion: PROTOCOL_VERSION });
   }
 
+  /** Subscribe to one component's live log tail. */
+  subscribeLogs(key: ComponentKey, opts?: { limit?: number; levels?: LogLevel[]; sinceId?: number }): void {
+    this.sendFrame({
+      type: "subscribe-logs",
+      protocolVersion: PROTOCOL_VERSION,
+      key,
+      ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
+      ...(opts?.levels !== undefined ? { levels: opts.levels } : {}),
+      ...(opts?.sinceId !== undefined ? { sinceId: opts.sinceId } : {}),
+    });
+  }
+
+  /** Stop one component log tail. Idempotent. */
+  unsubscribeLogs(key: ComponentKey): void {
+    this.sendFrame({ type: "unsubscribe-logs", protocolVersion: PROTOCOL_VERSION, key });
+  }
+
   /**
    * Acknowledge an active alarm (R0 `ack-alarm`) — console-side state that does not
    * clear the alarm. No direct reply: the tracker re-pushes a fresh `alarms` snapshot
@@ -462,6 +487,7 @@ export class FleetClient {
     const attributes = this.attributeStore.view();
     const signals = this.signalStore.view();
     const metrics = this.metricStore.view();
+    const logs = this.logStore.view();
     const commands = this.commandStore.view();
     if (
       this.stateCache === undefined ||
@@ -473,6 +499,7 @@ export class FleetClient {
       this.stateCache.attributes !== attributes ||
       this.stateCache.signals !== signals ||
       this.stateCache.metrics !== metrics ||
+      this.stateCache.logs !== logs ||
       this.stateCache.commands !== commands ||
       this.stateCache.status !== this.status ||
       this.stateCache.role !== this.role ||
@@ -494,6 +521,7 @@ export class FleetClient {
         attributes,
         signals,
         metrics,
+        logs,
         ...(this.busMsgsPerSec !== undefined ? { busMsgsPerSec: this.busMsgsPerSec } : {}),
         ...(this.busRecentRates !== undefined ? { busRecentRates: this.busRecentRates } : {}),
         ...(this.self !== undefined ? { self: this.self } : {}),
@@ -666,6 +694,21 @@ export class FleetClient {
         return;
       case "metric":
         this.metricStore.applyUpdates(msg.updates);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "logs":
+        this.logStore.applySnapshot(msg.key, msg.records, msg.dropped);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "log":
+        this.logStore.applyRecords(msg.key, msg.records, msg.dropped);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "logs-unavailable":
+        this.logStore.applyUnavailable(msg.key, msg.code, msg.reason);
         this.retries = 0;
         this.notify();
         return;

@@ -109,6 +109,28 @@ describe("MetricStore - folding", () => {
     expect(snap[1]).toMatchObject({ measure: "memory_usage", latest: 41 });
   });
 
+  it("uses the EMF instance dimension instead of the reserved metric-topic instance", () => {
+    const clock = new TestClock();
+    const store = new MetricStore(clock.fn);
+
+    store.ingest(metricEvent("OpcUaActivity", {
+      coreName: "gw-01",
+      component: "opcua-adapter",
+      category: "OpcUaActivity",
+      instance: "palletizer1",
+      SubscribedReadTotal: 12,
+      _aws: { Timestamp: 1, CloudWatchMetrics: [] },
+    }));
+
+    expect(store.snapshot()[0]).toMatchObject({
+      key: KEY,
+      instance: "palletizer1",
+      metric: "OpcUaActivity",
+      measure: "SubscribedReadTotal",
+      latest: 12,
+    });
+  });
+
   it("bounds each series to maxSeriesPoints, dropping the oldest", () => {
     const clock = new TestClock();
     const store = new MetricStore(clock.fn, { maxSeriesPoints: 3 });

@@ -82,7 +82,7 @@ An HTTP + WebSocket server (`ws` + `node:http`/`node:fs` — no framework: this 
 on that SAME origin) fans the FleetModel's snapshot + delta stream out to browsers,
 **snapshot-then-deltas**:
 
-- On connect, a client's first frame must be `{"type":"hello","protocolVersion":1}`
+- On connect, a client's first frame must be `{"type":"hello","protocolVersion":7}`
   (optionally `resumeSeq`). The gateway replies with one `snapshot` (the current
   `FleetSnapshot`, carrying its last-folded `seq`), then streams every subsequent `delta`
   batch (`FleetDelta[]`, strictly increasing `seq`).
@@ -180,13 +180,13 @@ derived from the page origin — `ws(s)://{host}/ws`. In dev, `vite.config.ts` p
 `/ws` to `127.0.0.1:8443` (the server's `console.ws.port` default), so the
 origin-derived URL works in both dev and production shapes.
 
-## Config review, events & metrics (slices C5 + C6)
+## Config review, events, metrics & logs (slices C5 + C6)
 
 The liveness stream deliberately carries **no message bodies** (a `value-updated`
 delta is a change notification). Bodies travel over dedicated, versioned message
 families on the **same single WS connection**, each backed by a pure side store fed
 by the one BusIngress tee (`console-app.ts`: FleetModel + ConfigStore + EventStore +
-MetricStore):
+MetricStore + LogStore):
 
 - **Config review (C5, protocol v2)** — request/response + interest: `get-config{key}`
   is answered from the retained-`cfg` cache (`server/src/fleet/config-store.ts`,
@@ -221,12 +221,21 @@ MetricStore):
   **sparkline** (time-scaled, subtle area fill, emphasized endpoint dot, native
   hover summary; single hue = the g100 `support-info` blue, validated against the
   dark surface — no chart dependency).
+- **Logs (protocol v7)** — component-scoped snapshot + live stream:
+  `subscribe-logs{key,limit?,levels?}` answers one `logs` snapshot from the bounded
+  `log/{level}` history, then pushes each new record as a `log` frame until
+  `unsubscribe-logs{key}`/disconnect. Records are normalized from the core
+  `edgecommons.log.v1` body and retain `timestamp`, `level`, `logger`, `message`,
+  optional `fields`/`error`/`truncated`/`dropped`, and malformed/dropped counters.
+  The Components page subscribes for the selected component so the embedded **Logs**
+  tab can filter/follow/clear without navigating away.
 
 Interest of all three families is **per-connection**: the owning view re-requests /
 re-subscribes when the connection comes (back) up (the effect keys on the status),
 and the fresh backlog/snapshot self-heals the client store — no client-side
 resubscribe machinery. Client folds mirror the server bounds
-(`ui/src/fleet/event-log-store.ts`, `ui/src/fleet/metric-series-store.ts`), and the
+(`ui/src/fleet/event-log-store.ts`, `ui/src/fleet/metric-series-store.ts`,
+`ui/src/fleet/log-store.ts`), and the
 version handshake turns any protocol skew into a clean "reload the page".
 
 ## Configuration
@@ -245,7 +254,9 @@ The console is configured like any edgecommons component; its own knobs live in 
                      "sweepIntervalMs": 1000 },
       "cache":     { "maxChannelsPerComponent": 1024 },
       "events":    { "maxEvents": 1000, "maxPerComponent": 100 },   // C6 rolling evt history
-      "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 }     // C6 metric series bounds
+      "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 },    // C6 metric series bounds
+      "logs":      { "maxRecords": 5000, "maxPerComponent": 1000,
+                     "defaultTail": 500, "maxTail": 2000 }          // v7 log history bounds
     }
   }
 }

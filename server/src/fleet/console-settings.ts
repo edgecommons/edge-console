@@ -64,6 +64,10 @@ export function consoleSettings(config: ConsoleConfig, self?: ConsoleSelfInfo): 
       maxPerComponent: config.events.maxPerComponent,
       maxSeriesPoints: config.metrics.maxSeriesPoints,
       maxSeries: config.metrics.maxSeries,
+      maxLogRecords: config.logs.maxRecords,
+      maxLogsPerComponent: config.logs.maxPerComponent,
+      defaultLogTail: config.logs.defaultTail,
+      maxLogTail: config.logs.maxTail,
     },
   };
 }

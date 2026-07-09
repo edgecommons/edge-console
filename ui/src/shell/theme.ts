@@ -48,12 +48,27 @@ export function saveTheme(theme: EcTheme, storage?: Storage): void {
   }
 }
 
+/** The `data-theme` value the EdgeCommons brand tokens key their dark palette off. */
+export function brandTheme(theme: EcTheme): "light" | "dark" {
+  return theme === "g100" ? "dark" : "light";
+}
+
+/**
+ * Stamp `data-theme` on the document so the brand tokens resolve to the matching palette.
+ * Setting it explicitly also pins the choice against the OS `prefers-color-scheme` default.
+ */
+export function applyBrandTheme(theme: EcTheme, root?: HTMLElement): void {
+  const el = root ?? (typeof document === "undefined" ? undefined : document.documentElement);
+  if (el) el.dataset["theme"] = brandTheme(theme);
+}
+
 /** The shell's theme state: `[theme, toggle]`, persisted across reloads. */
 export function useTheme(): [EcTheme, () => void] {
   const [theme, setTheme] = useState<EcTheme>(() => loadTheme());
   const toggle = useCallback(() => setTheme((t) => otherTheme(t)), []);
   useEffect(() => {
     saveTheme(theme);
+    applyBrandTheme(theme);
   }, [theme]);
   return [theme, toggle];
 }

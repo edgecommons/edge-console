@@ -124,6 +124,31 @@ describe("FleetModel - discovery + LKV cache", () => {
     expect(comp.values[0]!.tags).toEqual({ _relay: ["gw-01/uns-bridge"] });
   });
 
+  it("keeps configured instances even when a proto3 false connected value is absent", () => {
+    const clock = new TestClock();
+    const model = new FleetModel(clock.fn);
+
+    const deltas = model.ingest(
+      env({
+        cls: "state",
+        body: { status: "RUNNING", uptimeSecs: 7, instances: [{ instance: "palletizer1" }] },
+      }),
+    );
+
+    expect(deltas).toEqual([
+      expect.objectContaining({ type: "device-discovered" }),
+      expect.objectContaining({ type: "component-discovered" }),
+      expect.objectContaining({ type: "value-updated" }),
+      expect.objectContaining({
+        type: "instances-changed",
+        instances: [{ instance: "palletizer1", connected: false }],
+      }),
+    ]);
+    expect(model.snapshot().devices[0]!.components[0]!.instances).toEqual([
+      { instance: "palletizer1", connected: false },
+    ]);
+  });
+
   it("ignores 'ignored' ingress events and unattributable identities", () => {
     const model = new FleetModel(new TestClock().fn);
     expect(model.ingest({ kind: "ignored", cls: "state", topic: "t", reason: "raw-non-lwt" })).toEqual([]);
@@ -402,7 +427,7 @@ describe("FleetModel - #1c per-instance connectivity (state.instances[])", () =>
     ]);
   });
 
-  it("omits the section when absent, and skips malformed entries when present", () => {
+  it("omits the section when absent, defaults omitted proto3 false values, and skips malformed entries", () => {
     const model = new FleetModel(new TestClock().fn);
     model.ingest(state("RUNNING", 5)); // no instances key
     expect(model.snapshot().devices[0]!.components[0]!.instances).toBeUndefined();
@@ -416,7 +441,8 @@ describe("FleetModel - #1c per-instance connectivity (state.instances[])", () =>
           instances: [
             { instance: "ok", connected: true },
             { instance: "", connected: true }, // blank id -> skipped
-            { instance: "noflag" }, // missing connected -> skipped
+            { instance: "noflag" }, // omitted proto3 false -> disconnected
+            { instance: "badflag", connected: "yes" }, // malformed connected -> skipped
             "nonsense", // not an object -> skipped
           ],
         },
@@ -424,6 +450,7 @@ describe("FleetModel - #1c per-instance connectivity (state.instances[])", () =>
     );
     expect(model.snapshot().devices[0]!.components[0]!.instances).toEqual([
       { instance: "ok", connected: true },
+      { instance: "noflag", connected: false },
     ]);
   });
 

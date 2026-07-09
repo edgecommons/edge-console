@@ -57,8 +57,11 @@
  * v6 (Phase 3 descriptor panels): client `get-descriptor`/`refresh-descriptor`, server
  * `descriptor`/`descriptor-unavailable`. Breaking because a v5 gateway rejects the new
  * client frames; the exact-match handshake turns that into a clean reload.
+ * v7 (component log tail): client `subscribe-logs`/`unsubscribe-logs`, server
+ * `logs`/`log`/`logs-unavailable`. Breaking because a v6 gateway rejects the new
+ * client frames; the exact-match handshake turns that into a clean reload.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
@@ -367,6 +370,68 @@ const SEVERITY_SYNONYMS: Record<string, EventSeverityLevel> = {
 export function classifyEventSeverity(severity: string | undefined): EventSeverityLevel | undefined {
   if (severity === undefined) return undefined;
   return SEVERITY_SYNONYMS[severity.toLowerCase()];
+}
+
+/* -----------------------------------------------------------------------------
+ * C6 — component logs: structured records published on the reserved `log` class.
+ *
+ * Core libraries publish `log/{level}` envelopes with the normalized body schema
+ * `edgecommons.log.v1`. The console keeps a bounded tail per component and exposes
+ * snapshot-then-push frames to selected component detail panes.
+ * --------------------------------------------------------------------------- */
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+
+export const LOG_LEVELS: readonly LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"];
+
+export interface ConsoleLogError {
+  type?: string;
+  message?: string;
+  stack?: string;
+}
+
+export interface ConsoleLogRecord {
+  /** Monotonic server-assigned id (arrival order; dedupe and React key). */
+  id: number;
+  key: ComponentKey;
+  /** Source instance from the envelope identity. v1 core publishers use `main`. */
+  instance: string;
+  /** Lowercase canonical log level, derived from `log/{level}` or body.level. */
+  level: LogLevel;
+  logger: string;
+  message: string;
+  /** Console receipt time (server-clock ms epoch). */
+  receivedAt: number;
+  /** Publisher's record timestamp (`header.timestamp`/`body.timestamp`), when present. */
+  sourceTimestamp?: string;
+  /** Monotonic publisher-side sequence, when the body carried one. */
+  sequence?: number;
+  /** Source thread/task name, when present. */
+  thread?: string;
+  /** Structured fields emitted with the log record. */
+  fields?: Record<string, unknown>;
+  /** Structured exception/error information, when present. */
+  error?: ConsoleLogError;
+  /** Whether the publisher truncated the record before sending it. */
+  truncated?: boolean;
+  /** Raw log channel, retained for diagnostics when it differs from the level. */
+  channel?: string;
+  /** Envelope tags, verbatim (`_`-prefixed keys are system-reserved). */
+  tags?: Record<string, unknown>;
+}
+
+export interface ConsoleLogSnapshot {
+  key: ComponentKey;
+  /** Newest-first log records for the subscribed component. */
+  records: ConsoleLogRecord[];
+  /** Count of retained-record overflows/malformed drops known for this component. */
+  dropped?: number;
+}
+
+export function parseLogLevel(value: unknown): LogLevel | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  return (LOG_LEVELS as readonly string[]).includes(normalized) ? (normalized as LogLevel) : undefined;
 }
 
 /** The label shown for an event whose channel carried no type token. */
@@ -694,6 +759,14 @@ export interface ConsoleSettings {
     maxSeriesPoints: number;
     /** Max distinct metric series overall (`metrics.maxSeries`). */
     maxSeries: number;
+    /** Fleet-wide recent-log ring capacity (`logs.maxRecords`). */
+    maxLogRecords?: number;
+    /** Per-component recent-log ring capacity (`logs.maxPerComponent`). */
+    maxLogsPerComponent?: number;
+    /** Default log rows requested by component detail (`logs.defaultTail`). */
+    defaultLogTail?: number;
+    /** Maximum log rows a client may request (`logs.maxTail`). */
+    maxLogTail?: number;
   };
 }
 
@@ -915,6 +988,11 @@ export type WsErrorCode = "malformed" | "unsupported-protocol-version";
  *    answers with ONE `metrics` snapshot frame (every known series: latest value +
  *    bounded recent points) and then pushes fresh samples as `metric` frames.
  *  - `unsubscribe-metrics` (C6) — stop the `metric` pushes. No reply; idempotent.
+ *  - `subscribe-logs` (v7) — register interest in one component's live log tail.
+ *    The gateway answers with a `logs` snapshot (newest-first, capped by `limit`)
+ *    and pushes later records as `log` frames while the interest is active.
+ *  - `unsubscribe-logs` (v7) — stop pushes for that component key. No reply;
+ *    idempotent.
  *  - `invoke-command` (C4) — invoke `verb` (with optional `args`) on the component named
  *    by `key`. `requestId` is a CLIENT-chosen correlation token echoed back on the
  *    matching `command-result`, so a client can have several commands in flight at once
@@ -932,6 +1010,8 @@ export type ClientMessage =
   | { type: "unsubscribe-events"; protocolVersion: number }
   | { type: "subscribe-metrics"; protocolVersion: number }
   | { type: "unsubscribe-metrics"; protocolVersion: number }
+  | { type: "subscribe-logs"; protocolVersion: number; key: ComponentKey; limit?: number; levels?: LogLevel[]; sinceId?: number }
+  | { type: "unsubscribe-logs"; protocolVersion: number; key: ComponentKey }
   | {
       type: "invoke-command";
       protocolVersion: number;
@@ -979,6 +1059,12 @@ export type ClientMessage =
  *  - `metric` (C6) — fresh samples pushed to subscribed clients; one bus arrival can
  *    carry several measures, hence a batch. The client appends bounded (see
  *    {@link DEFAULT_METRIC_SERIES_POINTS}), starting unseen series from scratch.
+ *  - `logs` (v7) — the reply to `subscribe-logs`: the component's retained log tail,
+ *    NEWEST-FIRST. Replaces that component's client-side log list.
+ *  - `log` (v7) — fresh records pushed to subscribed clients. Records are batched so
+ *    a future store compaction/backpressure replay can send several at once.
+ *  - `logs-unavailable` (v7) — the reply when no log source is wired or policy
+ *    forbids the subscription.
  *  - `command-result` (C4) — the single answer to an `invoke-command`, correlated by the
  *    client's `requestId`. `ok` distinguishes success (`result` = the verb's result
  *    object, e.g. ping's `{status, uptimeSecs}`) from failure (`error` = a
@@ -1046,6 +1132,15 @@ export type ServerMessage =
   | { type: "event"; protocolVersion: number; event: ConsoleEvent }
   | { type: "metrics"; protocolVersion: number; series: MetricSeriesSnapshot[] }
   | { type: "metric"; protocolVersion: number; updates: MetricSeriesUpdate[] }
+  | { type: "logs"; protocolVersion: number; key: ComponentKey; records: ConsoleLogRecord[]; dropped?: number }
+  | { type: "log"; protocolVersion: number; key: ComponentKey; records: ConsoleLogRecord[]; dropped?: number }
+  | {
+      type: "logs-unavailable";
+      protocolVersion: number;
+      key: ComponentKey;
+      code: "FORBIDDEN" | "UNAVAILABLE";
+      reason: string;
+    }
   // R0 signals (data plane): the `subscribe-signals` reply (every series) + live pushes.
   | { type: "signals"; protocolVersion: number; series: SignalSeriesSnapshot[] }
   | { type: "signal"; protocolVersion: number; updates: SignalSeriesUpdate[] }
@@ -1093,6 +1188,34 @@ export function parseComponentKey(value: unknown): ComponentKey | undefined {
   if (typeof device !== "string" || device === "") return undefined;
   if (typeof component !== "string" || component === "") return undefined;
   return { device, component };
+}
+
+function parsePositiveInt(value: unknown, field: string): { ok: true; value?: number } | { ok: false; reason: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    return { ok: false, reason: `${field} must be a positive integer` };
+  }
+  return { ok: true, value };
+}
+
+function parseNonNegativeInt(value: unknown, field: string): { ok: true; value?: number } | { ok: false; reason: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return { ok: false, reason: `${field} must be a non-negative integer` };
+  }
+  return { ok: true, value };
+}
+
+function parseLogLevels(value: unknown): LogLevel[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return [];
+  const levels: LogLevel[] = [];
+  for (const raw of value) {
+    const level = parseLogLevel(raw);
+    if (level === undefined) return [];
+    if (!levels.includes(level)) levels.push(level);
+  }
+  return levels;
 }
 
 /**
@@ -1199,6 +1322,38 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
       return { ok: true, message: { type: "subscribe-metrics", protocolVersion } };
     case "unsubscribe-metrics":
       return { ok: true, message: { type: "unsubscribe-metrics", protocolVersion } };
+    case "subscribe-logs": {
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return { ok: false, reason: "subscribe-logs key must be {device, component} non-empty strings" };
+      }
+      const limit = parsePositiveInt(obj.limit, "subscribe-logs limit");
+      if (!limit.ok) return limit;
+      const sinceId = parseNonNegativeInt(obj.sinceId, "subscribe-logs sinceId");
+      if (!sinceId.ok) return sinceId;
+      const levels = parseLogLevels(obj.levels);
+      if (levels !== undefined && levels.length === 0) {
+        return { ok: false, reason: "subscribe-logs levels must be an array of known log levels" };
+      }
+      return {
+        ok: true,
+        message: {
+          type: "subscribe-logs",
+          protocolVersion,
+          key,
+          ...(limit.value !== undefined ? { limit: limit.value } : {}),
+          ...(levels !== undefined ? { levels } : {}),
+          ...(sinceId.value !== undefined ? { sinceId: sinceId.value } : {}),
+        },
+      };
+    }
+    case "unsubscribe-logs": {
+      const key = parseComponentKey(obj.key);
+      if (key === undefined) {
+        return { ok: false, reason: "unsubscribe-logs key must be {device, component} non-empty strings" };
+      }
+      return { ok: true, message: { type: "unsubscribe-logs", protocolVersion, key } };
+    }
     case "subscribe-signals":
       return { ok: true, message: { type: "subscribe-signals", protocolVersion } };
     case "unsubscribe-signals":

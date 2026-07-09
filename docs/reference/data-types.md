@@ -10,7 +10,7 @@ console↔bus UNS side, see [messaging-interface.md](messaging-interface.md).
 - One WebSocket per browser app, at **`/ws`** on the gateway origin (`ws://` or, behind a TLS terminator,
   `wss://`). The UI derives the URL from the page origin, overridable with `VITE_CONSOLE_WS_URL`.
 - Every frame in **both** directions is a JSON object carrying a `protocolVersion` integer.
-- **`PROTOCOL_VERSION = 5`**. The gateway validates every inbound frame through one pure
+- **`PROTOCOL_VERSION = 7`**. The gateway validates every inbound frame through one pure
   `parseClientMessage()` — nothing lenient is accepted (unlike the config parsers). A version skew is a
   clean rejection, not a misparse.
 
@@ -36,6 +36,8 @@ connection.
 | `subscribe-events` | `limit?` | Ask for the rolling `evt` backlog (newest-first, optionally capped) then live `event` pushes. |
 | `unsubscribe-events` | — | Stop `event` pushes. Idempotent. |
 | `subscribe-metrics` / `unsubscribe-metrics` | — | Metric snapshot then `metric` pushes / stop. |
+| `subscribe-logs` | `key`, `limit?`, `levels?`, `sinceId?` | Ask for one component's retained log tail (newest-first), optionally capped/filtered, then live `log` pushes. |
+| `unsubscribe-logs` | `key` | Stop log pushes for that component. Idempotent. |
 | `subscribe-signals` / `unsubscribe-signals` | — | Data-plane signal snapshot then `signal` pushes / stop. |
 | `subscribe-attributes` / `unsubscribe-attributes` | — | Runtime-attribute snapshot then `attribute` pushes / stop. |
 | `subscribe-alarms` / `unsubscribe-alarms` | — | Alarm snapshot then live `alarms` replace-frames / stop. |
@@ -57,6 +59,7 @@ snapshot/backlog self-heals the client store (no client-side resubscribe bookkee
 | `config` / `config-unavailable` | `key`, `cfg`, `receivedAt`, `sourceTimestamp?` | Reply to `get-config` + later pushes / no cfg held. |
 | `events` / `event` | `events: ConsoleEvent[]` / `event: ConsoleEvent` | Backlog (newest-first) / one live arrival. |
 | `metrics` / `metric` | `series: MetricSeriesSnapshot[]` / `updates: MetricSeriesUpdate[]` | Snapshot / live sample batches. |
+| `logs` / `log` / `logs-unavailable` | `key`, `records`, `dropped?` / `key`, `records`, `dropped?` / `key`, `code`, `reason` | Component log tail snapshot / live record batch / unavailable notice. |
 | `signals` / `signal` | `series: SignalSeriesSnapshot[]` / `updates: SignalSeriesUpdate[]` | Data-plane snapshot / live samples. |
 | `attributes` / `attribute` | `components: RuntimeAttributes[]` / `updates: RuntimeAttributes[]` | Runtime-attribute snapshot / live updates. |
 | `alarms` | `snapshot: AlarmSnapshot` | The reply to `subscribe-alarms` **and** every later change (one replace-frame). |
@@ -71,7 +74,7 @@ snapshot/backlog self-heals the client store (no client-side resubscribe bookkee
 - **Backpressure**: a client whose transport stays backpressured across several delta pushes is
   dropped-and-resnapshotted, never queued — it cannot stall other clients.
 - **Value bodies do not ride deltas.** A `value-updated` delta is a change *notification*; cached value
-  bodies refresh via snapshots and the dedicated body families (`config`/`events`/`metrics`/`signals`).
+bodies refresh via snapshots and the dedicated body families (`config`/`events`/`metrics`/`signals`).
 
 ## Core identity & liveness types
 
@@ -167,6 +170,38 @@ One series per `(component, instance, metric, measure)`: `latest`, `receivedAt`,
 `points: {at, value}[]` (default `DEFAULT_METRIC_SERIES_POINTS = 60`). Bodies fold leniently — the
 library's EMF shape (top-level numeric measures; `_aws` skipped) and bare numbers (measure `"value"`)
 alike.
+
+### Logs — `ConsoleLogRecord` / `ConsoleLogSnapshot`
+
+One retained record per structured UNS `log/{level}` envelope. The console only accepts attributable
+EdgeCommons envelopes with `body.schema === "edgecommons.log.v1"`; malformed or over-retained records are
+dropped and counted.
+
+```ts
+type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+
+interface ConsoleLogRecord {
+  id: number;
+  key: ComponentKey;
+  instance: string;
+  level: LogLevel;
+  logger: string;
+  message: string;
+  receivedAt: number;
+  sourceTimestamp?: string;
+  sequence?: number;
+  thread?: string;
+  fields?: Record<string, unknown>;
+  error?: { type?: string; message?: string; stack?: string };
+  truncated?: boolean;
+  channel?: string;
+  tags?: Record<string, unknown>;
+}
+```
+
+`subscribe-logs` scopes to one component key. A `logs` frame returns the retained component tail
+newest-first; later `log` frames carry one or more fresh records. `logs-unavailable` is returned when the
+gateway has no log source wired or policy forbids the subscription.
 
 ### Signals (data plane) — `SignalSeriesSnapshot` / `SignalSeriesUpdate`
 

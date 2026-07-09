@@ -34,6 +34,7 @@ import type {
   ComponentDescribeManifest,
   ComponentKey,
   ConsoleEvent,
+  ConsoleLogRecord,
   ConsoleSelf,
   ConsoleSettings,
   FleetDelta,
@@ -50,6 +51,7 @@ import type { Clock, DeltaListener } from "../fleet/fleet-model";
 import type { ConfigUpdateListener, StoredConfig } from "../fleet/config-store";
 import type { EventListener } from "../fleet/event-store";
 import type { MetricUpdateListener } from "../fleet/metric-store";
+import type { LogListener, LogQuery } from "../fleet/log-store";
 import type { SignalUpdateListener } from "../fleet/signal-store";
 import type { AttributeUpdateListener } from "../fleet/attribute-store";
 import type { AlarmListener } from "../fleet/alarm-tracker";
@@ -95,6 +97,13 @@ export interface MetricFeedSource {
   onUpdate(listener: MetricUpdateListener): () => void;
 }
 
+/** What the gateway needs from the component log tails. `LogStore` satisfies this structurally. */
+export interface LogFeedSource {
+  recentFor(key: ComponentKey, query?: LogQuery): ConsoleLogRecord[];
+  droppedFor(key: ComponentKey): number;
+  onLog(listener: LogListener): () => void;
+}
+
 /** What the gateway needs from the DATA-plane signal surface (R0). `SignalStore` satisfies this structurally. */
 export interface SignalFeedSource {
   snapshot(): SignalSeriesSnapshot[];
@@ -127,6 +136,7 @@ export interface AlarmFeedSource {
 export interface ActivityGatewayDeps {
   events: EventFeedSource;
   metrics: MetricFeedSource;
+  logs?: LogFeedSource;
   signals?: SignalFeedSource;
   attributes?: AttributeFeedSource;
   alarms?: AlarmFeedSource;
@@ -137,6 +147,16 @@ const EMPTY_ALARM_SNAPSHOT: AlarmSnapshot = {
   active: [],
   counts: { critical: 0, warning: 0, active: 0, contained: 0, acked: 0 },
 };
+
+function filterLogRecords(records: ConsoleLogRecord[], query: LogQuery): ConsoleLogRecord[] {
+  let rows = records;
+  if (query.sinceId !== undefined) rows = rows.filter((r) => r.id > query.sinceId!);
+  if (query.levels !== undefined && query.levels.length > 0) {
+    const levels = new Set(query.levels);
+    rows = rows.filter((r) => levels.has(r.level));
+  }
+  return rows;
+}
 
 /**
  * The C4 command seam (optional fifth constructor argument): the pure
@@ -228,6 +248,10 @@ interface Session {
   eventsSubscribed: boolean;
   /** Live `metric` pushes are streamed while set (C6 `subscribe-metrics`). */
   metricsSubscribed: boolean;
+  /** Component-scoped log subscriptions keyed by `device/component`. */
+  logSubscriptions: Map<string, { key: ComponentKey; query: LogQuery }>;
+  /** Log subscriptions that missed pushes under backpressure and need a fresh snapshot. */
+  dirtyLogKeys: Set<string>;
   /** Live `signal` pushes are streamed while set (R0 `subscribe-signals`). */
   signalsSubscribed: boolean;
   /** Live `attribute` pushes are streamed while set (R0 `subscribe-attributes`). */
@@ -247,6 +271,7 @@ export class FleetWsGateway {
   private readonly detachConfig: (() => void) | undefined;
   private readonly detachEvents: (() => void) | undefined;
   private readonly detachMetrics: (() => void) | undefined;
+  private readonly detachLogs: (() => void) | undefined;
   private readonly detachSignals: (() => void) | undefined;
   private readonly detachAttributes: (() => void) | undefined;
   private readonly detachAlarms: (() => void) | undefined;
@@ -264,6 +289,9 @@ export class FleetWsGateway {
     this.detachConfig = config?.configs.onUpdate((entry) => this.pushConfig(entry));
     this.detachEvents = activity?.events.onEvent((event) => this.pushEvent(event));
     this.detachMetrics = activity?.metrics.onUpdate((updates) => this.pushMetricUpdates(updates));
+    this.detachLogs = activity?.logs?.onLog((key, records, dropped) =>
+      this.pushLogRecords(key, records, dropped),
+    );
     this.detachSignals = activity?.signals?.onUpdate((updates) => this.pushSignalUpdates(updates));
     this.detachAttributes = activity?.attributes?.onUpdate((updates) =>
       this.pushAttributeUpdates(updates),
@@ -288,6 +316,8 @@ export class FleetWsGateway {
       configKeys: new Set(),
       eventsSubscribed: false,
       metricsSubscribed: false,
+      logSubscriptions: new Map(),
+      dirtyLogKeys: new Set(),
       signalsSubscribed: false,
       attributesSubscribed: false,
       alarmsSubscribed: false,
@@ -329,6 +359,7 @@ export class FleetWsGateway {
         ...(busRecentRates !== undefined ? { busRecentRates } : {}),
         ...(self !== undefined ? { self } : {}),
       });
+      this.flushDirtyLogSnapshots(session);
     }
   }
 
@@ -343,6 +374,7 @@ export class FleetWsGateway {
     this.detachConfig?.();
     this.detachEvents?.();
     this.detachMetrics?.();
+    this.detachLogs?.();
     this.detachSignals?.();
     this.detachAttributes?.();
     this.detachAlarms?.();
@@ -443,6 +475,32 @@ export class FleetWsGateway {
       }
       case "unsubscribe-metrics":
         session.metricsSubscribed = false;
+        return;
+      case "subscribe-logs": {
+        if (this.activity?.logs === undefined) {
+          this.send(session, {
+            type: "logs-unavailable",
+            protocolVersion: PROTOCOL_VERSION,
+            key: msg.key,
+            code: "UNAVAILABLE",
+            reason: "the console log store is not configured",
+          });
+          return;
+        }
+        const id = componentKeyId(msg.key);
+        const query: LogQuery = {
+          ...(msg.limit !== undefined ? { limit: msg.limit } : {}),
+          ...(msg.levels !== undefined ? { levels: msg.levels } : {}),
+          ...(msg.sinceId !== undefined ? { sinceId: msg.sinceId } : {}),
+        };
+        session.logSubscriptions.set(id, { key: msg.key, query });
+        session.dirtyLogKeys.delete(id);
+        this.sendLogSnapshot(session, msg.key, query);
+        return;
+      }
+      case "unsubscribe-logs":
+        session.logSubscriptions.delete(componentKeyId(msg.key));
+        session.dirtyLogKeys.delete(componentKeyId(msg.key));
         return;
       case "subscribe-signals": {
         session.signalsSubscribed = true;
@@ -644,6 +702,55 @@ export class FleetWsGateway {
         updates,
       } satisfies ServerMessage);
       this.sendEncoded(session, encoded);
+    }
+  }
+
+  /** A fresh component log batch: push to matching component-scoped subscriptions. */
+  private pushLogRecords(key: ComponentKey, records: ConsoleLogRecord[], dropped?: number): void {
+    const id = componentKeyId(key);
+    for (const session of [...this.sessions.values()]) {
+      if (!session.ready) continue;
+      const sub = session.logSubscriptions.get(id);
+      if (sub === undefined) continue;
+      const filtered = filterLogRecords(records, sub.query);
+      if (filtered.length === 0) continue;
+      if (session.transport.bufferedAmount() > this.opts.maxBufferedBytes) {
+        session.dirtyLogKeys.add(id);
+        continue;
+      }
+      this.send(session, {
+        type: "log",
+        protocolVersion: PROTOCOL_VERSION,
+        key,
+        records: filtered,
+        ...(dropped !== undefined && dropped > 0 ? { dropped } : {}),
+      });
+    }
+  }
+
+  private sendLogSnapshot(session: Session, key: ComponentKey, query: LogQuery): void {
+    const records = this.activity?.logs?.recentFor(key, query) ?? [];
+    const dropped = this.activity?.logs?.droppedFor(key);
+    this.send(session, {
+      type: "logs",
+      protocolVersion: PROTOCOL_VERSION,
+      key,
+      records,
+      ...(dropped !== undefined && dropped > 0 ? { dropped } : {}),
+    });
+  }
+
+  private flushDirtyLogSnapshots(session: Session): void {
+    if (session.dirtyLogKeys.size === 0) return;
+    if (session.transport.bufferedAmount() > this.opts.maxBufferedBytes) return;
+    for (const id of [...session.dirtyLogKeys]) {
+      const sub = session.logSubscriptions.get(id);
+      if (sub === undefined) {
+        session.dirtyLogKeys.delete(id);
+        continue;
+      }
+      this.sendLogSnapshot(session, sub.key, sub.query);
+      session.dirtyLogKeys.delete(id);
     }
   }
 

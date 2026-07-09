@@ -14,13 +14,14 @@
  *
  * The component-specific Panel tab is descriptor-driven: the console asks the component for
  * `cmd/describe`, then renders the advertised panel views without fabricating OPC UA-only UI.
- * Logs remain pending because the UNS `log` class has no LogStore yet.
+ * Logs are served by the component-scoped C6 log tail (`subscribe-logs`/`log`) and kept
+ * out of the general last-known-value model so high-rate log records do not churn the page.
  *
  * `ComponentDetailView` is purely presentational (state in, DOM out — component-testable
  * without a socket); `ConnectedComponentDetailView` binds it to the shared {@link FleetClient}
  * and owns the config request / event subscription lifecycle.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   InlineLoading,
@@ -38,12 +39,14 @@ import type {
   CommandError,
   ComponentDescribeManifest,
   ComponentKey,
+  ConsoleLogRecord,
   InstanceStatus,
+  LogLevel,
   MetricSeriesSnapshot,
   PanelViewDescriptor,
   PanelWidgetDescriptor,
 } from "@edgecommons/edge-console-protocol";
-import { componentKeyId } from "@edgecommons/edge-console-protocol";
+import { LOG_LEVELS, componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
 import type { DescriptorEntryView } from "../fleet/description-store";
 import type { ComponentView } from "../fleet/store";
@@ -69,31 +72,6 @@ import { findComponent } from "./components-tree";
 
 /** A no-op command seam (presentational tests without a live client). */
 const NO_INVOKE: InvokeCommand = () => undefined;
-
-/** A pending surface for capabilities whose backing store is not shipped yet. */
-function PendingSurface({
-  feature,
-  needs,
-  testId,
-  children,
-}: {
-  feature: string;
-  needs: string;
-  testId: string;
-  children?: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <div className="ec-pending" data-testid={testId}>
-      <div className="ec-pending__badge">Not yet available</div>
-      <h3 className="ec-pending__title">{feature}</h3>
-      <p className="ec-dim">
-        This surface is driven by <code>{needs}</code>. The console does not fabricate it — it
-        lights up once the backing bus surface is available.
-      </p>
-      {children}
-    </div>
-  );
-}
 
 /** The Health tab's console-computed "health checks" structured list. */
 function HealthChecks({ checks }: { checks: HealthCheck[] }): React.JSX.Element {
@@ -441,7 +419,6 @@ function isCustomMetric(series: MetricSeriesSnapshot): boolean {
   return (
     metric !== "" &&
     metric !== "sys" &&
-    metric !== "southbound_health" &&
     !metric.startsWith("sys.") &&
     !metric.startsWith("sys/") &&
     !metric.startsWith("sys_")
@@ -458,6 +435,25 @@ function customMetricsForComponent(series: MetricSeriesSnapshot[], detailKey: Co
         a.metric.localeCompare(b.metric) ||
         a.measure.localeCompare(b.measure),
     );
+}
+
+function logLevelTagType(level: LogLevel): "red" | "magenta" | "blue" | "gray" | "warm-gray" {
+  switch (level) {
+    case "fatal":
+    case "error":
+      return "red";
+    case "warn":
+      return "warm-gray";
+    case "info":
+      return "blue";
+    case "debug":
+    case "trace":
+      return "gray";
+  }
+}
+
+function logLevelLabel(level: LogLevel): string {
+  return level.toUpperCase();
 }
 
 function AddressSpaceResult({
@@ -1442,6 +1438,222 @@ function MetricsTab({
   );
 }
 
+function LogsTab({
+  records,
+  unavailable,
+  dropped,
+  detailKey,
+  canSetLogLevel,
+  onInvoke,
+}: {
+  records: ConsoleLogRecord[];
+  unavailable?: { code: "FORBIDDEN" | "UNAVAILABLE"; reason: string };
+  dropped?: number;
+  detailKey: ComponentKey;
+  canSetLogLevel: boolean;
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [level, setLevel] = useState<"all" | LogLevel>("all");
+  const [query, setQuery] = useState("");
+  const [follow, setFollow] = useState(true);
+  const [clearedBeforeId, setClearedBeforeId] = useState(0);
+  const [runtimeLevel, setRuntimeLevel] = useState<LogLevel>("info");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return records
+      .filter((r) => r.id > clearedBeforeId)
+      .filter((r) => level === "all" || r.level === level)
+      .filter((r) => {
+        if (q === "") return true;
+        return (
+          r.message.toLowerCase().includes(q) ||
+          r.logger.toLowerCase().includes(q) ||
+          (r.thread?.toLowerCase().includes(q) ?? false)
+        );
+      });
+  }, [clearedBeforeId, level, query, records]);
+
+  useEffect(() => {
+    if (!follow) return;
+    const el = listRef.current;
+    if (el !== null) el.scrollTop = 0;
+  }, [filtered.length, follow]);
+
+  const onScroll = () => {
+    const el = listRef.current;
+    if (el === null) return;
+    setFollow(el.scrollTop < 12);
+  };
+
+  const applyRuntimeLevel = () => {
+    if (!canSetLogLevel) return;
+    onInvoke(detailKey, "set-log-level", {
+      level: runtimeLevel.toUpperCase(),
+      ttlSecs: 300,
+      publish: true,
+    });
+  };
+
+  if (unavailable !== undefined) {
+    return (
+      <Tile className="ec-empty" data-testid="logs-unavailable">
+        <h3>Logs unavailable</h3>
+        <p className="ec-dim">{unavailable.reason}</p>
+      </Tile>
+    );
+  }
+
+  return (
+    <div className="ec-logs" data-testid="logs-tab">
+      <div className="ec-log-toolbar">
+        <div className="ec-log-toolbar__group">
+          <select
+            className="ec-log-control"
+            value={level}
+            aria-label="Filter log level"
+            data-testid="logs-level-filter"
+            onChange={(e) => setLevel(e.target.value as "all" | LogLevel)}
+          >
+            <option value="all">All levels</option>
+            {LOG_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {logLevelLabel(l)}
+              </option>
+            ))}
+          </select>
+          <input
+            className="ec-log-filter"
+            value={query}
+            placeholder="Filter logs"
+            aria-label="Filter logs"
+            data-testid="logs-text-filter"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <Button kind="ghost" size="sm" onClick={() => setFollow((v) => !v)} data-testid="logs-follow">
+            {follow ? "Pause" : "Follow"}
+          </Button>
+          <Button
+            kind="ghost"
+            size="sm"
+            onClick={() => setClearedBeforeId(records[0]?.id ?? clearedBeforeId)}
+            data-testid="logs-clear"
+          >
+            Clear
+          </Button>
+        </div>
+        <div className="ec-log-toolbar__group ec-log-toolbar__group--right">
+          <span className="ec-dim">{records.length} retained</span>
+          {dropped !== undefined && dropped > 0 && (
+            <Tag size="sm" type="gray" className="ec-tag">
+              {dropped} dropped
+            </Tag>
+          )}
+          <select
+            className="ec-log-control"
+            value={runtimeLevel}
+            aria-label="Temporary runtime log level"
+            data-testid="logs-runtime-level"
+            disabled={!canSetLogLevel}
+            title={
+              canSetLogLevel
+                ? "Set the component runtime log level for five minutes"
+                : "Unavailable until the component advertises cmd/set-log-level"
+            }
+            onChange={(e) => setRuntimeLevel(e.target.value as LogLevel)}
+          >
+            {LOG_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {logLevelLabel(l)}
+              </option>
+            ))}
+          </select>
+          <Button
+            kind="ghost"
+            size="sm"
+            disabled={!canSetLogLevel}
+            title={
+              canSetLogLevel
+                ? "Set the component runtime log level for five minutes"
+                : "Unavailable until the component advertises cmd/set-log-level"
+            }
+            onClick={applyRuntimeLevel}
+            data-testid="logs-apply-level"
+          >
+            Apply 5 min
+          </Button>
+        </div>
+      </div>
+
+      {records.length === 0 ? (
+        <Tile className="ec-empty" data-testid="logs-empty">
+          <p className="ec-dim">
+            No bus-published log records have been received for this component.
+          </p>
+        </Tile>
+      ) : filtered.length === 0 ? (
+        <Tile className="ec-empty" data-testid="logs-filter-empty">
+          <p className="ec-dim">No retained log records match the current filters.</p>
+        </Tile>
+      ) : (
+        <div className="ec-log-tail" ref={listRef} onScroll={onScroll} data-testid="logs-tail">
+          {filtered.map((r) => (
+            <details className={`ec-log-row ec-log-row--${r.level}`} key={r.id} data-testid="logs-row">
+              <summary>
+                <span className="ec-mono ec-tnum ec-log-row__time">
+                  {formatClockTime(r.receivedAt)}
+                </span>
+                <Tag size="sm" type={logLevelTagType(r.level)} className="ec-tag ec-log-row__level">
+                  {logLevelLabel(r.level)}
+                </Tag>
+                <span className="ec-mono ec-log-row__logger">{r.logger}</span>
+                <span className="ec-log-row__message">{r.message}</span>
+              </summary>
+              <div className="ec-log-row__detail">
+                <div className="ec-slist__r">
+                  <span className="ec-slist__k">Instance</span>
+                  <span className="ec-slist__v ec-mono">{r.instance}</span>
+                </div>
+                {r.sourceTimestamp !== undefined && (
+                  <div className="ec-slist__r">
+                    <span className="ec-slist__k">Source time</span>
+                    <span className="ec-slist__v ec-mono">{r.sourceTimestamp}</span>
+                  </div>
+                )}
+                {r.sequence !== undefined && (
+                  <div className="ec-slist__r">
+                    <span className="ec-slist__k">Sequence</span>
+                    <span className="ec-slist__v ec-mono">{r.sequence}</span>
+                  </div>
+                )}
+                {r.thread !== undefined && (
+                  <div className="ec-slist__r">
+                    <span className="ec-slist__k">Thread</span>
+                    <span className="ec-slist__v ec-mono">{r.thread}</span>
+                  </div>
+                )}
+                {r.truncated === true && (
+                  <div className="ec-slist__r">
+                    <span className="ec-slist__k">Record</span>
+                    <span className="ec-slist__v">Truncated by publisher</span>
+                  </div>
+                )}
+                {r.fields !== undefined && (
+                  <pre className="ec-panel-json">{JSON.stringify(r.fields, null, 2)}</pre>
+                )}
+                {r.error !== undefined && (
+                  <pre className="ec-panel-json">{JSON.stringify(r.error, null, 2)}</pre>
+                )}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export interface ComponentDetailViewProps {
   state: ClientState;
   now: number;
@@ -1529,7 +1741,10 @@ export function ComponentDetailView({
   const descriptorEntry = state.descriptions.entriesById[id];
   const descriptorManifest = descriptorEntry?.manifest;
   const panelViewCount = descriptorManifest?.panels?.views.length ?? 0;
+  const canSetLogLevel = hasCommand(descriptorManifest, "set-log-level");
   const metricSeries = customMetricsForComponent(state.metrics.series, detailKey);
+  const logEntry = state.logs.byId[id];
+  const logCount = logEntry?.records.length ?? 0;
   const implementationParts = [
     descriptorManifest?.component?.implementation,
     descriptorManifest?.component?.version,
@@ -1591,7 +1806,7 @@ export function ComponentDetailView({
           <Tab data-testid="tab-config">Configuration</Tab>
           <Tab data-testid="tab-events">Events</Tab>
           <Tab data-testid="tab-metrics">Metrics{metricSeries.length > 0 ? ` · ${metricSeries.length}` : ""}</Tab>
-          <Tab data-testid="tab-logs">Logs</Tab>
+          <Tab data-testid="tab-logs">Logs{logCount > 0 ? ` · ${logCount}` : ""}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel>
@@ -1631,14 +1846,15 @@ export function ComponentDetailView({
           <TabPanel>
             <MetricsTab series={metricSeries} detailKey={detailKey} nowServerMs={nowServerMs} />
           </TabPanel>
-          <TabPanel>
-            <PendingSurface feature="Log tail" needs="the log class surface" testId="phase2-logs">
-              <p className="ec-dim">
-                The UNS <code>log</code> class is one of the six consumer classes, but the console
-                ships no LogStore yet — the mockup&apos;s <span className="ec-mono">cmd/get-log-tail</span>{" "}
-                live-follow lands with the log surface in a later slice.
-              </p>
-            </PendingSurface>
+          <TabPanel className="ec-detail-panel--logs">
+            <LogsTab
+              records={logEntry?.records ?? []}
+              unavailable={logEntry?.unavailable}
+              dropped={logEntry?.dropped}
+              detailKey={detailKey}
+              canSetLogLevel={canSetLogLevel}
+              onInvoke={onInvoke}
+            />
           </TabPanel>
         </TabPanels>
       </Tabs>
@@ -1690,6 +1906,10 @@ export function ConnectedComponentDetailView({
     if (status === "connected") client.subscribeMetrics();
   }, [client, status]);
   useEffect(() => () => client.unsubscribeMetrics(), [client]);
+  useEffect(() => {
+    if (status === "connected") client.subscribeLogs(detailKey, { limit: 500 });
+  }, [client, keyId, status, detailKey]);
+  useEffect(() => () => client.unsubscribeLogs(detailKey), [client, keyId, detailKey]);
 
   return (
     <ComponentDetailView

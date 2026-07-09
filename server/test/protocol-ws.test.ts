@@ -208,6 +208,48 @@ describe("parseClientMessage - the C6 activity family", () => {
     },
   );
 
+  it("accepts subscribe/unsubscribe logs with a component key and optional tail query", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "subscribe-logs",
+          protocolVersion: PROTOCOL_VERSION,
+          key: { device: "gw-01", component: "opcua-adapter", extra: true },
+          limit: 100,
+          levels: ["INFO", "warn", "ERROR", "warn"],
+          sinceId: 12,
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "subscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: { device: "gw-01", component: "opcua-adapter" },
+        limit: 100,
+        levels: ["info", "warn", "error"],
+        sinceId: 12,
+      },
+    });
+
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "unsubscribe-logs",
+          protocolVersion: PROTOCOL_VERSION,
+          key: { device: "gw-01", component: "opcua-adapter" },
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      message: {
+        type: "unsubscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: { device: "gw-01", component: "opcua-adapter" },
+      },
+    });
+  });
+
   it.each([
     ["zero limit", JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 0 })],
     [
@@ -223,6 +265,41 @@ describe("parseClientMessage - the C6 activity family", () => {
       JSON.stringify({ type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: "10" }),
     ],
     ["subscribe-metrics without protocolVersion", JSON.stringify({ type: "subscribe-metrics" })],
+    [
+      "subscribe-logs missing key",
+      JSON.stringify({ type: "subscribe-logs", protocolVersion: PROTOCOL_VERSION }),
+    ],
+    [
+      "subscribe-logs zero limit",
+      JSON.stringify({
+        type: "subscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: { device: "gw-01", component: "opcua-adapter" },
+        limit: 0,
+      }),
+    ],
+    [
+      "subscribe-logs negative sinceId",
+      JSON.stringify({
+        type: "subscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: { device: "gw-01", component: "opcua-adapter" },
+        sinceId: -1,
+      }),
+    ],
+    [
+      "subscribe-logs unknown level",
+      JSON.stringify({
+        type: "subscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: { device: "gw-01", component: "opcua-adapter" },
+        levels: ["info", "banana"],
+      }),
+    ],
+    [
+      "unsubscribe-logs missing key",
+      JSON.stringify({ type: "unsubscribe-logs", protocolVersion: PROTOCOL_VERSION }),
+    ],
   ])("rejects: %s", (_label, raw) => {
     expect(parseClientMessage(raw).ok).toBe(false);
   });

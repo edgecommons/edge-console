@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
-import type { ServerMessage } from "@edgecommons/edge-console-protocol";
+import type { ConsoleLogRecord, ServerMessage } from "@edgecommons/edge-console-protocol";
 import { FleetClient } from "../src/fleet/client";
 import type { SocketLike } from "../src/fleet/client";
 import { T0, alarmSnapshot, consoleAlarm, consoleEvent, key } from "./_fixtures";
@@ -59,13 +59,23 @@ describe("FleetClient - activity subscriptions", () => {
 
     client.subscribeEvents(50);
     client.subscribeAlarms();
+    client.subscribeLogs(KEY, { limit: 100, levels: ["warn", "error"], sinceId: 2 });
     client.ackAlarm("gw-01/opcua-adapter::connection-lost");
     client.unsubscribeEvents();
     client.unsubscribeAlarms();
+    client.unsubscribeLogs(KEY);
 
     expect(sockets[0]!.frames().slice(1)).toEqual([
       { type: "subscribe-events", protocolVersion: PROTOCOL_VERSION, limit: 50 },
       { type: "subscribe-alarms", protocolVersion: PROTOCOL_VERSION },
+      {
+        type: "subscribe-logs",
+        protocolVersion: PROTOCOL_VERSION,
+        key: KEY,
+        limit: 100,
+        levels: ["warn", "error"],
+        sinceId: 2,
+      },
       {
         type: "ack-alarm",
         protocolVersion: PROTOCOL_VERSION,
@@ -73,6 +83,7 @@ describe("FleetClient - activity subscriptions", () => {
       },
       { type: "unsubscribe-events", protocolVersion: PROTOCOL_VERSION },
       { type: "unsubscribe-alarms", protocolVersion: PROTOCOL_VERSION },
+      { type: "unsubscribe-logs", protocolVersion: PROTOCOL_VERSION, key: KEY },
     ]);
     client.stop();
   });
@@ -82,6 +93,7 @@ describe("FleetClient - activity subscriptions", () => {
     // never opened — status is "connecting"
     client.subscribeEvents();
     client.subscribeAlarms();
+    client.subscribeLogs(KEY);
     expect(sockets[0]!.sent).toHaveLength(0);
     client.stop();
   });
@@ -108,6 +120,64 @@ describe("FleetClient - activity subscriptions", () => {
       event: consoleEvent({ id: 2, type: "b-dup" }), // already in the backlog — dropped
     });
     expect(client.getState().events.entries.map((e) => e.type)).toEqual(["c", "b", "a"]);
+    client.stop();
+  });
+
+  it("folds component log snapshots, live pushes, and unavailable states into state", () => {
+    const { client, sockets } = rig();
+    sockets[0]!.open();
+    const first: ConsoleLogRecord = {
+      id: 1,
+      key: KEY,
+      instance: "main",
+      level: "info",
+      logger: "opcua.session",
+      message: "adapter ready",
+      receivedAt: T0,
+    };
+    const second: ConsoleLogRecord = {
+      ...first,
+      id: 2,
+      level: "error",
+      message: "browse failed",
+      receivedAt: T0 + 10,
+    };
+
+    sockets[0]!.frame({
+      type: "logs",
+      protocolVersion: PROTOCOL_VERSION,
+      key: KEY,
+      records: [first],
+      dropped: 3,
+    });
+    expect(client.getState().logs.byId["gw-01/opcua-adapter"]!.records.map((r) => r.message)).toEqual([
+      "adapter ready",
+    ]);
+    expect(client.getState().logs.byId["gw-01/opcua-adapter"]!.dropped).toBe(3);
+
+    sockets[0]!.frame({
+      type: "log",
+      protocolVersion: PROTOCOL_VERSION,
+      key: KEY,
+      records: [second, first],
+      dropped: 4,
+    });
+    expect(client.getState().logs.byId["gw-01/opcua-adapter"]!.records.map((r) => r.message)).toEqual([
+      "browse failed",
+      "adapter ready",
+    ]);
+    expect(client.getState().logs.byId["gw-01/opcua-adapter"]!.dropped).toBe(4);
+
+    sockets[0]!.frame({
+      type: "logs-unavailable",
+      protocolVersion: PROTOCOL_VERSION,
+      key: key("gw-02", "modbus-adapter"),
+      code: "UNAVAILABLE",
+      reason: "no log source",
+    });
+    expect(client.getState().logs.byId["gw-02/modbus-adapter"]!.unavailable).toMatchObject({
+      reason: "no log source",
+    });
     client.stop();
   });
 

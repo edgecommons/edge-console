@@ -24,9 +24,13 @@ per-component topic templates.
 | `evt` | `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
 | `metric` | `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
 | `data` | `ecv1/+/+/+/data/#` | The data plane → the Signals screen (latest value + quality + trend). |
-| `log` | `ecv1/+/+/+/log/#` | Subscribed (part of the six); the console has no Logs UI. |
+| `log` | `ecv1/+/+/+/log/#` | Component log tails. The gateway normalizes `edgecommons.log.v1` records into the Components-page Logs tab. |
 
 `cmd` is **published, never subscribed**, and `app` is not consumed.
+
+The Logs tab requires components to publish the core log bus (`logging.publish.enabled: true`). If a
+component only writes local stdout/files and never emits `log/{level}` records, the console has no log
+records to display for it.
 
 ## Envelope & identity
 
