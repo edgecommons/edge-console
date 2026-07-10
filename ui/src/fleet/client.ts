@@ -31,6 +31,8 @@ import type {
   ConsoleSettings,
   LogLevel,
   ServerMessage,
+  SignalPointSelector,
+  SignalSeriesUpdate,
 } from "@edgecommons/edge-console-protocol";
 import type { LadderOptions } from "./store";
 import { FleetStore } from "./store";
@@ -197,6 +199,8 @@ export class FleetClient {
   private readonly refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private readonly listeners: Array<() => void> = [];
+  /** Observers of live `signal` update batches (R5 — the Signals screen's per-group msg/s meter). */
+  private readonly signalUpdateListeners: Array<(updates: SignalSeriesUpdate[]) => void> = [];
   private stateCache: ClientState | undefined;
 
   constructor(opts: FleetClientOptions) {
@@ -376,13 +380,31 @@ export class FleetClient {
    * server-side interest is per-connection, so the view re-subscribes whenever the
    * connection comes (back) up — the same reconnect story as the others.
    */
-  subscribeSignals(): void {
-    this.sendFrame({ type: "subscribe-signals", protocolVersion: PROTOCOL_VERSION });
+  subscribeSignals(mode?: "summary" | "full"): void {
+    this.sendFrame({
+      type: "subscribe-signals",
+      protocolVersion: PROTOCOL_VERSION,
+      ...(mode !== undefined ? { mode } : {}),
+    });
   }
 
   /** Stop the signal stream (e.g. the Signals view unmounted). Idempotent. */
   unsubscribeSignals(): void {
     this.sendFrame({ type: "unsubscribe-signals", protocolVersion: PROTOCOL_VERSION });
+  }
+
+  /**
+   * Backfill the recent points of named series (R5 `get-signal-points`) — used after a
+   * summary-mode `subscribe-signals` when a group/row expands and its sparkline/trend needs the
+   * bounded history. The gateway answers one `signal-points` frame (found series only). Batched at
+   * the protocol's 200-selector ceiling; a request must carry at least one selector.
+   */
+  getSignalPoints(series: SignalPointSelector[]): void {
+    for (let i = 0; i < series.length; i += 200) {
+      const batch = series.slice(i, i + 200);
+      if (batch.length === 0) continue;
+      this.sendFrame({ type: "get-signal-points", protocolVersion: PROTOCOL_VERSION, series: batch });
+    }
   }
 
   /**
@@ -474,6 +496,19 @@ export class FleetClient {
     return () => {
       const i = this.listeners.indexOf(listener);
       if (i >= 0) this.listeners.splice(i, 1);
+    };
+  }
+
+  /**
+   * Observe live `signal` update batches (R5) — the Signals screen's per-group msg/s meter records
+   * arrival counts here (the state-change {@link subscribe} seam collapses batches, losing the
+   * count). Returns the unsubscribe function.
+   */
+  onSignalUpdate(listener: (updates: SignalSeriesUpdate[]) => void): () => void {
+    this.signalUpdateListeners.push(listener);
+    return () => {
+      const i = this.signalUpdateListeners.indexOf(listener);
+      if (i >= 0) this.signalUpdateListeners.splice(i, 1);
     };
   }
 
@@ -684,6 +719,12 @@ export class FleetClient {
         return;
       case "signal":
         this.signalStore.applyUpdates(msg.updates);
+        for (const listener of [...this.signalUpdateListeners]) listener(msg.updates);
+        this.retries = 0;
+        this.notify();
+        return;
+      case "signal-points":
+        this.signalStore.applyPoints(msg.series);
         this.retries = 0;
         this.notify();
         return;

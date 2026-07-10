@@ -1,14 +1,14 @@
 /**
- * The Signals view (R5) — presentational tests (state in, DOM out, callbacks observed)
- * plus App-level integration (nav mounts + subscribes the signal stream, live frames
- * render rows, the app-bar search filters, Read fires the `sb.read` command, and the
- * Component-Detail "Signals" deep-link scopes the screen). The projection/quality/filter
- * logic itself is covered in `signals-selectors.test.ts`.
+ * The Signals view (R5 — rev-4 mockup): presentational tests (state in, DOM out, callbacks
+ * observed) plus App-level integration (nav mounts + subscribes, live frames render grouped
+ * rows, the app-bar search filters, the expansion links to Component Detail, and Read is gone)
+ * and capability gating (summary subscribe + points backfill vs the full fallback). The
+ * grouping / lag / cascade / meter logic itself is covered in `signals-selectors.test.ts`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PROTOCOL_VERSION } from "@edgecommons/edge-console-protocol";
-import type { ServerMessage, SignalSeriesSnapshot } from "@edgecommons/edge-console-protocol";
+import type { ConsoleSettings, ServerMessage, SignalSeriesSnapshot } from "@edgecommons/edge-console-protocol";
 import App from "../src/App";
 import { SignalsView } from "../src/signals/SignalsView";
 import { FleetClient } from "../src/fleet/client";
@@ -17,6 +17,7 @@ import {
   T0,
   clientState,
   compSnap,
+  consoleSettings,
   deviceSnap,
   fleetView,
   key,
@@ -30,101 +31,228 @@ afterEach(cleanup);
 const PRESS = key("press-gw-01", "opcua-adapter");
 const PACK = key("pack-gw-01", "modbus-adapter");
 
-/** The mockup's three rows + a no-quality bare-scalar signal. */
+/** A small (≤5) two-device fleet across three signal-path groups — groups load expanded. */
 function demoSeries(): SignalSeriesSnapshot[] {
   return [
-    signalSeries(PRESS, "Temp_01", {
-      latest: 72.4,
+    signalSeries(PRESS, "filler/tank_level", {
+      latest: 63.4,
       quality: "GOOD",
+      name: "Filler Tank Level",
+      signalId: "ns=3;i=1021",
+      adapter: "opcua",
+      endpoint: "opc.tcp://192.168.1.180:49320",
+      qualityRaw: "Good (0x00000000)",
+      address: { ns: 3, nodeId: "ns=3;i=1021" },
       receivedAt: T0 - 2000,
-      points: signalPoints([70, 71, 72.4], { quality: "GOOD", startAt: T0 - 4000 }),
+      // OPC-UA-like: the full verbatim pair (+ the folded compat field the wire still sends).
+      sourceTs: "2026-07-10T14:32:07.812Z",
+      serverTs: "2026-07-10T14:32:07.940Z",
+      sourceTimestamp: "2026-07-10T14:32:07.812Z",
+      publishedTs: "2026-07-10T14:32:07.992Z", // lag 0.18 s (published − sourceTs)
+      points: signalPoints([61, 62, 63.4], { quality: "GOOD", startAt: T0 - 4000 }),
     }),
-    signalSeries(PRESS, "Pressure", {
-      latest: 4.1,
+    signalSeries(PRESS, "filler/head_pressure", {
+      latest: 2.06,
+      quality: "GOOD",
+      name: "Fill Head Pressure",
+      receivedAt: T0 - 2000,
+      points: signalPoints([2.0, 2.1, 2.06], { quality: "GOOD", startAt: T0 - 4000 }),
+    }),
+    signalSeries(PACK, "chiller/glycol_temp", {
+      latest: -1.8,
       quality: "UNCERTAIN",
+      name: "Glycol Supply Temp",
+      qualityRaw: "STALE_READ",
+      receivedAt: T0 - 14000,
+      // Modbus-like: serverTs only (Modbus never has a sourceTs); folded compat field = serverTs.
+      serverTs: "2026-07-10T14:32:06.800Z",
+      sourceTimestamp: "2026-07-10T14:32:06.800Z",
+      publishedTs: "2026-07-10T14:32:15.100Z", // lag 8.3 s (published − serverTs, warn)
+      points: signalPoints([-2, -1.9, -1.8], { quality: "UNCERTAIN", startAt: T0 - 16000 }),
+    }),
+    signalSeries(PACK, "line/valve_open", {
+      latest: true, // bool ⇒ no numeric trend
+      quality: "GOOD",
+      name: "Fill Valve Open",
       receivedAt: T0 - 1000,
-      points: signalPoints([4.0, 4.2, 4.1], { quality: "UNCERTAIN", startAt: T0 - 3000 }),
-    }),
-    signalSeries(PACK, "Flow_A", {
-      latest: null,
-      quality: "BAD",
-      receivedAt: T0 - 840_000, // 14 minutes ago
-      points: [{ at: T0 - 840_000, value: null, quality: "BAD" }],
-    }),
-    signalSeries(PRESS, "raw_count", {
-      latest: 5,
-      receivedAt: T0 - 3000,
-      points: signalPoints([3, 4, 5], { startAt: T0 - 5000 }), // no quality token
+      // Legacy-like: no verbatim pair; the folded compat field fell back to the envelope header
+      // (== publishedTs) — the WP-F shape that used to fabricate `lag 0`.
+      sourceTimestamp: "2026-07-10T14:32:14.000Z",
+      publishedTs: "2026-07-10T14:32:14.000Z",
+      points: [{ at: T0 - 1000, value: true, quality: "GOOD" }],
     }),
   ];
 }
 
 function renderView(overrides: Partial<Parameters<typeof SignalsView>[0]> = {}) {
-  const onRead = vi.fn();
+  const onDeviceScopeChange = vi.fn();
   const onComponentScopeChange = vi.fn();
+  const onOpenComponentDetail = vi.fn();
   render(
     <SignalsView
       state={clientState(fleetView([]), { signals: { series: demoSeries() } })}
       now={T0}
       query=""
+      onDeviceScopeChange={onDeviceScopeChange}
       onComponentScopeChange={onComponentScopeChange}
-      onRead={onRead}
+      onOpenComponentDetail={onOpenComponentDetail}
       {...overrides}
     />,
   );
-  return { onRead, onComponentScopeChange };
+  return { onDeviceScopeChange, onComponentScopeChange, onOpenComponentDetail };
 }
 
 describe("SignalsView (presentational)", () => {
-  it("lists a row per signal with the mockup columns (value · quality · trend · age)", () => {
+  it("groups by signal path and renders name-led rows with the mockup columns", () => {
     renderView();
-    const table = screen.getByTestId("signals-table");
-    expect(within(table).getAllByTestId(/^signal-row-/)).toHaveLength(4);
+    // Three path groups (chiller/, filler/, line/) — sorted by label.
+    const groups = screen.getAllByTestId(/^signal-group-/);
+    expect(groups.map((g) => within(g).getByRole("button").textContent)).toEqual(
+      expect.arrayContaining(["▾"]),
+    );
+    expect(screen.getByTestId("signal-group-p:filler")).toBeTruthy();
+    expect(screen.getByTestId("signal-group-p:chiller")).toBeTruthy();
+    expect(screen.getByTestId("signal-group-p:line")).toBeTruthy();
 
-    // GOOD Temp_01: formatted value, a GOOD chip, a sparkline, "2s" age.
-    const temp = screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main Temp_01");
-    expect(within(temp).getByText("72.4")).toBeTruthy();
-    expect(within(temp).getByTestId("quality-good")).toBeTruthy();
-    expect(within(temp).getByTestId("sparkline")).toBeTruthy();
-    expect(within(temp).getByText("press-gw-01 / Temp_01")).toBeTruthy();
-    expect(within(temp).getByTestId("signal-age-press-gw-01/opcua-adapter/main Temp_01").textContent).toBe("2s");
+    // 4 rows across the groups (all expanded — total ≤ 5).
+    expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(4);
 
-    // UNCERTAIN Pressure: a warn chip showing the raw token.
-    const press = screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main Pressure");
-    expect(within(press).getByTestId("quality-uncertain").textContent).toContain("UNCERTAIN");
+    const tank = screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main filler/tank_level");
+    expect(within(tank).getByText("Filler Tank Level")).toBeTruthy(); // name-led
+    expect(within(tank).getByText(/ns=3;i=1021 · data\/filler\/tank_level/)).toBeTruthy(); // id line
+    expect(within(tank).getByText("63.4")).toBeTruthy();
+    expect(within(tank).getByTestId("quality-good")).toBeTruthy();
+    expect(within(tank).getByTestId("sparkline")).toBeTruthy();
+    expect(within(tank).getByTestId("signal-lag-press-gw-01/opcua-adapter/main filler/tank_level").textContent).toBe(
+      "lag 0.18 s",
+    );
 
-    // BAD Flow_A: value-less (em dash), a BAD chip, NO sparkline, "14m" age.
-    const flow = screen.getByTestId("signal-row-pack-gw-01/modbus-adapter/main Flow_A");
-    expect(within(flow).getByTestId("quality-bad")).toBeTruthy();
-    expect(within(flow).queryByTestId("sparkline")).toBeNull();
-    expect(within(flow).getByTestId("signal-age-pack-gw-01/modbus-adapter/main Flow_A").textContent).toBe("14m");
-
-    // A bare-scalar signal with no quality token: an honest em dash, not a faked GOOD.
-    const raw = screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main raw_count");
-    expect(within(raw).getByTestId("quality-none")).toBeTruthy();
+    // A bool signal: no numeric trend (em dash, not a sparkline).
+    const valve = screen.getByTestId("signal-row-pack-gw-01/modbus-adapter/main line/valve_open");
+    expect(within(valve).queryByTestId("sparkline")).toBeNull();
+    expect(within(valve).getByText("true")).toBeTruthy();
   });
 
-  it("honestly flags units / name / limits as pending (not on the data body)", () => {
+  it("renders the over-5s lag warning-toned (Modbus-like: computed from serverTs)", () => {
+    renderView();
+    const table = within(screen.getByTestId("signals-table"));
+    const lag = table.getByTestId("signal-lag-pack-gw-01/modbus-adapter/main chiller/glycol_temp");
+    expect(lag.textContent).toBe("lag 8.3 s");
+    expect(lag.className).toMatch(/ec-lag--warn/);
+  });
+
+  it("a legacy publisher (no verbatim pair) shows 'lag —' even though the folded compat field is present", () => {
+    renderView();
+    const table = within(screen.getByTestId("signals-table"));
+    const lag = table.getByTestId("signal-lag-pack-gw-01/modbus-adapter/main line/valve_open");
+    expect(lag.textContent).toBe("lag —"); // never a fabricated lag 0
+    expect(lag.className).not.toMatch(/ec-lag--warn/);
+  });
+
+  it("has NO Read action anywhere on the screen", () => {
+    renderView();
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
+    expect(screen.queryByTestId(/signal-read-/)).toBeNull();
+  });
+
+  it("flags units / limits as pending (not on the data body)", () => {
     renderView();
     expect(screen.getByTestId("signals-pending-note").textContent).toMatch(/units.*limits pending/i);
   });
 
-  it("shows the Live chip when connected and filters via the app-bar query", () => {
-    const { rerender } = renderWithQuery("");
-    expect(screen.getByTestId("signals-live").textContent).toContain("Live");
-    expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(4);
+  it("shows the quality triage strip and filters on click", () => {
+    renderView();
+    expect(screen.getByTestId("triage-all").textContent).toContain("4");
+    expect(screen.getByTestId("triage-good").textContent).toContain("3");
+    expect(screen.getByTestId("triage-uncertain").textContent).toContain("1");
 
-    rerender("temp");
-    expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(1);
-    expect(screen.getByTestId("signal-filter-count").textContent).toBe("1 of 4 signals");
-  });
-
-  it("scopes to one component and fires Read for a row", () => {
-    const { onRead } = renderView({ componentScope: "pack-gw-01/modbus-adapter" });
+    fireEvent.click(screen.getByTestId("triage-uncertain"));
     const rows = screen.getAllByTestId(/^signal-row-/);
     expect(rows).toHaveLength(1);
-    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Read" }));
-    expect(onRead).toHaveBeenCalledWith(PACK, "Flow_A");
+    expect(within(rows[0]!).getByText("Glycol Supply Temp")).toBeTruthy();
+  });
+
+  it("shows the device dropdown on a multi-device fleet and hides it on a single-device one", () => {
+    const { rerender } = render(
+      <SignalsView
+        state={clientState(fleetView([]), { signals: { series: demoSeries() } })}
+        now={T0}
+        query=""
+        onDeviceScopeChange={vi.fn()}
+        onComponentScopeChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("signals-device")).toBeTruthy();
+
+    rerender(
+      <SignalsView
+        state={clientState(fleetView([]), {
+          signals: { series: [signalSeries(PRESS, "filler/only", { latest: 1 })] },
+        })}
+        now={T0}
+        query=""
+        onDeviceScopeChange={vi.fn()}
+        onComponentScopeChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("signals-device")).toBeNull();
+  });
+
+  it("collapses a group's rows and re-expands them via the header toggle", () => {
+    renderView();
+    // filler/ has 2 rows visible initially.
+    expect(screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main filler/tank_level")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("group-toggle-p:filler"));
+    expect(screen.queryByTestId("signal-row-press-gw-01/opcua-adapter/main filler/tank_level")).toBeNull();
+    // The collapsed header still shows the count rollup.
+    expect(within(screen.getByTestId("signals-table")).getByTestId("group-count-p:filler").textContent).toContain("2");
+    fireEvent.click(screen.getByTestId("group-toggle-p:filler"));
+    expect(screen.getByTestId("signal-row-press-gw-01/opcua-adapter/main filler/tank_level")).toBeTruthy();
+  });
+
+  it("expands a row to its detail panel (identity, address, the four labeled timestamps + lag) and links to Component Detail", () => {
+    const { onOpenComponentDetail } = renderView();
+    const rowId = "press-gw-01/opcua-adapter/main filler/tank_level";
+    fireEvent.click(screen.getByTestId(`signal-expand-${rowId}`));
+    const detail = screen.getByTestId(`signal-detail-${rowId}`);
+    expect(within(detail).getByText("data/filler/tank_level")).toBeTruthy();
+    expect(within(detail).getByTestId(`signal-address-${rowId}`).textContent).toContain("nodeId");
+    // The rev-4 timestamp block: Source ts (measured, verbatim) / Server ts (server refresh,
+    // verbatim) / Published (adapter → bus) / Lag — plus the approved Received (console) row.
+    expect(within(detail).getByTestId(`signal-source-ts-${rowId}`).textContent).toContain("2026-07-10T14:32:07.812Z");
+    expect(within(detail).getByTestId(`signal-server-ts-${rowId}`).textContent).toContain("2026-07-10T14:32:07.940Z");
+    expect(within(detail).getByText("2026-07-10T14:32:07.992Z")).toBeTruthy(); // published
+    expect(within(detail).getByText("console")).toBeTruthy(); // the retained Received row
+    expect(within(detail).getByTestId(`signal-detail-lag-${rowId}`).textContent).toContain("0.18 s");
+
+    fireEvent.click(within(detail).getByTestId(`signal-open-detail-${rowId}`));
+    expect(onOpenComponentDetail).toHaveBeenCalledWith(PRESS);
+  });
+
+  it("the expansion renders em dashes for an absent Source ts (Modbus-like) and both (legacy)", () => {
+    renderView();
+    // Modbus-like: Source ts —, Server ts present.
+    const glycolId = "pack-gw-01/modbus-adapter/main chiller/glycol_temp";
+    fireEvent.click(screen.getByTestId(`signal-expand-${glycolId}`));
+    const glycol = screen.getByTestId(`signal-detail-${glycolId}`);
+    expect(within(glycol).getByTestId(`signal-source-ts-${glycolId}`).textContent).toContain("—");
+    expect(within(glycol).getByTestId(`signal-server-ts-${glycolId}`).textContent).toContain("2026-07-10T14:32:06.800Z");
+    expect(within(glycol).getByTestId(`signal-detail-lag-${glycolId}`).textContent).toContain("8.3 s");
+
+    // Legacy: both verbatim timestamps —, lag —.
+    const valveId = "pack-gw-01/modbus-adapter/main line/valve_open";
+    fireEvent.click(screen.getByTestId(`signal-expand-${valveId}`));
+    const valve = screen.getByTestId(`signal-detail-${valveId}`);
+    expect(within(valve).getByTestId(`signal-source-ts-${valveId}`).textContent).toContain("—");
+    expect(within(valve).getByTestId(`signal-server-ts-${valveId}`).textContent).toContain("—");
+    expect(within(valve).getByTestId(`signal-detail-lag-${valveId}`).textContent).toContain("—");
+  });
+
+  it("renders the per-group msg/s rollup when a meter is wired", () => {
+    renderView({ rateFor: () => 48.2 });
+    expect(within(screen.getByTestId("signals-table")).getByTestId("group-rate-p:filler").textContent).toBe(
+      "48.2 msg/s",
+    );
   });
 
   it("renders the connecting empty state with no signals", () => {
@@ -133,8 +261,8 @@ describe("SignalsView (presentational)", () => {
         state={clientState(fleetView([]), { signals: { series: [] }, status: "connecting" })}
         now={T0}
         query=""
+        onDeviceScopeChange={vi.fn()}
         onComponentScopeChange={vi.fn()}
-        onRead={vi.fn()}
       />,
     );
     expect(screen.getByTestId("signals-empty")).toBeTruthy();
@@ -147,8 +275,8 @@ describe("SignalsView (presentational)", () => {
         state={clientState(fleetView([]), { signals: { series: demoSeries() }, status: "reconnecting" })}
         now={T0}
         query=""
+        onDeviceScopeChange={vi.fn()}
         onComponentScopeChange={vi.fn()}
-        onRead={vi.fn()}
       />,
     );
     expect(screen.getByText("Gateway connection lost — reconnecting")).toBeTruthy();
@@ -156,17 +284,69 @@ describe("SignalsView (presentational)", () => {
   });
 });
 
-/** Re-render helper that flips only the query prop (the app-bar filter path). */
-function renderWithQuery(initial: string) {
-  const props = {
-    state: clientState(fleetView([]), { signals: { series: demoSeries() } }),
-    now: T0,
-    onComponentScopeChange: vi.fn(),
-    onRead: vi.fn(),
-  };
-  const { rerender: raw } = render(<SignalsView {...props} query={initial} />);
-  return { rerender: (q: string) => raw(<SignalsView {...props} query={q} />) };
-}
+describe("SignalsView — collapse-default + paging at scale", () => {
+  function bigGroup(n: number): SignalSeriesSnapshot[] {
+    return Array.from({ length: n }, (_, i) =>
+      signalSeries(PRESS, `filler/s${String(i).padStart(3, "0")}`, {
+        latest: i,
+        quality: "GOOD",
+        points: signalPoints([i], { quality: "GOOD" }),
+      }),
+    );
+  }
+
+  it("loads groups collapsed past 5 signals, then pages the expanded rows (first 50, +200)", () => {
+    render(
+      <SignalsView
+        state={clientState(fleetView([]), { signals: { series: bigGroup(52) } })}
+        now={T0}
+        query=""
+        onDeviceScopeChange={vi.fn()}
+        onComponentScopeChange={vi.fn()}
+      />,
+    );
+    // Collapsed by default (52 > 5) — no rows, header shows the count.
+    expect(screen.queryAllByTestId(/^signal-row-/)).toHaveLength(0);
+    expect(within(screen.getByTestId("signals-table")).getByTestId("group-count-p:filler").textContent).toContain(
+      "52",
+    );
+
+    // Expand → first 50 rows + a "Show 2 more" row.
+    fireEvent.click(screen.getByTestId("group-toggle-p:filler"));
+    expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(50);
+    const more = screen.getByTestId("signal-more-p:filler");
+    expect(more.textContent).toContain("Show 2 more");
+
+    fireEvent.click(within(more).getByRole("button"));
+    expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(52);
+  });
+
+  it("a search auto-expands the matching groups", () => {
+    const { rerender } = render(
+      <SignalsView
+        state={clientState(fleetView([]), { signals: { series: bigGroup(52) } })}
+        now={T0}
+        query=""
+        onDeviceScopeChange={vi.fn()}
+        onComponentScopeChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryAllByTestId(/^signal-row-/)).toHaveLength(0); // collapsed
+    rerender(
+      <SignalsView
+        state={clientState(fleetView([]), { signals: { series: bigGroup(52) } })}
+        now={T0}
+        query="filler/s001"
+        onDeviceScopeChange={vi.fn()}
+        onComponentScopeChange={vi.fn()}
+      />,
+    );
+    // The matching group is force-expanded; only the matching row shows.
+    const rows = screen.getAllByTestId(/^signal-row-/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("data-testid")).toBe("signal-row-press-gw-01/opcua-adapter/main filler/s001");
+  });
+});
 
 // ---------------------------------------------------------------- App integration
 
@@ -202,37 +382,32 @@ function appRig() {
 }
 
 describe("App — Signals screen (R5) integration", () => {
-  it("mounts on nav (subscribes the signal stream on the shared socket), renders live rows, search + Read wired", () => {
+  it("subscribes on nav, renders grouped rows, search filters, no sb.read, and unsubscribes on leave", () => {
     const { sockets, frames } = appRig();
     act(() => sockets[0]!.onopen?.());
 
     fireEvent.click(screen.getByRole("link", { name: /Signals/ }));
-    expect(frames().at(-1)).toMatchObject({ type: "subscribe-signals" });
+    expect(frames().some((f) => f.type === "subscribe-signals")).toBe(true);
+    // No capability advertised ⇒ a full subscribe (no `mode`).
+    expect(frames().filter((f) => f.type === "subscribe-signals").every((f) => f.mode === undefined)).toBe(true);
 
-    // A live `signals` snapshot renders the rows without any refetch.
     act(() => {
-      const msg: ServerMessage = {
-        type: "signals",
-        protocolVersion: PROTOCOL_VERSION,
-        series: demoSeries(),
-      };
+      const msg: ServerMessage = { type: "signals", protocolVersion: PROTOCOL_VERSION, series: demoSeries() };
       sockets[0]!.onmessage?.(JSON.stringify(msg));
     });
     expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(4);
 
-    // The app-bar search filters the signals live.
-    fireEvent.change(screen.getByTestId("appbar-search"), { target: { value: "flow" } });
+    fireEvent.change(screen.getByTestId("appbar-search"), { target: { value: "glycol" } });
     expect(screen.getAllByTestId(/^signal-row-/)).toHaveLength(1);
     fireEvent.change(screen.getByTestId("appbar-search"), { target: { value: "" } });
 
-    // Read fires an sb.read command on the SAME socket (no second dial).
-    fireEvent.click(screen.getAllByRole("button", { name: "Read" })[0]!);
-    expect(sockets).toHaveLength(1);
-    expect(frames().some((f) => f.type === "invoke-command" && f.verb === "sb.read")).toBe(true);
+    // No command surface on this screen at all.
+    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
 
-    // Leaving unsubscribes.
     fireEvent.click(screen.getByRole("link", { name: /Overview/ }));
     expect(frames().at(-1)).toMatchObject({ type: "unsubscribe-signals" });
+    // Never issued a southbound read command.
+    expect(frames().some((f) => f.type === "invoke-command" && f.verb === "sb.read")).toBe(false);
   });
 
   it("deep-links from Component Detail scoped to that component", () => {
@@ -245,28 +420,48 @@ describe("App — Signals screen (R5) integration", () => {
         snapshot: snapshot([deviceSnap("press-gw-01", [compSnap({ key: PRESS })])]),
       };
       sockets[0]!.onmessage?.(JSON.stringify(snap));
-      // Signals for two different components arrive on the wire.
-      const sig: ServerMessage = {
-        type: "signals",
-        protocolVersion: PROTOCOL_VERSION,
-        series: demoSeries(),
-      };
+      const sig: ServerMessage = { type: "signals", protocolVersion: PROTOCOL_VERSION, series: demoSeries() };
       sockets[0]!.onmessage?.(JSON.stringify(sig));
     });
 
-    // Components → select the leaf → inline detail → click the "Signals" deep-link.
     fireEvent.click(screen.getByRole("link", { name: /Components/ }));
     fireEvent.click(screen.getByTestId("tree-node-press-gw-01/opcua-adapter"));
     fireEvent.click(screen.getByTestId("detail-open-signals"));
 
-    // Scoped to press-gw-01/opcua-adapter: only its three signals, not pack-gw-01's Flow_A.
-    // (Order is the store's component-id-then-signal localeCompare: Pressure, raw_count, Temp_01.)
+    // Scoped to press-gw-01/opcua-adapter: only its two filler signals, not pack-gw-01's rows.
     const rows = screen.getAllByTestId(/^signal-row-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
-      "signal-row-press-gw-01/opcua-adapter/main Pressure",
-      "signal-row-press-gw-01/opcua-adapter/main raw_count",
-      "signal-row-press-gw-01/opcua-adapter/main Temp_01",
+      "signal-row-press-gw-01/opcua-adapter/main filler/head_pressure",
+      "signal-row-press-gw-01/opcua-adapter/main filler/tank_level",
     ]);
-    expect(screen.queryByTestId("signal-row-pack-gw-01/modbus-adapter/main Flow_A")).toBeNull();
+    expect(screen.queryByTestId("signal-row-pack-gw-01/modbus-adapter/main chiller/glycol_temp")).toBeNull();
+  });
+
+  it("uses summary mode + backfills points on expand when the gateway advertises the capability", () => {
+    const { sockets, frames } = appRig();
+    const settings: ConsoleSettings = consoleSettings({ capabilities: { signalsSummary: true } });
+    act(() => {
+      sockets[0]!.onopen?.();
+      sockets[0]!.onmessage?.(
+        JSON.stringify({ type: "settings", protocolVersion: PROTOCOL_VERSION, settings } satisfies ServerMessage),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: /Signals/ }));
+    // Capability present ⇒ a summary subscribe is issued.
+    expect(frames().some((f) => f.type === "subscribe-signals" && f.mode === "summary")).toBe(true);
+
+    // A summary snapshot omits `points`; a small (≤5) fleet loads expanded, so the visible rows
+    // trigger a points backfill.
+    act(() => {
+      const summary = demoSeries().map((s) => {
+        const { points: _points, ...rest } = s;
+        return rest;
+      });
+      sockets[0]!.onmessage?.(
+        JSON.stringify({ type: "signals", protocolVersion: PROTOCOL_VERSION, series: summary } satisfies ServerMessage),
+      );
+    });
+    expect(frames().some((f) => f.type === "get-signal-points")).toBe(true);
   });
 });

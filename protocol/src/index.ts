@@ -256,6 +256,15 @@ export type FleetDelta =
       instances: InstanceStatus[];
     }
   | {
+      /** The component's expected keepalive cadence changed after a cfg announcement. */
+      type: "cadence-changed";
+      seq: number;
+      at: number;
+      key: ComponentKey;
+      expectedIntervalSecs: number;
+      cadenceSource: CadenceSource;
+    }
+  | {
       type: "value-updated";
       seq: number;
       at: number;
@@ -531,6 +540,19 @@ export interface SignalPoint {
   value: unknown;
   /** Data-quality token (`GOOD`/`UNCERTAIN`/`BAD`) when the body carried one. */
   quality?: string;
+  /**
+   * The sample's MEASURED timestamp — the canonical `SouthboundSignalUpdate` sample's `sourceTs`,
+   * VERBATIM (no `serverTs` fallback; e.g. the OPC UA SourceTimestamp). Distinct from `at`
+   * (console receipt); absent when the publisher sent none (Modbus never has one; legacy
+   * `{value, quality}` / bare-scalar bodies carry neither).
+   */
+  sourceTs?: string;
+  /**
+   * The protocol server's REFRESH timestamp — the canonical sample's `serverTs`, verbatim (the
+   * OPC UA ServerTimestamp, or the Modbus register-read completion stamp). Absent when the
+   * publisher sent none.
+   */
+  serverTs?: string;
 }
 
 /**
@@ -549,8 +571,44 @@ export interface SignalSeriesSnapshot {
   quality?: string;
   /** Console receipt time of the latest sample (server-clock ms epoch). */
   receivedAt: number;
+  /** The folded compat timestamp (`sourceTs ?? serverTs ?? envelope header`) — WP-D semantics,
+   *  unchanged. Display/compat only; lag uses the verbatim pair below. */
   sourceTimestamp?: string;
-  points: SignalPoint[];
+  /**
+   * The LATEST valid sample's measured timestamp (`sourceTs`), verbatim — set or cleared on every
+   * ingest (a per-sample fact, unlike the latest-wins identity metadata). Lets a summary-mode row
+   * compute publish lag without points.
+   */
+  sourceTs?: string;
+  /**
+   * The LATEST valid sample's protocol-server refresh timestamp (`serverTs`), verbatim — set or
+   * cleared on every ingest (e.g. the OPC UA ServerTimestamp / Modbus read-completion stamp).
+   */
+  serverTs?: string;
+  /** The canonical `SouthboundSignalUpdate` `signal.name` — the human display label, latest-wins. */
+  name?: string;
+  /** The canonical `signal.id` — the stable protocol-native id (e.g. an OPC UA NodeId), latest-wins. */
+  signalId?: string;
+  /** The canonical `signal.address` — protocol-native addressing, verbatim/opaque (any JSON shape). */
+  address?: unknown;
+  /** The southbound `device.adapter` (e.g. `opcua`/`modbus`), latest-wins. */
+  adapter?: string;
+  /** The southbound `device.endpoint` (e.g. `opc.tcp://…`), latest-wins. */
+  endpoint?: string;
+  /** The newest sample's native status code (`qualityRaw`), latest-wins. */
+  qualityRaw?: string;
+  /**
+   * The envelope header timestamp of the latest publish (`header.timestamp`), latest-wins — the
+   * adapter→bus publish time. Distinct from `sourceTimestamp` (the sample's measured time); the
+   * Signals screen renders publish lag as `publishedTs − (sourceTs ?? serverTs)`.
+   */
+  publishedTs?: string;
+  /**
+   * The bounded recent series (ascending time, newest last). Omitted entirely in the summary
+   * snapshot (`subscribe-signals` `mode: "summary"`) — a summary series carries only latest +
+   * metadata, with points backfilled on demand via `get-signal-points` / accumulated live.
+   */
+  points?: SignalPoint[];
 }
 
 /** One fresh sample for a signal series (a live `signal` push): bounded append, latest-wins. */
@@ -560,6 +618,31 @@ export interface SignalSeriesUpdate {
   signal: string;
   point: SignalPoint;
   sourceTimestamp?: string;
+  /** The envelope header timestamp of this publish (`header.timestamp`), when present. */
+  publishedTs?: string;
+  /** The series label — present only on a batch that first sets or re-labels the series. */
+  name?: string;
+  /** The canonical signal id — present only on a batch that first sets or re-labels the series. */
+  signalId?: string;
+}
+
+/**
+ * One selector in a `get-signal-points` request: the `(component, instance, signal)` series whose
+ * recent points the client wants backfilled (after a summary-mode subscribe). `instance`/`signal`
+ * are non-empty; a request carries 1..=200 selectors.
+ */
+export interface SignalPointSelector {
+  key: ComponentKey;
+  instance: string;
+  signal: string;
+}
+
+/** One entry in a `signal-points` reply: the selector echoed back with its resolved recent points. */
+export interface SignalPointsResult {
+  key: ComponentKey;
+  instance: string;
+  signal: string;
+  points: SignalPoint[];
 }
 
 /**
@@ -627,6 +710,12 @@ export interface RuntimeAttributes {
    * cpu; absent (no sparkline, bare "—"/latest) otherwise.
    */
   cpuSeries?: number[];
+  /**
+   * A small bounded recent memory-MB series (oldest→newest), accumulated from the `sys` memory
+   * measure — the Memory-cell/tile sparkline, mirroring {@link cpuSeries} exactly. Present only
+   * for components that emit `sys` memory; absent (no sparkline, bare "—"/latest) otherwise.
+   */
+  memorySeries?: number[];
   /** Console receipt time of the most recent contributing sample (server-clock ms). */
   receivedAt: number;
   sourceTimestamp?: string;
@@ -746,6 +835,30 @@ export interface ConsoleSettings {
     maxTimeoutMs: number;
     /** Per-verb deadline overrides (ms), order-stable by verb. */
     verbTimeouts: { verb: string; ms: number }[];
+  };
+  /**
+   * Optional gateway capability advertisement — the UI feature-detects here rather than off the
+   * protocol version (all R5 signal additions are additive). `signalsSummary` present + true means
+   * the gateway serves the `subscribe-signals` summary mode + `get-signal-points` backfill; absent
+   * (or false) makes the Signals screen fall back to a full subscribe (works against any gateway).
+   */
+  capabilities?: {
+    signalsSummary?: boolean;
+  };
+  /** Launch-latched process/runtime tuning (`console.runtime`). */
+  runtime?: {
+    /** Configured Tokio worker thread count (`console.runtime.workerThreads`). */
+    workerThreads: number;
+    /** Effective Tokio worker thread count used by the running process. */
+    effectiveWorkerThreads: number;
+    /** Configured glibc malloc arena cap (`console.runtime.mallocArenaMax`), when set. */
+    mallocArenaMax?: number;
+    /** Effective `MALLOC_ARENA_MAX` observed by the running process, when exported. */
+    effectiveMallocArenaMax?: number;
+    /** Gateway event broadcast ring capacity; lagged clients are resynchronized. */
+    eventBufferCapacity?: number;
+    /** True when changes require a process restart. */
+    launchLatched?: boolean;
   };
   /** The FleetModel + activity-store retention caps (`console.cache`/`.events`/`.metrics`). */
   retention: {
@@ -1021,8 +1134,14 @@ export type ClientMessage =
       args?: Record<string, unknown>;
     }
   // R0 data-plane signals: snapshot reply + live pushes, per-connection interest (C6 shape).
-  | { type: "subscribe-signals"; protocolVersion: number }
+  //  - `mode` (R5, optional): `"summary"` asks the snapshot to OMIT each series' `points` (latest +
+  //    metadata only — the fleet-scale reply); absent or `"full"` is today's every-series-with-points
+  //    reply. Gated client-side on `settings.capabilities.signalsSummary` (see {@link ConsoleSettings}).
+  | { type: "subscribe-signals"; protocolVersion: number; mode?: "summary" | "full" }
   | { type: "unsubscribe-signals"; protocolVersion: number }
+  // R5 points backfill: fetch the recent points for named series (after a summary subscribe). The
+  // gateway answers ONE `signal-points` frame carrying the found series in request order.
+  | { type: "get-signal-points"; protocolVersion: number; series: SignalPointSelector[] }
   // R0 runtime attributes: snapshot reply + live pushes, per-connection interest.
   | { type: "subscribe-attributes"; protocolVersion: number }
   | { type: "unsubscribe-attributes"; protocolVersion: number }
@@ -1144,6 +1263,9 @@ export type ServerMessage =
   // R0 signals (data plane): the `subscribe-signals` reply (every series) + live pushes.
   | { type: "signals"; protocolVersion: number; series: SignalSeriesSnapshot[] }
   | { type: "signal"; protocolVersion: number; updates: SignalSeriesUpdate[] }
+  // R5 points backfill: the reply to `get-signal-points` — the requested series (found only), in
+  // request order, each with its resolved recent points.
+  | { type: "signal-points"; protocolVersion: number; series: SignalPointsResult[] }
   // R0 runtime attributes: the `subscribe-attributes` reply (every component) + live pushes.
   | { type: "attributes"; protocolVersion: number; components: RuntimeAttributes[] }
   | { type: "attribute"; protocolVersion: number; updates: RuntimeAttributes[] }
@@ -1354,10 +1476,52 @@ export function parseClientMessage(raw: string): ParsedClientMessage {
       }
       return { ok: true, message: { type: "unsubscribe-logs", protocolVersion, key } };
     }
-    case "subscribe-signals":
-      return { ok: true, message: { type: "subscribe-signals", protocolVersion } };
+    case "subscribe-signals": {
+      let mode: "summary" | "full" | undefined;
+      if (obj.mode !== undefined) {
+        if (obj.mode !== "summary" && obj.mode !== "full") {
+          return { ok: false, reason: "subscribe-signals mode must be 'summary' or 'full'" };
+        }
+        mode = obj.mode;
+      }
+      return {
+        ok: true,
+        message: {
+          type: "subscribe-signals",
+          protocolVersion,
+          ...(mode !== undefined ? { mode } : {}),
+        },
+      };
+    }
     case "unsubscribe-signals":
       return { ok: true, message: { type: "unsubscribe-signals", protocolVersion } };
+    case "get-signal-points": {
+      if (!Array.isArray(obj.series) || obj.series.length < 1 || obj.series.length > 200) {
+        return { ok: false, reason: "get-signal-points series must be an array of 1..=200 selectors" };
+      }
+      const series: SignalPointSelector[] = [];
+      for (const raw of obj.series) {
+        if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+          return { ok: false, reason: "get-signal-points series entries must be objects" };
+        }
+        const entry = raw as Record<string, unknown>;
+        const key = parseComponentKey(entry.key);
+        if (key === undefined) {
+          return {
+            ok: false,
+            reason: "get-signal-points selector key must be {device, component} non-empty strings",
+          };
+        }
+        if (typeof entry.instance !== "string" || entry.instance === "") {
+          return { ok: false, reason: "get-signal-points selector instance must be a non-empty string" };
+        }
+        if (typeof entry.signal !== "string" || entry.signal === "") {
+          return { ok: false, reason: "get-signal-points selector signal must be a non-empty string" };
+        }
+        series.push({ key, instance: entry.instance, signal: entry.signal });
+      }
+      return { ok: true, message: { type: "get-signal-points", protocolVersion, series } };
+    }
     case "subscribe-attributes":
       return { ok: true, message: { type: "subscribe-attributes", protocolVersion } };
     case "unsubscribe-attributes":

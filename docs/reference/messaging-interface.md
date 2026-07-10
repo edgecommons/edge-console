@@ -51,7 +51,9 @@ Normal messages use the EdgeCommons protobuf envelope whose diagnostic JSON shap
 - `tags` is verbatim business metadata; `_`-prefixed keys (e.g. the bridge hop tag `_relay`) are
   system-reserved and ignored for grouping/business logic.
 - `header.timestamp`, when present, is kept as `sourceTimestamp` (display only — it **never** drives
-  staleness; the console's own receipt time does).
+  staleness; the console's own receipt time does). On the `data` class it is additionally surfaced
+  verbatim as `publishedTs` on signal series and update entries, so a client can compute publish
+  lag against the sample timestamps in the adapter's own clock domain.
 
 An envelope the console cannot attribute (no parseable `identity`) is counted (`missing-identity`) and
 dropped — never fatal.
@@ -80,19 +82,43 @@ reserved classes; the console never hand-addresses them.
 
 ### The per-device republish broadcast (late-join rehydration)
 
-On first sight of a device (and for already-known devices at startup, and on a Configuration **Refresh**),
-the console publishes a fire-and-forget `cmd` pair to the reserved `_bcast` pseudo-component:
+The console publishes fire-and-forget `cmd` broadcasts to the reserved `_bcast` pseudo-component, asking
+already-running components on a device to re-announce (the platform uses no broker retain):
 
 ```text
 ecv1/{device}/_bcast/main/cmd/republish-state
 ecv1/{device}/_bcast/main/cmd/republish-cfg
 ```
 
-These ask already-running components on the device to re-announce `state`+`cfg` (the platform uses no
-broker retain). They are answered only if the device-side edgecommons runtime handles the `_bcast`
-broadcast; the periodic `state` keepalive reconverges liveness within one interval regardless, while the
-`cfg` of a long-running component may not refresh until it re-announces. No `reply_to`, no direct reply; a
-hostile/invalid device token or a publish failure is logged and skipped.
+- **Discovery** — on first sight of a device (and for already-known devices at startup) the console fires
+  **both** verbs, rehydrating that device's `state` and `cfg` at once.
+- **Configuration Refresh** — the browser's `refresh-config` action fires **only** `republish-cfg`. A
+  config refresh re-pulls configuration without touching liveness observation: it never re-triggers the
+  `state` keepalive, so it cannot reset any component's staleness clock.
+
+They are answered only if the device-side edgecommons runtime handles the `_bcast` broadcast; the periodic
+`state` keepalive reconverges liveness within one interval regardless, while the `cfg` of a long-running
+component may not refresh until it re-announces. No `reply_to`, no direct reply; a hostile/invalid device
+token or a publish failure is logged and skipped.
+
+### The self-reported clock fault (`evt/warning/clock-step`)
+
+When the gateway observes its own wall clock stepping backward past
+`console.clock.stepAlarmThresholdMs` (see [configuration.md](configuration.md)), it publishes a
+canonical event on its **own** UNS identity:
+
+```text
+ecv1/{own-device}/{console-component}/main/evt/warning/clock-step
+body: { "message": "gateway wall clock stepped backward <n> ms; receipt timeline clamped (see console.clock)",
+        "stepMs": <n>, "active": true }
+```
+
+The envelope is indistinguishable from any component's event, so it round-trips through the
+console's own `evt` subscription and raises the `clock-step` alarm through the normal
+event/alarm pipeline — one observation per backward window. After
+`console.clock.clearAfterQuietSecs` without a step, the console publishes the same channel with
+`"active": false`, clearing the alarm into history. Publishing is fire-and-forget; a failure is
+logged and never blocks ingestion.
 
 ## The command write path
 

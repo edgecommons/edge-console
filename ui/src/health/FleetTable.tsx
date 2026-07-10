@@ -133,6 +133,38 @@ function CpuCell({
   );
 }
 
+/**
+ * The Memory cell: the latest MB with a leading recent-trend sparkline when the component has
+ * reported a memory series, else the bare "—" — the exact {@link CpuCell} treatment mirrored
+ * (`memorySeries` rides the same runtime `sys` heartbeat metric as the CPU series).
+ */
+function MemoryCell({
+  attrs,
+  component,
+}: {
+  attrs?: RuntimeAttributes;
+  component: string;
+}): React.JSX.Element {
+  if (attrs?.memoryMb === undefined) return <Dash />;
+  const series = attrs.memorySeries;
+  const points: MetricPoint[] =
+    series !== undefined ? series.map((value, at) => ({ at, value })) : [];
+  return (
+    <span className="ec-cpu-cell">
+      {points.length > 1 && (
+        <Sparkline
+          points={points}
+          width={52}
+          height={16}
+          ariaLabel={`${component} memory trend`}
+          formatValue={(v) => `${Math.round(v)} MB`}
+        />
+      )}
+      <span className="ec-tnum">{Math.round(attrs.memoryMb)} MB</span>
+    </span>
+  );
+}
+
 function ComponentRow({
   comp,
   attrs,
@@ -164,11 +196,7 @@ function ComponentRow({
           <CpuCell attrs={attrs} component={comp.key.component} />
         </TableCell>
         <TableCell>
-          {attrs?.memoryMb !== undefined ? (
-            <span className="ec-tnum">{Math.round(attrs.memoryMb)} MB</span>
-          ) : (
-            <Dash />
-          )}
+          <MemoryCell attrs={attrs} component={comp.key.component} />
         </TableCell>
         <TableCell>
           <ConnCell attrs={attrs} />
@@ -249,11 +277,7 @@ function ComponentCard({
         <div className="ec-kv">
           <dt>Memory</dt>
           <dd>
-            {attrs?.memoryMb !== undefined ? (
-              <span className="ec-tnum">{Math.round(attrs.memoryMb)} MB</span>
-            ) : (
-              <Dash />
-            )}
+            <MemoryCell attrs={attrs} component={comp.key.component} />
           </dd>
         </div>
         <div className="ec-kv">

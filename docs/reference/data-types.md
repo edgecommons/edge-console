@@ -38,7 +38,8 @@ connection.
 | `subscribe-metrics` / `unsubscribe-metrics` | — | Metric snapshot then `metric` pushes / stop. |
 | `subscribe-logs` | `key`, `limit?`, `levels?`, `sinceId?` | Ask for one component's retained log tail (newest-first), optionally capped/filtered, then live `log` pushes. |
 | `unsubscribe-logs` | `key` | Stop log pushes for that component. Idempotent. |
-| `subscribe-signals` / `unsubscribe-signals` | — | Data-plane signal snapshot then `signal` pushes / stop. |
+| `subscribe-signals` / `unsubscribe-signals` | `mode?` | Data-plane signal snapshot then `signal` pushes / stop. `mode` is `"full"` (default) or `"summary"` — summary series omit `points`. |
+| `get-signal-points` | `series: {key, instance, signal}[]` | Fetch the points rings for 1–200 named series (the summary-mode backfill). Answered by one `signal-points` frame. |
 | `subscribe-attributes` / `unsubscribe-attributes` | — | Runtime-attribute snapshot then `attribute` pushes / stop. |
 | `subscribe-alarms` / `unsubscribe-alarms` | — | Alarm snapshot then live `alarms` replace-frames / stop. |
 | `ack-alarm` | `alarmId` | Toggle console-side acknowledgement of an alarm. |
@@ -60,7 +61,8 @@ snapshot/backlog self-heals the client store (no client-side resubscribe bookkee
 | `events` / `event` | `events: ConsoleEvent[]` / `event: ConsoleEvent` | Backlog (newest-first) / one live arrival. |
 | `metrics` / `metric` | `series: MetricSeriesSnapshot[]` / `updates: MetricSeriesUpdate[]` | Snapshot / live sample batches. |
 | `logs` / `log` / `logs-unavailable` | `key`, `records`, `dropped?` / `key`, `records`, `dropped?` / `key`, `code`, `reason` | Component log tail snapshot / live record batch / unavailable notice. |
-| `signals` / `signal` | `series: SignalSeriesSnapshot[]` / `updates: SignalSeriesUpdate[]` | Data-plane snapshot / live samples. |
+| `signals` / `signal` | `series: SignalSeriesSnapshot[]` / `updates: SignalSeriesUpdate[]` | Data-plane snapshot (full or summary per the subscribe `mode`) / live samples. |
+| `signal-points` | `series: {key, instance, signal, points}[]` | The reply to `get-signal-points`: found series only, in request order. |
 | `attributes` / `attribute` | `components: RuntimeAttributes[]` / `updates: RuntimeAttributes[]` | Runtime-attribute snapshot / live updates. |
 | `alarms` | `snapshot: AlarmSnapshot` | The reply to `subscribe-alarms` **and** every later change (one replace-frame). |
 | `command-result` | `requestId`, `key`, `verb`, `ok`, `result?`, `error?`, `elapsedMs` | The single answer to an `invoke-command`. Never closes the connection. |
@@ -104,6 +106,10 @@ transition rules. `CadenceSource` = `"default" | "cfg"` records where the expect
 | `tags` | object? | Envelope tags, verbatim. `_`-prefixed keys are system-reserved (never business context). |
 | `receivedAt` | number | Console receipt time (ms epoch) — the authoritative LKV timestamp. |
 | `sourceTimestamp` | string? | The publisher's `header.timestamp` claim (display only — never drives staleness). |
+
+Receipt times (`receivedAt` everywhere, and the point `at` in metric/signal series) are stamped on
+the gateway's own monotonic timeline — non-decreasing per gateway, even when the host wall clock
+steps backward.
 
 ### `InstanceStatus` (per-connection reachability)
 
@@ -205,19 +211,76 @@ gateway has no log source wired or policy forbids the subscription.
 
 ### Signals (data plane) — `SignalSeriesSnapshot` / `SignalSeriesUpdate`
 
-One series per `(component, instance, signal)`: `latest` (verbatim value), `quality?`, `receivedAt`, and a
-bounded `points: {at, value, quality?}[]` (default `DEFAULT_SIGNAL_SERIES_POINTS = 60`).
-`extractSignalSample(body)` splits a `data` body leniently: an object with a `value` field yields that
-value (+ its `quality`); any other object yields the whole body as the value; a scalar body is the value
-with no quality.
+One series per `(component, instance, signal)`:
+
+```ts
+interface SignalSeriesSnapshot {
+  key: ComponentKey;
+  instance: string;
+  signal: string;            // the data channel
+  latest: unknown;           // the newest sample's value, verbatim
+  quality?: string;          // the newest sample's normalized quality (GOOD | BAD | UNCERTAIN)
+  receivedAt: number;
+  sourceTimestamp?: string;  // folded display fallback: sourceTs ?? serverTs ?? envelope timestamp
+  sourceTs?: string;         // the newest sample's measured/device timestamp, verbatim
+  serverTs?: string;         // the newest sample's protocol-server refresh timestamp, verbatim
+  name?: string;             // signal.name — the human label
+  signalId?: string;         // signal.id — the canonical stable id
+  address?: unknown;         // signal.address — protocol-native, opaque
+  adapter?: string;          // device.adapter
+  endpoint?: string;         // device.endpoint
+  qualityRaw?: string;       // the newest sample's native status code
+  publishedTs?: string;      // the latest publish's envelope header timestamp, verbatim
+  points?: { at: number; value: unknown; quality?: string; sourceTs?: string; serverTs?: string }[];
+}
+```
+
+`points` is a bounded ring (60). Each point's `at` is the console receipt time — one consistent
+time base for trend rendering. `sourceTs` (measured/device time) and `serverTs` (protocol-server
+refresh time) ride each point verbatim when the publisher provided them — a publisher that only
+stamps `serverTs` yields points with `serverTs` and no `sourceTs`. The series-level
+`sourceTs`/`serverTs` describe the newest sample and clear when it carries neither. `publishedTs`
+is the adapter's publish-time envelope timestamp — with the verbatim pair it lets a client
+compute publish lag (`publishedTs − (sourceTs ?? serverTs)`) entirely in the adapter's clock
+domain; a series with neither sample timestamp has no computable lag. `sourceTimestamp` is the
+folded display fallback.
+
+`subscribe-signals` accepts `mode: "full" | "summary"` (default full). A **full** snapshot carries
+every series' `points` ring; a **summary** snapshot serves the same series objects with the
+`points` key omitted. A summary-mode client backfills trends on demand with `get-signal-points`
+(1–200 `{key, instance, signal}` selectors); the `signal-points` reply carries the requested
+series' rings — found series only, in request order. Live `signal` pushes stream points
+regardless of mode. Servers that support summary mode advertise it via
+`settings.capabilities.signalsSummary`.
+
+A `data` body is split into samples by shape:
+
+- **Canonical `SouthboundSignalUpdate`** (the adapter contract): a body carrying a `samples` array
+  yields one point per element that is an object with a `value` key — `value` verbatim (including
+  `null`), `quality`, `qualityRaw`, and per-sample timestamps all optional. Invalid elements are
+  skipped; a batch with no valid samples changes nothing. The last valid sample becomes `latest` /
+  `quality` / `qualityRaw`. The series metadata fields (`name`, `signalId`, `address`, `adapter`,
+  `endpoint`) are captured from the body's `signal{ id, name, address }` and
+  `device{ adapter, endpoint }` blocks, latest-wins.
+- **Plain object** (no `samples`): one sample — the `value` field if present, otherwise the whole
+  body as the value, with `quality` when present.
+- **Bare value** (non-object body): one sample, the body itself, no quality.
+
+A live `signal` frame carries one update entry per ingested sample:
+`{ key, instance, signal, point, sourceTimestamp?, publishedTs?, name?, signalId? }` —
+`sourceTimestamp` is the per-sample folded fallback (`sourceTs ?? serverTs ??` envelope
+timestamp), `publishedTs` is the envelope header timestamp verbatim (omitted when the publisher
+sent none), and `name`/`signalId` appear only on a batch that sets or changes the series label,
+so a client that subscribed after the snapshot can still label the series.
 
 ### Runtime attributes — `RuntimeAttributes`
 
 A latest-wins projection over the `metric` class the Overview columns and Component-Detail Health tab
 render: `cpuPercent?`, `memoryMb?`, `threads?`, `fds?` (the `sys.*` measures), `connectionState?`,
 `readErrors?`, `writeErrors?` (adapter `southbound_health`), `platform?` (from `tags.platform` when a
-component advertises it), and `cpuSeries?` (the Overview CPU sparkline). All optional — a component that
-never emitted a measure omits it (the UI shows "—").
+component advertises it), and `cpuSeries?` / `memorySeries?` (30-point drop-oldest sparkline rings fed
+by each `sys` heartbeat's `cpu_usage` / `memory_usage`). All optional — a component that never emitted a
+measure omits it (the UI shows "—").
 
 ### Alarms — `ConsoleAlarm` / `AlarmCounts` / `AlarmSnapshot`
 
@@ -233,8 +296,10 @@ clear) its components' alarms. `AlarmCounts` = `{ critical, warning, active, con
   "Edge node" and "Edge bus" tiles.
 - **`ConsoleSettings`** (the `settings` frame): the console's own effective policy, read-only — `rbac`
   (roles + allow/deny + default), `connection` (identity + WS listener + `servesUi`), `staleness`,
-  `commands` (incl. the bridge TTL ceiling), and `retention` (all the cache caps). This is a curated
-  projection of the parsed config, never the raw document.
+  `commands` (incl. the bridge TTL ceiling), `retention` (all the cache caps), and `capabilities`
+  (feature flags the client detects on — `signalsSummary: true` marks summary-mode signal
+  subscribe + `get-signal-points` support). This is a curated projection of the parsed config,
+  never the raw document.
 
 ## Commands
 

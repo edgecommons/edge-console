@@ -16,6 +16,7 @@
 import type {
   ComponentKey,
   SignalPoint,
+  SignalPointsResult,
   SignalSeriesSnapshot,
   SignalSeriesUpdate,
 } from "@edgecommons/edge-console-protocol";
@@ -108,10 +109,45 @@ export class SignalStore {
       else delete state.quality;
       if (update.sourceTimestamp !== undefined) state.sourceTimestamp = update.sourceTimestamp;
       else delete state.sourceTimestamp;
-      state.points.push(point);
+      // WP-G verbatim pair: the series-level sourceTs/serverTs describe the LATEST sample — set
+      // or cleared on every fold from the point's own pair (per-sample facts, like `quality`;
+      // NOT latest-wins-retained like the identity metadata below).
+      if (point.sourceTs !== undefined) state.sourceTs = point.sourceTs;
+      else delete state.sourceTs;
+      if (point.serverTs !== undefined) state.serverTs = point.serverTs;
+      else delete state.serverTs;
+      // R5 latest-wins metadata: publish timestamp always latest-wins; name/signalId ride only a
+      // (re)labelling batch, so keep the prior label when this batch omits them.
+      if (update.publishedTs !== undefined) state.publishedTs = update.publishedTs;
+      if (update.name !== undefined) state.name = update.name;
+      if (update.signalId !== undefined) state.signalId = update.signalId;
+      // A summary-mode series has no `points` array yet — accumulate live samples into one.
+      (state.points ??= []).push(point);
       if (state.points.length > this.opts.maxSeriesPoints) state.points.shift(); // drop-oldest
     }
     this.version++;
+  }
+
+  /**
+   * Fold a `signal-points` reply (R5 backfill): replace the recent points of each named series
+   * with the fetched, bounded series. A result for an unknown series (never seen in the summary
+   * snapshot) is ignored — the store only backfills series it already tracks.
+   */
+  applyPoints(results: SignalPointsResult[]): void {
+    if (results.length === 0) return;
+    let changed = false;
+    for (const result of results) {
+      const id = seriesId(`${componentKeyId(result.key)}/${result.instance}`, result.signal);
+      const state = this.series.get(id);
+      if (state === undefined) continue;
+      const points = result.points.map((p) => ({ ...p }));
+      if (points.length > this.opts.maxSeriesPoints) {
+        points.splice(0, points.length - this.opts.maxSeriesPoints); // keep the newest cap
+      }
+      state.points = points;
+      changed = true;
+    }
+    if (changed) this.version++;
   }
 
   /** The latest record for one series, or `undefined` (nothing reported yet). */
@@ -148,6 +184,18 @@ function cloneSeries(s: SignalSeriesSnapshot): SignalSeriesSnapshot {
     ...(s.quality !== undefined ? { quality: s.quality } : {}),
     receivedAt: s.receivedAt,
     ...(s.sourceTimestamp !== undefined ? { sourceTimestamp: s.sourceTimestamp } : {}),
-    points: s.points.map((p) => ({ ...p })),
+    // WP-G verbatim latest-sample timestamps (set-or-cleared per ingest, server-side).
+    ...(s.sourceTs !== undefined ? { sourceTs: s.sourceTs } : {}),
+    ...(s.serverTs !== undefined ? { serverTs: s.serverTs } : {}),
+    // R5 series metadata (all optional, latest-wins) — carried verbatim into the client fold.
+    ...(s.name !== undefined ? { name: s.name } : {}),
+    ...(s.signalId !== undefined ? { signalId: s.signalId } : {}),
+    ...(s.address !== undefined ? { address: s.address } : {}),
+    ...(s.adapter !== undefined ? { adapter: s.adapter } : {}),
+    ...(s.endpoint !== undefined ? { endpoint: s.endpoint } : {}),
+    ...(s.qualityRaw !== undefined ? { qualityRaw: s.qualityRaw } : {}),
+    ...(s.publishedTs !== undefined ? { publishedTs: s.publishedTs } : {}),
+    // Summary-mode series omit `points` entirely — start an empty ring the live/backfill folds grow.
+    points: (s.points ?? []).map((p) => ({ ...p })),
   };
 }

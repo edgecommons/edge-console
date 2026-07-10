@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTRIBUTES_FRESH_FALLBACK_MS,
   alarmsForComponent,
+  attributesFresh,
   componentDetailPath,
   componentFullPath,
   connectionStateCheck,
@@ -199,5 +201,25 @@ describe("detailUptimeSecs", () => {
       uptimeAnchorAt: T0 - 10_000,
     });
     expect(detailUptimeSecs(comp, T0)).toBe(100);
+  });
+});
+
+describe("attributesFresh (the Health tiles' Live-chit semantics — fresh, not ever-reported)", () => {
+  it("fresh within 3× the expected heartbeat interval, stale beyond (boundary inclusive)", () => {
+    // 5 s interval ⇒ a 15 s window.
+    expect(attributesFresh(T0 - 14_999, 5, T0)).toBe(true);
+    expect(attributesFresh(T0 - 15_000, 5, T0)).toBe(true);
+    expect(attributesFresh(T0 - 15_001, 5, T0)).toBe(false);
+  });
+
+  it("falls back to a 60 s window when the interval is unknown or non-positive", () => {
+    expect(ATTRIBUTES_FRESH_FALLBACK_MS).toBe(60_000);
+    expect(attributesFresh(T0 - 59_000, undefined, T0)).toBe(true);
+    expect(attributesFresh(T0 - 61_000, undefined, T0)).toBe(false);
+    expect(attributesFresh(T0 - 59_000, 0, T0)).toBe(true); // non-positive interval ⇒ fallback
+  });
+
+  it("never fresh with no attribute record at all", () => {
+    expect(attributesFresh(undefined, 5, T0)).toBe(false);
   });
 });

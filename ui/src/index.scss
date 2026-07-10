@@ -1516,38 +1516,422 @@ body {
   gap: 0.5rem;
 }
 
-/* ============ signals screen (R5 — mockup #screen-signals) ============ */
-// The data-plane browser is a lighter table than the 9-col Overview; let it use the
-// full width and only scroll on genuinely narrow viewports.
+/* ============ signals screen (R5 — signals-r5-redesign.html, rev 4) ============ */
+// The data-plane browser is grouped by signal path; a lighter table than the 9-col Overview.
 .ec-signals-tablewrap table {
   min-width: 44rem;
 }
-// The owning component, shown dim beside the "{device} / {signal}" primary label.
-.ec-signal-owner {
-  margin-left: 0.5rem;
-  font-size: 0.75rem;
+
+// ---- quality triage strip (live counts that also filter) ----
+.ec-triage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
 }
-// The trend sparkline cell: vertically centered, fixed height so rows stay even.
-.ec-signal-trend {
-  .ec-spark {
-    display: block;
+.ec-qchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--cds-text-primary);
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  border-radius: 999px;
+  padding: 0.3125rem 0.875rem;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--cds-border-strong);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
   }
 }
-.ec-signal-latest .ec-tnum {
-  font-size: 0.9375rem;
+.ec-qchip--sel {
+  border-color: var(--cds-border-interactive);
+  box-shadow: inset 0 0 0 1px var(--cds-border-interactive);
 }
-.ec-signal-actioncell {
-  text-align: right;
-  white-space: nowrap;
+.ec-qchip__n {
+  font-variant-numeric: tabular-nums;
+  color: var(--cds-text-secondary);
+  font-weight: 400;
 }
-// The honest "pending" note in the filter row (units / name / limits not on the data body).
+.ec-qsw {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  flex: none;
+}
+.ec-qsw--good {
+  background: var(--cds-support-success);
+}
+.ec-qsw--unc {
+  background: var(--cds-support-warning);
+}
+.ec-qsw--bad {
+  background: var(--cds-support-error);
+}
+.ec-qsw--none {
+  background: var(--cds-text-secondary);
+  opacity: 0.5;
+}
+
+// ---- filter row ----
+.ec-signals-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.ec-signals-filters__spacer {
+  flex: 1;
+}
+.ec-collapse-all {
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--cds-link-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+// The honest "pending" note in the filter row (units / limits not on the data body).
 .ec-signals__pending {
-  margin-left: auto;
   font-style: italic;
 
   code {
     font-style: normal;
   }
+}
+
+// ---- group header rows (sticky) ----
+.ec-sig-group td {
+  background: var(--cds-layer-accent);
+  border-top: 1px solid var(--cds-border-strong);
+  padding: 0.5rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.ec-sig-ghead {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+.ec-sig-gtoggle {
+  font: inherit;
+  font-size: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--cds-text-secondary);
+  padding: 0.125rem;
+
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 1px;
+  }
+}
+.ec-sig-gname {
+  font-family: var(--ec-font-mono, monospace);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.ec-sig-gcount {
+  color: var(--cds-text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.ec-sig-groll {
+  display: inline-flex;
+  gap: 0.375rem;
+}
+.ec-gpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.6563rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  border-radius: 999px;
+  padding: 0.125rem 0.5625rem;
+  white-space: nowrap;
+}
+.ec-gpill--bad {
+  color: var(--cds-text-on-color, #fff);
+  background: var(--cds-support-error);
+}
+.ec-gpill--unc {
+  color: var(--cds-text-primary);
+  background: var(--cds-support-warning);
+}
+.ec-sig-gstats {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.875rem;
+  font-family: var(--ec-font-mono, monospace);
+  font-size: 0.72rem;
+  color: var(--cds-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+// ---- "show more" paging row ----
+.ec-sig-more td {
+  padding: 0.5rem 1rem 0.75rem 2.125rem;
+  color: var(--cds-text-secondary);
+  font-size: 0.78rem;
+}
+.ec-sig-more-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cds-link-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ---- signal rows (severity edge stripes) ----
+.ec-sig {
+  border-left: 3px solid transparent;
+}
+.ec-sig--uncertain {
+  border-left-color: var(--cds-support-warning);
+}
+.ec-sig--bad {
+  border-left-color: var(--cds-support-error);
+}
+.ec-sig-namecell {
+  padding-left: 2.125rem;
+}
+.ec-sig-expand {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+
+  &:focus-visible {
+    outline: 2px solid var(--cds-focus);
+    outline-offset: 2px;
+  }
+}
+.ec-sig-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.ec-sig-nm {
+  font-weight: 650;
+}
+.ec-sig-nm--fallback {
+  font-family: var(--ec-font-mono, monospace);
+  font-weight: 500;
+}
+.ec-sig-exp {
+  color: var(--cds-text-secondary);
+  font-size: 0.7rem;
+  margin-right: 0.375rem;
+}
+.ec-sig-id {
+  font-family: var(--ec-font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+.ec-sig-owner {
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+.ec-sig-inst {
+  font-family: var(--ec-font-mono, monospace);
+  border: 1px solid var(--cds-border-subtle);
+  border-radius: 999px;
+  padding: 0 0.375rem;
+  margin-left: 0.25rem;
+  font-size: 0.6875rem;
+}
+.ec-sig-latest .ec-latest {
+  font-family: var(--ec-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 1.0625rem;
+}
+.ec-sig-latest .ec-latest--boolean,
+.ec-sig-latest .ec-latest--string,
+.ec-sig-latest .ec-latest--json {
+  font-size: 0.875rem;
+}
+.ec-sig-trend .ec-spark {
+  display: block;
+}
+.ec-upd {
+  font-family: var(--ec-font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ec-lag {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--cds-text-secondary);
+}
+.ec-lag--warn {
+  color: var(--cds-text-error, var(--cds-support-error));
+  font-weight: 600;
+}
+
+// ---- expanded detail row ----
+.ec-sig-detail td {
+  background: var(--cds-layer-accent);
+  padding: 1.25rem 1rem 1.375rem 2.125rem;
+  border-left: 3px solid var(--cds-border-interactive);
+}
+.ec-sig-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(14rem, 1fr) minmax(17rem, 1.2fr);
+  gap: 1.5rem;
+}
+@media (max-width: 56rem) {
+  .ec-sig-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ec-sig-dsec h4 {
+  margin: 0 0 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cds-text-secondary);
+}
+.ec-sig-kv {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+
+  dt {
+    color: var(--cds-text-secondary);
+    margin: 0;
+  }
+  dd {
+    margin: 0;
+    font-family: var(--ec-font-mono, monospace);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+  }
+}
+.ec-sig-kv--sans {
+  font-family: var(--cds-font-family, inherit) !important;
+  font-size: 0.8125rem;
+}
+.ec-sig-addr {
+  font-family: var(--ec-font-mono, monospace);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  background: var(--cds-layer);
+  border: 1px solid var(--cds-border-subtle);
+  border-radius: 6px;
+  padding: 0.5rem 0.625rem;
+  margin-top: 0.5rem;
+  white-space: pre;
+  overflow-x: auto;
+}
+.ec-sig-statrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.125rem;
+  margin-top: 0.5rem;
+  font-family: var(--ec-font-mono, monospace);
+  font-size: 0.72rem;
+  color: var(--cds-text-secondary);
+  font-variant-numeric: tabular-nums;
+
+  b {
+    color: var(--cds-text-primary);
+    font-weight: 600;
+  }
+}
+.ec-sig-detail-actions {
+  margin-top: 1rem;
+}
+.ec-linkish {
+  color: var(--cds-link-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ---- mobile card list (follows the grouping) ----
+.ec-sig-cardgroup {
+  border: 1px solid var(--cds-border-subtle);
+  background: var(--cds-layer);
+}
+.ec-sig-cardgroup__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: var(--cds-layer-accent);
+  border: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ec-sig-cardgroup__body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+.ec-sig-card {
+  border-left: 3px solid transparent;
+}
+.ec-sig-card--uncertain {
+  border-left-color: var(--cds-support-warning);
+}
+.ec-sig-card--bad {
+  border-left-color: var(--cds-support-error);
+}
+.ec-sig-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.625rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
 }
 
 /* ============ components screen (R2 — mockup #screen-components) ============ */

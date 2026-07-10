@@ -7,7 +7,7 @@ see the [how-to guides](../how-to-guides.md); for the wire protocols, see
 
 ## Config source
 
-The console is a standard edgecommons TypeScript component (`com.mbreissi.edgecommons.EdgeConsole`; UNS component
+The console is a standard edgecommons Rust component (`com.mbreissi.edgecommons.EdgeConsole`; UNS component
 token `edge-console`). It reads one JSON document from `-c/--config`, defaulting by platform:
 `HOST` → `FILE`, `GREENGRASS` → `GG_CONFIG`, `KUBERNETES` → `CONFIGMAP`. The console's own knobs live
 under **`component.global.console`** (a permissive subtree); the sibling sections (`messaging`,
@@ -84,6 +84,28 @@ library's own `HeartbeatConfig` parsing), else `defaultIntervalSecs`.
 | `defaultTail` | number | `500` | Default `subscribe-logs` response size when the client does not ask for a limit. |
 | `maxTail` | number | `2000` | Hard cap on a single `subscribe-logs` response. |
 
+## `component.global.console.clock` — clock-fault detection
+
+| Key | Type | Default | Definition |
+|-----|------|---------|-----------|
+| `stepAlarmThresholdMs` | number | `250` | A wall-clock reading at least this far behind the gateway's receipt timeline is a backward clock step. One backward window raises one `clock-step` observation; the console publishes it as `evt/warning/clock-step` on its own identity, which raises the `clock-step` alarm through the normal event pipeline. |
+| `clearAfterQuietSecs` | number | `600` | After this many seconds without a backward step, the console publishes the clearing event (`active: false`), resolving the alarm into history. |
+
+Receipt timestamps are always clamped onto the gateway's own monotonic timeline regardless of
+these settings; the settings govern only when a step is *reported*. NTP slews stay under 128 ms,
+so the default threshold only fires on unambiguous clock trouble (VM/hypervisor time steps).
+
+## `component.global.console.runtime` — process runtime tuning
+
+| Key | Type | Default | Definition |
+|-----|------|---------|-----------|
+| `workerThreads` | number | `4` | Tokio worker thread count for the Rust gateway process. This is launch-latched: changing it requires restarting the process with `EDGECONSOLE_WORKER_THREADS` set to the same value before launch. |
+| `mallocArenaMax` | number | `2` | Caps the glibc allocator's per-thread arenas. The gateway's Rust heap uses the mimalloc allocator (which returns freed memory to the OS), so this bounds only any non-Rust / C-library allocations on Linux/glibc deployments, and only when exported as `MALLOC_ARENA_MAX` before the process starts (launch-latched). |
+| `eventBufferCapacity` | number | `512` | Capacity of the gateway's internal broadcast ring for recent live events. This ring contains full JSON event payloads for connected WebSocket sessions; lower values reduce retained heap. If a client falls behind this buffer, the gateway sends a fresh fleet snapshot and live traffic continues. Values are clamped to `16..4096`. |
+
+The Settings screen reports both configured and effective runtime values. If they differ, the
+gateway is running with the process-start environment, not the newly loaded component config.
+
 ## `component.global.console.rbac` — command authorization
 
 | Key | Type | Default | Definition |
@@ -119,6 +141,8 @@ Default policy:
 - Missing/malformed `console` section or field ⇒ its default (never a hard failure).
 - Numbers must be finite and positive; ports must be 1–65535; timeouts are truncated to integers and
   clamped to the bridge TTL; the staleness trio must be strictly increasing (else all-defaults).
+- Runtime knobs are launch-latched: the config declares desired values, while the process applies
+  `EDGECONSOLE_WORKER_THREADS` and `MALLOC_ARENA_MAX` from its startup environment.
 - The expected keepalive interval per component: **its `cfg` value ▸ `defaultIntervalSecs`**.
 
 ## Identity & the UNS device tree (for the console itself)
@@ -174,6 +198,9 @@ keep it out of the fleet it watches. The console's dynamic grouping renders **wh
         "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 },
         "logs":      { "maxRecords": 5000, "maxPerComponent": 1000,
                        "defaultTail": 500, "maxTail": 2000 },
+        "clock":     { "stepAlarmThresholdMs": 250, "clearAfterQuietSecs": 600 },
+        "runtime":   { "workerThreads": 4, "mallocArenaMax": 2,
+                       "eventBufferCapacity": 512 },
         "rbac":      { "defaultRole": "viewer",
                        "roles": { "operator": { "allow": ["*"], "deny": ["reboot"] },
                                   "viewer":   { "allow": ["ping", "get-configuration"] } } },

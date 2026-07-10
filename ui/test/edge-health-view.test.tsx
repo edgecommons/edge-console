@@ -370,6 +370,27 @@ describe("Overview — R1: console-self tile, Edge-bus tile, alarm notes, table-
     expect(within(screen.getByTestId("group-line=packaging")).getByText(/pack-gw-01 \(HOST\)/)).toBeTruthy();
   });
 
+  it("renders the Memory sparkline where a memory series exists — the exact CPU treatment mirrored (WP-J)", () => {
+    const withMem = clientState(view, {
+      attributes: attributesView([
+        runtimeAttrs(key("press-gw-01", "opcua-adapter"), {
+          cpuPercent: 12,
+          memoryMb: 210,
+          cpuSeries: [10, 12, 9, 14, 11],
+          memorySeries: [180, 195, 200, 205, 210],
+          platform: "GREENGRASS",
+        }),
+      ]),
+    });
+    render(<EdgeHealthView state={withMem} now={NOW} />);
+    const opcua = screen.getByTestId("component-row-press-gw-01/opcua-adapter");
+    const sparks = within(opcua).getAllByTestId("sparkline");
+    expect(sparks).toHaveLength(2); // CPU + Memory, same cell treatment
+    expect(sparks[0]!.getAttribute("aria-label")).toContain("cpu trend");
+    expect(sparks[1]!.getAttribute("aria-label")).toContain("memory trend");
+    expect(within(opcua).getByText("210 MB")).toBeTruthy();
+  });
+
   it("keeps Capabilities honestly blank (Phase-2) alongside the R1 additions", () => {
     render(<EdgeHealthView state={state} now={NOW} />);
     expect(screen.getByTestId("capabilities-press-gw-01/opcua-adapter").textContent).toBe("—");

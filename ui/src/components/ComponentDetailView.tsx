@@ -62,6 +62,7 @@ import { ConfigInspector } from "../configreview/ConfigInspector";
 import type { HealthCheck } from "./detail-selectors";
 import {
   alarmsForComponent,
+  attributesFresh,
   componentDetailPath,
   connectionStateCheck,
   detailSubtitleParts,
@@ -1111,6 +1112,10 @@ function HealthTab({
   nowServerMs: number;
 }): React.JSX.Element {
   const cpuSeries = attrs?.cpuSeries;
+  const memorySeries = attrs?.memorySeries;
+  // "Live" means FRESH (receivedAt within 3× the expected heartbeat interval), not ever-reported —
+  // stale attributes keep showing their value, without the chit. CPU and Memory identically.
+  const attrsLive = attributesFresh(attrs?.receivedAt, comp.expectedIntervalSecs, nowServerMs);
   const hasDisk =
     attrs?.diskTotalGb !== undefined ||
     attrs?.diskUsedGb !== undefined ||
@@ -1159,8 +1164,8 @@ function HealthTab({
         <Tile className="ec-tile">
           <div className="ec-tile__label">
             CPU{" "}
-            {attrs?.cpuPercent !== undefined && (
-              <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled}>
+            {attrs?.cpuPercent !== undefined && attrsLive && (
+              <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled} data-testid="cpu-live-chit">
                 Live
               </Tag>
             )}
@@ -1181,15 +1186,33 @@ function HealthTab({
           </div>
         </Tile>
         <Tile className="ec-tile">
-          <div className="ec-tile__label">Memory</div>
-          <div className="ec-tile__num ec-tile__num--md ec-tnum">
-            {attrs?.memoryMb !== undefined ? (
-              <>
-                {Math.round(attrs.memoryMb)}
-                <small>MB</small>
-              </>
-            ) : (
-              <span className="ec-dim">—</span>
+          <div className="ec-tile__label">
+            Memory{" "}
+            {attrs?.memoryMb !== undefined && attrsLive && (
+              <Tag size="sm" type="blue" className="ec-tag" renderIcon={CircleFilled} data-testid="memory-live-chit">
+                Live
+              </Tag>
+            )}
+          </div>
+          <div className="ec-tile__busrow">
+            <div className="ec-tile__num ec-tile__num--md ec-tnum">
+              {attrs?.memoryMb !== undefined ? (
+                <>
+                  {Math.round(attrs.memoryMb)}
+                  <small>MB</small>
+                </>
+              ) : (
+                <span className="ec-dim">—</span>
+              )}
+            </div>
+            {memorySeries !== undefined && memorySeries.length > 1 && (
+              <Sparkline
+                points={memorySeries.map((value, at) => ({ at, value }))}
+                width={80}
+                height={28}
+                ariaLabel={`${comp.key.component} memory trend`}
+                formatValue={(v) => `${Math.round(v)} MB`}
+              />
             )}
           </div>
         </Tile>
@@ -1848,6 +1871,7 @@ export function ComponentDetailView({
           </TabPanel>
           <TabPanel className="ec-detail-panel--logs">
             <LogsTab
+              key={id}
               records={logEntry?.records ?? []}
               unavailable={logEntry?.unavailable}
               dropped={logEntry?.dropped}

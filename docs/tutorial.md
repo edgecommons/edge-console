@@ -12,21 +12,22 @@ There are two paths. Start with **Path A** (the demo) to learn the UI in two min
 
 ## Path A — See every screen with the demo gateway (no broker, no components)
 
-The demo gateway runs the **real** server classes (fleet model, config/event/metric/signal/attribute
+The demo gateway runs the legacy TypeScript parity-oracle server classes (fleet model, config/event/metric/signal/attribute
 stores, the WebSocket gateway) over a synthetic fleet that exercises the whole liveness ladder, redacted
 `cfg` announcements, a live event stream, moving metric series, and a fake command responder. Only the
 MQTT edge is bypassed.
 
 ### 1. Prerequisites
 
-- Node 20+ (Node 22+ for the WebSocket round-trip tests) and npm.
+- Node 20+ (Node 22+ for the WebSocket round-trip tests), npm, and Rust.
 - The sibling `edgecommons` TypeScript library built at `../core/libs/ts` (the console depends on
   `@edgecommons/edgecommons`). From the console repo root:
 
 ```bash
 npm run link:lib     # generates the gitignored local/edgecommons workspace stub -> ../core/libs/ts
+npm run link:rust    # generates the gitignored Rust crate/proto links -> ../core/libs/rust
 npm install
-npm run build        # builds protocol -> server -> ui
+npm run build        # builds protocol -> ui -> Rust edge-console-gateway
 ```
 
 ### 2. Start the demo gateway
@@ -75,8 +76,12 @@ component returns **TIMEOUT**.
 
 - **Events & Alarms** — the live, newest-first feed; alarms carry an Active/Ack lifecycle (try **Ack**).
 - **Metrics** — schema-free component metrics with latest values and trends.
-- **Signals** — the data-plane table: latest value, quality, a trend sparkline, and how long ago each
-  updated.
+- **Signals** — the data-plane browser, grouped by signal path. Each row is name-led (the canonical
+  signal name, with the channel as a mono fallback) and carries the latest value, its data quality (the
+  native status code on hover), a trend sparkline, and its receipt freshness over a publish-lag line
+  (`publishedTs − sourceTs`, warning-toned above 5 s). Collapsed group headers still surface bad/uncertain
+  pills, the group's msg/s, and its freshest update. Filter by quality, device, and component, or search;
+  a row expands to its identity, address, timestamps, larger trend, and a link to Component Detail.
 - **Components** — select a component and use the embedded Health / Metrics / Configuration / Events /
   Logs tabs. Logs appear when the component publishes `edgecommons.log.v1` records on the UNS `log` class.
 - **Site Topology** — a derived connectivity graph.
@@ -91,7 +96,7 @@ the WebSocket wire to the browser — only the broker was simulated.
 
 ## Path B — Run against a real site broker
 
-Now point the real server at a live UNS. You need a **site broker** (an MQTT broker that a `uns-bridge`
+Now point the real gateway at a live UNS. You need a **site broker** (an MQTT broker that a `uns-bridge`
 relays each device's traffic into) with at least one component publishing.
 
 ### 1. A broker + a component
@@ -108,25 +113,24 @@ or two scaffolded edgecommons skeletons publishing. Any broker the bridge feeds 
 "messaging": { "local": { "host": "localhost", "port": 1884, "clientId": "edge-console" } }
 ```
 
-### 3. Run the server
+### 3. Run the gateway
 
 The console is a standard edgecommons component — the same CLI shape as any adapter. Give it a **thing name
 of its own** so it does not appear as a device under the fleet it is watching:
 
 ```bash
-node server/dist/main.js \
+target/release/edge-console-gateway \
   --platform HOST --transport MQTT ./test-configs/config.json \
   -c FILE ./test-configs/config.json \
   -t site-console
 ```
 
-You should see it log its identity, then `edge-console ingress subscribed:` with the six wildcards, then
-`edge-console ws gateway listening on 0.0.0.0:8443/ws`.
+You should see it log the six subscribed wildcards, then the Rust gateway listening on `0.0.0.0:8443`.
 
 ### 4. Open the UI
 
 ```bash
-npm run dev -w ui                    # http://localhost:5173 (proxies /ws -> the server on 8443)
+npm run dev -w ui                    # http://localhost:5173 (proxies /ws -> the gateway on 8443)
 ```
 
 Every publishing component appears within one keepalive interval (~5 s). The Overview table groups them

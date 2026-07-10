@@ -7,21 +7,23 @@ For concepts see [explanation.md](explanation.md); for exhaustive options see [r
 
 ## Build the workspace
 
-The repo is an npm workspace of three packages — `protocol` (the shared WS types),
-`server` (the Node backend), and `ui` (the Carbon/React front end):
+The repo contains the shared TypeScript protocol, the Carbon/React UI, the official Rust
+gateway, and a legacy TypeScript server retained as a parity oracle:
 
 ```bash
 npm run link:lib     # dev only: satisfy @edgecommons/edgecommons from the sibling ../core/libs/ts
+npm run link:rust    # dev only: satisfy the Rust gateway from sibling ../core/libs/rust
 npm install
-npm run build        # protocol -> server -> ui (order matters; server + ui import protocol)
+npm run build        # protocol -> ui -> Rust edge-console-gateway
+cargo test -p edge-console-gateway
 npm test             # server + ui unit suites (fake bus/socket, injected clock — no live IO)
 npm run coverage     # vitest v8 coverage, thresholds 90/90/85/80 (the ecosystem gate)
 npm run lint         # eslint (flat config) over the whole workspace
 ```
 
-`npm run link:lib` generates the **gitignored** `local/edgecommons` stub — the npm analog of the bridge's
-`.cargo/config.toml` paths override. CI skips it and resolves the published `@edgecommons/edgecommons` from
-GitHub Packages instead (via the committed `.npmrc`).
+`npm run link:lib` generates the **gitignored** `local/edgecommons` stub. `npm run link:rust`
+generates the **gitignored** Rust crate/proto links for the gateway. CI points both scripts at the
+checked-out core repo.
 
 ---
 
@@ -50,7 +52,7 @@ See [reference — configuration](reference/configuration.md#config-source) for 
 ## Deploy on HOST (a plain process)
 
 ```bash
-node server/dist/main.js \
+target/release/edge-console-gateway \
   --platform HOST --transport MQTT ./messaging.json \
   -c FILE ./config.json \
   -t site-console
@@ -65,7 +67,7 @@ node server/dist/main.js \
 
 ## Deploy self-contained (serve the built UI from the server — no Vite, no nginx)
 
-Set `component.global.console.ws.webRoot` to the built `ui/dist` and the server serves its own UI as
+Set `component.global.console.ws.webRoot` to the built `ui/dist` and the gateway serves its own UI as
 static files on the **same** origin as the WebSocket — one process, no sidecar:
 
 ```jsonc
@@ -76,7 +78,7 @@ static files on the **same** origin as the WebSocket — one process, no sidecar
 
 ```bash
 npm run build                         # produces ui/dist
-node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
+target/release/edge-console-gateway --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
 # Browse straight to http://<host>:8443/ — index.html + hashed assets served by the console itself.
 ```
 
@@ -96,8 +98,8 @@ config from a mounted **ConfigMap**, identity from the **Downward API**, stdout 
 health probe, `SIGTERM` graceful shutdown, and a pull `/metrics`:
 
 ```bash
-# build + push the server image, then apply your manifests
-node dist/main.js --platform KUBERNETES        # -c defaults to CONFIGMAP on this platform
+# build + push the gateway image, then apply your manifests
+edge-console-gateway --platform KUBERNETES        # -c defaults to CONFIGMAP on this platform
 ```
 
 Two console-specific rules:
@@ -192,6 +194,28 @@ component's history. See [reference — configuration](reference/configuration.m
 
 ---
 
+## Tune gateway process memory/runtime
+
+Declare the desired Rust gateway runtime under `component.global.console.runtime`:
+
+```jsonc
+"console": {
+  "runtime": { "workerThreads": 4, "mallocArenaMax": 2, "eventBufferCapacity": 512 }
+}
+```
+
+These knobs are launch-latched. Start the process with matching environment values:
+
+```bash
+EDGECONSOLE_WORKER_THREADS=4 MALLOC_ARENA_MAX=2 edge-console-gateway --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
+```
+
+The Settings screen reports configured and effective values so a mismatch is visible after restart.
+`eventBufferCapacity` controls the internal live-event broadcast ring retained for WebSocket sessions;
+lagged clients resynchronize when they fall behind it.
+
+---
+
 ## Use each screen
 
 | To… | Go to |
@@ -203,7 +227,7 @@ component's history. See [reference — configuration](reference/configuration.m
 | Read a component's effective, redacted running config | **Configuration** (pick + Structured/Raw JSON + Refresh) |
 | Triage alarms with a real Ack lifecycle | **Events & Alarms** (Ack an active alarm) |
 | Browse schema-free component metrics | **Metrics** |
-| Browse live telemetry values + trends | **Signals** (filter, Read on demand) |
+| Browse live telemetry values + trends | **Signals** (grouped by signal path; filter by quality / device / component) |
 | See the console's own policy | **Settings** (read-only) |
 
 The **app-bar search** filters the fleet across the Overview, Components tree, and Signals; the **theme

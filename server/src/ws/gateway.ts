@@ -514,6 +514,13 @@ export class FleetWsGateway {
       case "unsubscribe-signals":
         session.signalsSubscribed = false;
         return;
+      case "get-signal-points":
+        // Compile-conformance only (R5): the TS parity server never advertises the
+        // `signalsSummary` capability, so a compliant UI never sends this frame here — answer an
+        // inert empty `signal-points` rather than leave the exhaustive switch incomplete. The Rust
+        // gateway is the go-forward server that resolves points for real.
+        this.send(session, { type: "signal-points", protocolVersion: PROTOCOL_VERSION, series: [] });
+        return;
       case "subscribe-attributes": {
         session.attributesSubscribed = true;
         this.send(session, {

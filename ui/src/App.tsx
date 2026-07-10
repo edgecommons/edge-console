@@ -204,6 +204,7 @@ export default function App({ client }: { client?: FleetClient }): React.JSX.Ele
             <ConnectedSignalsView
               client={fleetClient}
               {...(signalsScope !== undefined ? { initialComponentId: scopeIdFor(signalsScope) } : {})}
+              onOpenComponentDetail={openDetail}
             />
           ) : route === "settings" ? (
             <ConnectedSettingsView client={fleetClient} />

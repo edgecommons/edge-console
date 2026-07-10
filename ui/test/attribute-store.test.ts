@@ -60,4 +60,18 @@ describe("AttributeStore (browser fold)", () => {
     store.applyUpdates([]);
     expect(store.view()).toBe(v);
   });
+
+  it("carries memorySeries through snapshot + update folds (WP-J — mirrors cpuSeries)", () => {
+    const store = new AttributeStore();
+    store.applySnapshot([
+      runtimeAttrs(key("gw-01", "a"), { memoryMb: 210, memorySeries: [180, 200, 210], cpuSeries: [10, 12, 11] }),
+    ]);
+    expect(store.get(key("gw-01", "a"))!.memorySeries).toEqual([180, 200, 210]);
+    expect(store.get(key("gw-01", "a"))!.cpuSeries).toEqual([10, 12, 11]);
+
+    store.applyUpdates([
+      runtimeAttrs(key("gw-01", "a"), { memoryMb: 220, memorySeries: [200, 210, 220] }),
+    ]);
+    expect(store.get(key("gw-01", "a"))!.memorySeries).toEqual([200, 210, 220]);
+  });
 });

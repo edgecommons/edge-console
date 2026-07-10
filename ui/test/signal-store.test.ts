@@ -41,7 +41,7 @@ describe("SignalStore (browser fold)", () => {
     const src = signalSeries(key("gw-01", "a"), "s", { points: signalPoints([1, 2]) });
     store.applySnapshot([src]);
     // Mutating the source array/point after the fold must not change the store.
-    src.points.push({ at: T0 + 99, value: 999 });
+    src.points!.push({ at: T0 + 99, value: 999 });
     expect(store.get(key("gw-01", "a"), "s")!.points).toHaveLength(2);
   });
 
@@ -99,7 +99,7 @@ describe("SignalStore (browser fold)", () => {
       store.applyUpdates([{ key: key("gw-01", "a"), instance: "main", signal: "s", point: { at: T0 + i, value: i } }]);
     }
     const s = store.get(key("gw-01", "a"), "s")!;
-    expect(s.points.map((p) => p.value)).toEqual([3, 4, 5]); // oldest three dropped
+    expect(s.points!.map((p) => p.value)).toEqual([3, 4, 5]); // oldest three dropped
     expect(s.latest).toBe(5);
   });
 
@@ -123,5 +123,124 @@ describe("SignalStore (browser fold)", () => {
     const v = store.view();
     store.applyUpdates([]);
     expect(store.view()).toBe(v);
+  });
+
+  it("folds a summary-mode series (no `points` key) into an empty ring that live samples grow", () => {
+    const store = new SignalStore();
+    // A summary snapshot omits `points` entirely (latest + metadata only).
+    const summary = signalSeries(key("gw-01", "a"), "s", { latest: 5, quality: "GOOD" });
+    delete (summary as { points?: unknown }).points;
+    store.applySnapshot([summary]);
+    const s0 = store.get(key("gw-01", "a"), "s")!;
+    expect(s0.points).toEqual([]); // point-less until backfill / live
+    expect(s0.latest).toBe(5);
+
+    store.applyUpdates([
+      { key: key("gw-01", "a"), instance: "main", signal: "s", point: { at: T0 + 1, value: 6 } },
+    ]);
+    expect(store.get(key("gw-01", "a"), "s")!.points).toHaveLength(1);
+  });
+
+  it("backfills a series' points via applyPoints (bounded, unknown series ignored)", () => {
+    const store = new SignalStore({ maxSeriesPoints: 3 });
+    store.applySnapshot([signalSeries(key("gw-01", "a"), "s", { latest: 9 })]);
+    store.applyPoints([
+      {
+        key: key("gw-01", "a"),
+        instance: "main",
+        signal: "s",
+        points: signalPoints([1, 2, 3, 4]), // over the cap → newest three kept
+      },
+      // A series the store has never seen is silently ignored (no phantom series).
+      { key: key("gw-02", "z"), instance: "main", signal: "missing", points: signalPoints([1]) },
+    ]);
+    expect(store.get(key("gw-01", "a"), "s")!.points!.map((p) => p.value)).toEqual([2, 3, 4]);
+    expect(store.get(key("gw-02", "z"), "missing")).toBeUndefined();
+    expect(store.seriesCount()).toBe(1);
+  });
+
+  it("carries R5 series metadata + latest-wins publishedTs / name / signalId", () => {
+    const store = new SignalStore();
+    store.applySnapshot([
+      signalSeries(key("gw-01", "opcua-adapter"), "filler/level", {
+        latest: 63.4,
+        quality: "GOOD",
+        name: "Filler Tank Level",
+        signalId: "ns=3;i=1021",
+        address: { ns: 3, nodeId: "ns=3;i=1021" },
+        adapter: "opcua",
+        endpoint: "opc.tcp://kep:49320",
+        qualityRaw: "Good (0x0)",
+        publishedTs: "2026-07-10T14:32:07.992Z",
+      }),
+    ]);
+    const s = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(s.name).toBe("Filler Tank Level");
+    expect(s.signalId).toBe("ns=3;i=1021");
+    expect(s.adapter).toBe("opcua");
+    expect(s.publishedTs).toBe("2026-07-10T14:32:07.992Z");
+
+    // A relabelling update overwrites name/signalId/publishedTs; a plain update keeps the label.
+    store.applyUpdates([
+      {
+        key: key("gw-01", "opcua-adapter"),
+        instance: "main",
+        signal: "filler/level",
+        point: { at: T0 + 1, value: 64 },
+        publishedTs: "2026-07-10T14:32:09.000Z",
+        name: "Filler Level",
+        signalId: "ns=3;i=2000",
+      },
+    ]);
+    const relabelled = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(relabelled.name).toBe("Filler Level");
+    expect(relabelled.signalId).toBe("ns=3;i=2000");
+    expect(relabelled.publishedTs).toBe("2026-07-10T14:32:09.000Z");
+
+    store.applyUpdates([
+      { key: key("gw-01", "opcua-adapter"), instance: "main", signal: "filler/level", point: { at: T0 + 2, value: 65 } },
+    ]);
+    const kept = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(kept.name).toBe("Filler Level"); // label persists when a batch omits it
+    expect(kept.signalId).toBe("ns=3;i=2000");
+  });
+
+  it("folds the WP-G verbatim sourceTs/serverTs pair: snapshot carry + set-or-cleared per live point", () => {
+    const store = new SignalStore();
+    // Snapshot carries the series-level verbatim pair.
+    store.applySnapshot([
+      signalSeries(key("gw-01", "opcua-adapter"), "filler/level", {
+        latest: 63.4,
+        sourceTs: "2026-07-10T14:32:07.812Z",
+        serverTs: "2026-07-10T14:32:07.940Z",
+      }),
+    ]);
+    let s = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(s.sourceTs).toBe("2026-07-10T14:32:07.812Z");
+    expect(s.serverTs).toBe("2026-07-10T14:32:07.940Z");
+
+    // A Modbus-like live point (serverTs only): series sourceTs is CLEARED, serverTs replaced —
+    // per-sample facts (set-or-cleared), unlike the latest-wins identity metadata.
+    store.applyUpdates([
+      {
+        key: key("gw-01", "opcua-adapter"),
+        instance: "main",
+        signal: "filler/level",
+        point: { at: T0 + 1, value: 64, serverTs: "2026-07-10T14:32:09.500Z" },
+      },
+    ]);
+    s = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(s.sourceTs).toBeUndefined();
+    expect(s.serverTs).toBe("2026-07-10T14:32:09.500Z");
+    // The point itself carries the verbatim value too.
+    expect(s.points!.at(-1)).toEqual({ at: T0 + 1, value: 64, serverTs: "2026-07-10T14:32:09.500Z" });
+
+    // A legacy live point (neither): both series fields cleared.
+    store.applyUpdates([
+      { key: key("gw-01", "opcua-adapter"), instance: "main", signal: "filler/level", point: { at: T0 + 2, value: 65 } },
+    ]);
+    s = store.get(key("gw-01", "opcua-adapter"), "filler/level")!;
+    expect(s.sourceTs).toBeUndefined();
+    expect(s.serverTs).toBeUndefined();
   });
 });

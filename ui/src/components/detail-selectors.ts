@@ -216,3 +216,25 @@ export function healthChecks(
 export function detailUptimeSecs(comp: ComponentView, nowServerMs: number): number | undefined {
   return displayUptimeSecs(comp, nowServerMs);
 }
+
+/** Freshness window fallback (ms) when the component's expected heartbeat interval is unknown. */
+export const ATTRIBUTES_FRESH_FALLBACK_MS = 60_000;
+
+/**
+ * Whether an attribute record is FRESH: its `receivedAt` within 3× the component's expected
+ * heartbeat interval (fallback 60 s when the interval is unknown/non-positive). This is what the
+ * Health tiles' "Live" chit means — fresh, not ever-reported; stale data shows the value without
+ * the chit. Applied to CPU and Memory identically.
+ */
+export function attributesFresh(
+  receivedAt: number | undefined,
+  expectedIntervalSecs: number | undefined,
+  nowServerMs: number,
+): boolean {
+  if (receivedAt === undefined) return false;
+  const windowMs =
+    expectedIntervalSecs !== undefined && expectedIntervalSecs > 0
+      ? expectedIntervalSecs * 3 * 1000
+      : ATTRIBUTES_FRESH_FALLBACK_MS;
+  return nowServerMs - receivedAt <= windowMs;
+}

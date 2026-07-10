@@ -269,6 +269,56 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(screen.getByTestId("health-connection-state")).toBeTruthy();
   });
 
+  it("Health: Memory mirrors CPU — its own memorySeries sparkline and Live chit (WP-J)", () => {
+    renderDetail({
+      state: detailState({
+        attributes: attributesView([
+          runtimeAttrs(DKEY, {
+            cpuPercent: 22,
+            memoryMb: 210,
+            cpuSeries: [18, 20, 22, 21, 24],
+            memorySeries: [190, 200, 205, 208, 210],
+          }),
+        ]),
+      }),
+    });
+    const tiles = screen.getByTestId("health-tiles");
+    // Fresh attributes (receivedAt = T0, 5 s interval, now = T0) ⇒ BOTH chits render.
+    expect(within(tiles).getByTestId("cpu-live-chit")).toBeTruthy();
+    expect(within(tiles).getByTestId("memory-live-chit")).toBeTruthy();
+    // Two tile sparklines — CPU and Memory, the same treatment.
+    const sparks = within(tiles).getAllByTestId("sparkline");
+    expect(sparks).toHaveLength(2);
+    expect(sparks[0]!.getAttribute("aria-label")).toContain("cpu trend");
+    expect(sparks[1]!.getAttribute("aria-label")).toContain("memory trend");
+  });
+
+  it("Health: 'Live' means FRESH — stale attributes keep their values but lose both chits", () => {
+    renderDetail({
+      state: detailState({
+        attributes: attributesView([
+          runtimeAttrs(DKEY, {
+            cpuPercent: 22,
+            memoryMb: 210,
+            receivedAt: T0 - 16_000, // beyond 3 × 5 s
+          }),
+        ]),
+      }),
+    });
+    const tiles = screen.getByTestId("health-tiles");
+    expect(within(tiles).getByText("22%")).toBeTruthy(); // the values stay
+    expect(within(tiles).getByText("210", { exact: false })).toBeTruthy();
+    expect(within(tiles).queryByTestId("cpu-live-chit")).toBeNull(); // the chits do not
+    expect(within(tiles).queryByTestId("memory-live-chit")).toBeNull();
+  });
+
+  it("Health: fresh attributes render both Live chits (the ever-reported defect is gone)", () => {
+    renderDetail(); // the default fixture: receivedAt = T0, expected interval 5 s, now = T0
+    const tiles = screen.getByTestId("health-tiles");
+    expect(within(tiles).getByTestId("cpu-live-chit")).toBeTruthy();
+    expect(within(tiles).getByTestId("memory-live-chit")).toBeTruthy();
+  });
+
   it("Health: aggregates connection state from component instances", () => {
     const state = clientState(
       fleetView([
@@ -718,6 +768,55 @@ describe("ComponentDetailView — descriptor-driven panel + pending surfaces", (
       ttlSecs: 300,
       publish: true,
     });
+  });
+
+  it("Logs: resets local filters and clear state when switching components", () => {
+    const otherKey = key("pack-gw-01", "modbus-adapter");
+    const otherId = "pack-gw-01/modbus-adapter";
+    const state = clientState(
+      fleetView([
+        deviceView("pack-gw-01", [
+          compView({
+            key: DKEY,
+            hier: hier(["site", "dallas"], ["line", "packaging"], ["device", "pack-gw-01"]),
+          }),
+          compView({
+            key: otherKey,
+            hier: hier(["site", "dallas"], ["line", "packaging"], ["device", "pack-gw-01"]),
+          }),
+        ]),
+      ]),
+      {
+        logs: logsView({
+          [ID]: { key: DKEY, records: [logRecord({ id: 500, message: "opcua noisy" })] },
+          [otherId]: {
+            key: otherKey,
+            records: [
+              logRecord({
+                id: 20,
+                key: otherKey,
+                logger: "modbus.connection",
+                message: "modbus connected",
+              }),
+            ],
+          },
+        }),
+      },
+    );
+
+    const props = {
+      state,
+      now: T0,
+      onInvoke: vi.fn(),
+    };
+    const { rerender } = render(<ComponentDetailView {...props} detailKey={DKEY} />);
+    fireEvent.click(screen.getByTestId("tab-logs"));
+    fireEvent.click(screen.getByTestId("logs-clear"));
+    expect(screen.getByTestId("logs-filter-empty")).toBeTruthy();
+
+    rerender(<ComponentDetailView {...props} detailKey={otherKey} />);
+    fireEvent.click(screen.getByTestId("tab-logs"));
+    expect(screen.getByText("modbus connected")).toBeTruthy();
   });
 
   it("Logs: shows an unavailable state from the gateway", () => {
