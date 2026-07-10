@@ -81,7 +81,7 @@ pub struct SelfRuntime {
     pub malloc_arena_max: Option<usize>,
 }
 
-/// Upgrade-time auth seam (mirrors the TS `WsServer.resolveRole(req)`): resolves a connection's
+/// Upgrade-time auth seam: resolves a connection's
 /// console role from its request headers. The default implementation returns
 /// `console.rbac.defaultRole` for every connection — today's trusted-network posture. THIS is
 /// where production auth attaches: a real implementation verifies the principal from a bearer

@@ -1,8 +1,8 @@
 /**
- * Direct tests for the C2 wire contract's validator (`parseClientMessage`), which lives
- * in `@edgecommons/edge-console-protocol` since both the server gateway and the future
- * UI client share it. `ws-gateway.test.ts` covers the gateway's reaction to a rejected
- * frame (error + close); these tests pin the validator's own accept/reject boundary.
+ * Direct tests for the C2 wire contract's validator (`parseClientMessage`) and the
+ * shared protocol helpers. They live in `@edgecommons/edge-console-protocol` because
+ * both the gateway and the UI client depend on them; these tests pin the validator's
+ * own accept/reject boundary and the helper functions' behavior.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -13,7 +13,7 @@ import {
   parseClientMessage,
   parseComponentKey,
   splitEventChannel,
-} from "@edgecommons/edge-console-protocol";
+} from "../src/index";
 
 describe("parseClientMessage", () => {
   it("accepts a bare hello (no resumeSeq)", () => {

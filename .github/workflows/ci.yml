@@ -7,9 +7,8 @@ on:
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
-# TypeScript workspace (protocol + legacy server + ui) plus the official Rust gateway.
-# The legacy server remains in tests as the transition oracle. The official runtime is
-# the Rust gateway, which depends on edgecommons/libs/rust through a generated local link.
+# TypeScript workspace (protocol + ui) plus the official Rust gateway. The Rust gateway is
+# the official runtime and depends on edgecommons/libs/rust through a generated local link.
 # Until the GitHub Packages npm path is published, CI checks out the private core repo, builds
 # libs/ts, and generates gitignored local workspace stubs before install/build. package-lock.json
 # is intentionally gitignored because it records local dev links, so we `npm install` rather than
@@ -67,7 +66,7 @@ jobs:
         run: npm run build
       - name: Test Rust gateway
         run: cargo test -p edge-console-gateway
-      - name: Test (server + ui)
+      - name: Test (protocol + ui)
         run: npm test
       - name: Lint
         run: npm run lint

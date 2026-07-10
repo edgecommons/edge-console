@@ -3,7 +3,7 @@
 //! The console IS an EdgeCommons component, so these are honestly sourced from the running
 //! process. The sampler is injected behind [`VitalsSampler`] so the primed/unprimed cpu% logic
 //! is unit-testable without real sleeps or a live process — the same inject-the-clock discipline
-//! the TS reference uses in `server/src/fleet/console-self.ts`. It mirrors the library's
+//! used across the gateway. It mirrors the library's
 //! `HeartbeatMonitor` primed handling (`local/edgecommons-rust/src/heartbeat.rs`): CPU is measured
 //! as a delta between consecutive refreshes, so the first sample has no baseline and cpu% is
 //! **omitted** (never a fabricated 0) until the second sample.

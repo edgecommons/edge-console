@@ -1,4 +1,4 @@
-// ESLint flat config for the edge-console workspace (protocol / server / ui / scripts).
+// ESLint flat config for the edge-console workspace (protocol / ui / scripts).
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
@@ -28,7 +28,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.mjs", "ui/vite.config.ts", "ui/vitest.config.ts", "server/vitest.config.ts"],
+    files: ["scripts/**/*.mjs", "ui/vite.config.ts", "ui/vitest.config.ts"],
     languageOptions: {
       globals: {
         process: "readonly",

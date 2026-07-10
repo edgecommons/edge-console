@@ -1,12 +1,12 @@
 /**
- * FleetStore — the browser-side mirror of the server FleetModel (slice C3).
+ * FleetStore — the browser-side mirror of the gateway's Model (slice C3).
  *
  * PURE fold core, no IO and no clock reads: the {@link FleetClient} (the WS IO shell)
  * feeds it the gateway's snapshot-then-deltas stream, passing the client receipt time
- * in explicitly — the same inject-the-clock discipline the server FleetModel uses, so
+ * in explicitly — the same inject-the-clock discipline the gateway uses, so
  * every fold is deterministic and unit-testable without sockets or sleeps.
  *
- * Folding rules (mirroring `server/src/fleet/fleet-model.ts`):
+ * Folding rules (mirroring the gateway's Model, `gateway/src/model.rs`):
  *  - `snapshot` replaces the whole store; `snapshot.seq` is the delta baseline.
  *  - deltas are applied strictly in `seq` order: `seq <= lastApplied` is skipped
  *    (idempotent on resume overlap), `seq > lastApplied + 1` is a GAP — the store
