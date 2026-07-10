@@ -15,7 +15,6 @@
     "test": "npm run test -w protocol && npm run test -w ui",
     "coverage": "npm run coverage -w ui",
     "lint": "eslint .",
-    "link:lib": "node scripts/link-sibling-lib.mjs",
     "link:rust": "node scripts/link-sibling-rust.mjs"
   },
   "devDependencies": {

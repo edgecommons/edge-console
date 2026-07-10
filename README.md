@@ -8,10 +8,10 @@ device's [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into),
 Unified Namespace (`ecv1/{device}/{component}/{instance}/{class}[/channel]`), and needs **zero
 per-component knowledge**: six class wildcards cover the whole fleet.
 
-Priority #1 is **edge health** (fleet liveness, per-value freshness, whole-device
-reachability); priority #2 is **config review** (every component's effective, redacted config
-from its `cfg` announcements). Design source of truth: `docs/DESIGN.md` (v0.3) reconciled
-against the shipped UNS core in `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md`.
+Its focus is **edge health** (fleet liveness, per-value freshness, whole-device reachability)
+and **config review** (every component's effective, redacted config from its `cfg`
+announcements), alongside events, metrics, per-component logs, signals, and an RBAC-gated
+command surface.
 
 The console runs as one Rust binary, `edge-console-gateway`: a bus ingress over six UNS
 wildcards, a unified in-memory fleet model with console-side miss-detection, an HTTP + WebSocket
@@ -27,7 +27,7 @@ at the WS upgrade, and the read path (fleet snapshot + live stream) is unauthent
 | Package | What it is |
 |---|---|
 | `gateway/` | The console runtime — a standard **edgecommons Rust component** (`com.mbreissi.edgecommons.EdgeConsole`) that owns the bus ingress, the unified in-memory model, the command/descriptor gateway, `/ws`, `/healthz`, and static `ui/dist` serving. |
-| `ui/` | The IBM **Carbon/React** front end (Vite, `g100` dark per the signed-off hi-fi). Ships the **edge-health view** (C3): a WS client + client-side fleet store mirroring the gateway's fleet model, and the Overview screen (health tiles → issue notes → fleet table grouped by device). |
+| `ui/` | The IBM **Carbon/React** front end (Vite, `g100` dark per the signed-off hi-fi): a WS client + client-side fleet store mirroring the gateway's fleet model, and the screens (Overview health, config review, events & alarms, metrics, logs, signals, topology, settings). |
 | `protocol/` | Shared TypeScript types: the browser WS API contract (snapshots, deltas, liveness) + UNS envelope shapes. A hard contract between the Rust gateway and `ui/`. |
 | `test-configs/` | A runnable sample config (the console's own knobs live under `component.global.console`). |
 | `docs/` | DESIGN.md v0.3, the UNS reconciliation + Phase-1 plan, and the lo-fi/hi-fi mockups. |
@@ -273,10 +273,8 @@ the **site broker**, and the same file doubles as the `--transport MQTT` payload
 ## Build, test, run
 
 ```bash
-# Local dev: satisfy @edgecommons/edgecommons from sibling core checkouts.
-# link:lib creates the gitignored TypeScript workspace stub; link:rust creates the
-# gitignored Rust crate/proto links used by the official gateway build.
-npm run link:lib
+# Local dev: link:rust creates the gitignored Rust crate/proto links the
+# official gateway build compiles against, from the sibling core checkout.
 npm run link:rust
 
 npm install

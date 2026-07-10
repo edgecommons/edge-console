@@ -28,15 +28,14 @@ The console repo holds the shared TypeScript protocol package, the Carbon/React 
 From the repo root:
 
 ```bash
-npm run link:lib     # dev only: satisfy @edgecommons/edgecommons from the sibling ../core/libs/ts
 npm run link:rust    # dev only: satisfy the Rust gateway from the sibling ../core/libs/rust
 npm install
 npm run build        # builds protocol -> ui -> the Rust edge-console-gateway binary
 ```
 
-`npm run link:lib` generates the gitignored `local/edgecommons` workspace stub; `npm run link:rust`
-generates the gitignored Rust crate/proto links. `npm run build` compiles the protocol package, bundles
-the UI into `ui/dist`, and cargo-builds the gateway to `target/release/edge-console-gateway`.
+`npm run link:rust` generates the gitignored Rust crate/proto links. `npm run build` compiles the
+protocol package, bundles the UI into `ui/dist`, and cargo-builds the gateway to
+`target/release/edge-console-gateway`.
 
 ---
 

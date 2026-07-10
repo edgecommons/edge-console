@@ -9,10 +9,9 @@ on:
 
 # TypeScript workspace (protocol + ui) plus the official Rust gateway. The Rust gateway is
 # the official runtime and depends on edgecommons/libs/rust through a generated local link.
-# Until the GitHub Packages npm path is published, CI checks out the private core repo, builds
-# libs/ts, and generates gitignored local workspace stubs before install/build. package-lock.json
-# is intentionally gitignored because it records local dev links, so we `npm install` rather than
-# `npm ci`.
+# Until the crate is published, CI checks out the private core repo and generates the gitignored
+# local Rust-lib link before install/build. package-lock.json is intentionally gitignored because
+# it records the local dev link, so we `npm install` rather than `npm ci`.
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -32,26 +31,6 @@ jobs:
           node-version: "22"  # global WebSocket (used by the ws round-trip tests) is stable from Node 22
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Build core TypeScript library
-        run: |
-          node - <<'NODE'
-          const fs = require("fs");
-          const pkgPath = ".edgecommons-core/libs/ts/package.json";
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-          if (pkg.optionalDependencies) {
-            delete pkg.optionalDependencies["@edgecommons/streamlog-node"];
-            if (Object.keys(pkg.optionalDependencies).length === 0) {
-              delete pkg.optionalDependencies;
-            }
-          }
-          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-          NODE
-          npm install --no-audit --no-fund --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
-          npm run build --prefix "$GITHUB_WORKSPACE/.edgecommons-core/libs/ts"
-      - name: Link checked-out core TypeScript library
-        env:
-          EDGECOMMONS_TS_LIB: ${{ github.workspace }}/.edgecommons-core/libs/ts
-        run: npm run link:lib
       - name: Link checked-out core Rust library
         env:
           EDGECOMMONS_RUST_LIB: ${{ github.workspace }}/.edgecommons-core/libs/rust
