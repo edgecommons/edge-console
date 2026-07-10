@@ -1,9 +1,10 @@
 # Reference — WebSocket protocol & data types
 
 A console has no southbound register map, so this page is the **browser↔console WebSocket protocol** — the
-hard contract between the server and the UI. Every type here is defined in the shared package
-**`@edgecommons/edge-console-protocol`** and used verbatim on both sides (no re-mapping layer). For the
-console↔bus UNS side, see [messaging-interface.md](messaging-interface.md).
+hard contract between the gateway and the UI. Every type here is defined in the shared package
+**`@edgecommons/edge-console-protocol`**; the types are the shared wire contract — the UI imports the
+TypeScript package, and the Rust gateway emits and parses matching JSON. For the console↔bus UNS side, see
+[messaging-interface.md](messaging-interface.md).
 
 ## Endpoint & framing
 
@@ -11,7 +12,7 @@ console↔bus UNS side, see [messaging-interface.md](messaging-interface.md).
   `wss://`). The UI derives the URL from the page origin, overridable with `VITE_CONSOLE_WS_URL`.
 - Every frame in **both** directions is a JSON object carrying a `protocolVersion` integer.
 - **`PROTOCOL_VERSION = 7`**. The gateway validates every inbound frame through one pure
-  `parseClientMessage()` — nothing lenient is accepted (unlike the config parsers). A version skew is a
+  `parse_client_frame()` — nothing lenient is accepted (unlike the config parsers). A version skew is a
   clean rejection, not a misparse.
 
 ## The handshake
@@ -33,6 +34,8 @@ connection.
 | `hello` | `protocolVersion`, `resumeSeq?` | Mandatory first frame. `resumeSeq` = last applied delta `seq` (resume attempt). |
 | `get-config` | `key` | Request a component's latest retained `cfg`; also registers interest (later `cfg` pushed). |
 | `refresh-config` | `device` | Fire the per-device `republish-cfg` broadcast. Fire-and-forget. |
+| `get-descriptor` | `key` | Request a component's descriptor manifest (custom panels + command verbs). Answered by one `descriptor` or `descriptor-unavailable`. |
+| `refresh-descriptor` | `key` | Re-fetch the component's descriptor manifest. Answered the same way. |
 | `subscribe-events` | `limit?` | Ask for the rolling `evt` backlog (newest-first, optionally capped) then live `event` pushes. |
 | `unsubscribe-events` | — | Stop `event` pushes. Idempotent. |
 | `subscribe-metrics` / `unsubscribe-metrics` | — | Metric snapshot then `metric` pushes / stop. |
@@ -58,6 +61,8 @@ snapshot/backlog self-heals the client store (no client-side resubscribe bookkee
 | `delta` | `deltas: FleetDelta[]` | Change batches, strictly increasing `seq`. |
 | `heartbeat` | `at`, `busMsgsPerSec?`, `busRecentRates?`, `self?` | Periodic keep-alive + the console's own bus rate/sparkline/self vitals. |
 | `config` / `config-unavailable` | `key`, `cfg`, `receivedAt`, `sourceTimestamp?` | Reply to `get-config` + later pushes / no cfg held. |
+| `descriptor` | `key`, `manifest`, `receivedAt` | Reply to `get-descriptor`/`refresh-descriptor`: the normalized component manifest (`schema`, `component`, `commands`, `panels`). |
+| `descriptor-unavailable` | `key`, `code`, `reason` | The component returned no usable manifest, or its `describe` failed / was denied. |
 | `events` / `event` | `events: ConsoleEvent[]` / `event: ConsoleEvent` | Backlog (newest-first) / one live arrival. |
 | `metrics` / `metric` | `series: MetricSeriesSnapshot[]` / `updates: MetricSeriesUpdate[]` | Snapshot / live sample batches. |
 | `logs` / `log` / `logs-unavailable` | `key`, `records`, `dropped?` / `key`, `records`, `dropped?` / `key`, `code`, `reason` | Component log tail snapshot / live record batch / unavailable notice. |

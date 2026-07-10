@@ -69,8 +69,8 @@ body:    {"status":"UNREACHABLE"}
 ```
 
 For this bridge `state` envelope, `status === "UNREACHABLE"` marks the **whole device** UNREACHABLE with
-event time equal to console receipt time. Every raw/non-protobuf message is dropped before normal
-FleetModel processing.
+event time equal to console receipt time. Every raw/non-protobuf message is dropped before the ingress
+folds it into the model.
 
 ## What the console publishes
 
@@ -182,7 +182,7 @@ broadcasts and the per-component `…/cmd/{verb}` command requests, always throu
 | Property | Value |
 |----------|-------|
 | Filters | the six `uns().filter(cls, UnsScope.all())` wildcards |
-| Dispatch | serial per class (`concurrency = 1`) — ordered folds into the FleetModel |
+| Dispatch | serial per class (`concurrency = 1`) — ordered folds into the model |
 | Per-subscription queue bound | 256 messages |
 | Shutdown | every filter is unsubscribed (idempotent) — the bus is always left clean |
 
@@ -205,5 +205,5 @@ and every connection resolves to `console.rbac.defaultRole`. Two edge protection
 Role resolution runs at upgrade time through a pluggable resolver that maps request headers to a
 console role. The default resolver returns `defaultRole` for everyone; **this resolver is where
 production authentication attaches** (bearer / client-certificate / OIDC → console role) without
-changing the session loop. Authenticating the read surface and the auth mechanism itself are
-product decisions tracked for the prod-auth epic.
+changing the session loop. The console does not authenticate the read surface or resolve a connecting
+principal; every connection resolves to `console.rbac.defaultRole`.

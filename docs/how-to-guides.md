@@ -7,17 +7,16 @@ For concepts see [explanation.md](explanation.md); for exhaustive options see [r
 
 ## Build the workspace
 
-The repo contains the shared TypeScript protocol, the Carbon/React UI, the official Rust
-gateway, and a legacy TypeScript server retained as a parity oracle:
+The repo contains the shared TypeScript protocol, the Carbon/React UI, and the Rust gateway:
 
 ```bash
 npm run link:lib     # dev only: satisfy @edgecommons/edgecommons from the sibling ../core/libs/ts
 npm run link:rust    # dev only: satisfy the Rust gateway from sibling ../core/libs/rust
 npm install
 npm run build        # protocol -> ui -> Rust edge-console-gateway
-cargo test -p edge-console-gateway
-npm test             # server + ui unit suites (fake bus/socket, injected clock — no live IO)
-npm run coverage     # vitest v8 coverage, thresholds 90/90/85/80 (the ecosystem gate)
+cargo test -p edge-console-gateway  # gateway unit suite (injected clock, fake bus — no live IO)
+npm test             # protocol + ui unit suites (fake socket, injected clock — no live IO)
+npm run coverage     # vitest v8 coverage over protocol + ui (the ecosystem gate)
 npm run lint         # eslint (flat config) over the whole workspace
 ```
 
@@ -60,8 +59,9 @@ target/release/edge-console-gateway \
 
 - `--transport MQTT <file>` supplies the broker connection; the same file can carry the whole config
   (its `messaging.local` is the site broker), which is why the tutorial passes `config.json` twice.
-- The WebSocket gateway binds `console.ws.bindAddress:console.ws.port` (default `0.0.0.0:8443`). Reach the
-  UI over that port (behind a TLS terminator — see below).
+- The WebSocket gateway binds `console.ws.bindAddress:console.ws.port` (default `127.0.0.1:8443`
+  (loopback); set `bindAddress` to `0.0.0.0` to accept remote connections). Reach the UI over that port
+  (behind a TLS terminator — see below).
 
 ---
 
@@ -82,8 +82,8 @@ target/release/edge-console-gateway --platform HOST --transport MQTT ./config.js
 # Browse straight to http://<host>:8443/ — index.html + hashed assets served by the console itself.
 ```
 
-- **Opt-in**: with `webRoot` unset (the default) the server handles only `/healthz` and the `/ws`
-  upgrade; every other GET 404s exactly as before.
+- **Opt-in**: with `webRoot` unset (the default) the gateway handles only `/healthz` and the `/ws`
+  upgrade; every other GET returns 404.
 - Relative paths resolve against the **server process cwd**; an absolute path is used as-is.
 - Deep links work (SPA fallback serves `index.html` for extension-less routes); `..`, embedded NULs and
   decode failures are rejected with `403` before touching the filesystem; `index.html` is `no-cache`,

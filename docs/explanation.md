@@ -16,10 +16,10 @@ flowchart LR
     B1[Browser tab]
     B2[Browser tab]
   end
-  subgraph Console["edge-console (one process, one site)"]
-    WS[WS gateway<br/>HTTP + WebSocket]
-    FM[FleetModel<br/>last-known-value cache]
-    BI[BusIngress<br/>6 UNS wildcards]
+  subgraph Console["edge-console (one Rust process, one site)"]
+    WS[WS session loop<br/>HTTP + WebSocket]
+    FM[Model<br/>unified in-memory state]
+    BI[Ingress<br/>6 UNS wildcards]
     CG[CommandGateway<br/>RBAC -> request/reply]
   end
   subgraph Bus["Site UNS broker"]
@@ -66,7 +66,7 @@ envelope marks the whole device UNREACHABLE. Raw messages are not normal UNS dat
 
 ## The retain substitute: a timestamped last-known-value cache
 
-The platform deliberately uses **no broker retain**. Instead the **FleetModel** is a pure, in-memory
+The platform deliberately uses **no broker retain**. Instead the console's **Model** is a pure, in-memory
 **last-known-value (LKV) cache**, keyed by `(device, component, instance, class[, channel])`, where every
 entry carries its **receipt timestamp**. This is the crux of the design: a late-joining browser gets every
 current value *immediately* **and** its age — the two things retain would have given, without retain's
@@ -115,15 +115,15 @@ The console keeps a hard line between "who's alive" and "what's the value":
 
 ```mermaid
 flowchart TB
-  BI[BusIngress<br/>normalize each delivery] --> FM[FleetModel<br/>liveness + LKV]
-  BI --> CS[ConfigStore<br/>retained cfg]
-  BI --> ES[EventStore<br/>rolling evt history]
-  BI --> MS[MetricStore<br/>latest + series]
-  BI --> SS[SignalStore<br/>data plane]
-  BI --> AS[AttributeStore<br/>sys.* + conn projection]
-  BI --> AT[AlarmTracker<br/>evt -> raise/clear]
-  FM & CS & ES & MS & SS & AS & AT --> GW[FleetWsGateway]
-  GW -->|snapshot then deltas / streams| Browser
+  BI[Ingress<br/>normalize each delivery]
+  subgraph Model["Model — one unified in-memory state"]
+    LKV[Liveness + LKV plane<br/>who's alive]
+    FAM[Body / activity families<br/>cfg · evt · metric · data · attributes · alarms]
+  end
+  BI --> LKV
+  BI --> FAM
+  LKV & FAM -->|snapshot then deltas / streams| WS[WS session loop]
+  WS --> Browser
 ```
 
 ## Snapshot-then-deltas, resume, and backpressure isolation

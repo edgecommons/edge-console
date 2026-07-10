@@ -13,7 +13,9 @@ parsing with defaults), so a real config is often much shorter than these annota
 ## 1. Minimal HOST (dev rig)
 
 The smallest useful config — essentially the `test-configs/config.json` in the repo. It points at a
-local site broker and takes every console default. Run it with:
+local site broker and otherwise takes the console defaults; the one exception is
+`console.ws.bindAddress`, set to `0.0.0.0` to accept connections from other hosts (the default is
+loopback `127.0.0.1`). Run it with:
 
 ```bash
 target/release/edge-console-gateway --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
@@ -36,7 +38,7 @@ target/release/edge-console-gateway --platform HOST --transport MQTT ./config.js
   "component": {
     "global": {
       "console": {
-        "ws": { "port": 8443, "bindAddress": "0.0.0.0", "heartbeatIntervalMs": 15000 },
+        "ws": { "port": 8443, "bindAddress": "0.0.0.0", "heartbeatIntervalMs": 15000 },  // bindAddress 0.0.0.0 = remote-access opt-in; default is loopback 127.0.0.1
         "staleness": {
           "warnMultiplier": 2, "staleMultiplier": 2.5, "offlineMultiplier": 5,
           "defaultIntervalSecs": 5, "sweepIntervalMs": 1000

@@ -120,8 +120,8 @@ Default policy:
 "rbac": {
   "defaultRole": "operator",
   "roles": {
-    "operator": { "allow": ["*"], "deny": [] },                       // full control
-    "viewer":   { "allow": ["ping", "get-configuration"], "deny": [] } // read-only verbs
+    "operator": { "allow": ["*"], "deny": [] },  // full control
+    "viewer":   { "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"], "deny": [] }  // read-only verbs
   }
 }
 ```

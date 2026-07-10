@@ -8,12 +8,10 @@ bus — the *site broker*, the aggregation point every device's
 [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — subscribes six UNS class
 wildcards, and needs **zero per-component knowledge** to render the whole fleet.
 
-It is itself a **standard edgecommons Rust component** (`edge-console-gateway`), so it deploys the
+The console runs as `edge-console-gateway`, a **standard edgecommons Rust component**, so it deploys the
 same way as everything else — HOST, Greengrass, or Kubernetes — and the library owns its config,
 messaging, logging, metrics, state keepalive and graceful shutdown. The console adds the fleet model,
-the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on top. The old
-TypeScript/Node server remains in the repository only as a transition oracle, not as the official
-runtime.
+the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on top.
 
 | Doc | Start here when you want to… |
 |-----|------------------------------|
