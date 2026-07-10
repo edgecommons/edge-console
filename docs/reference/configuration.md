@@ -33,7 +33,8 @@ section/field falls back to its default rather than failing the component.
 | Key | Type | Default | Definition |
 |-----|------|---------|-----------|
 | `port` | number (1–65535) | `8443` | TCP port the HTTP + WebSocket gateway binds. |
-| `bindAddress` | string | `"0.0.0.0"` | Bind address. |
+| `bindAddress` | string | `"127.0.0.1"` | Bind address. Loopback by default; set `"0.0.0.0"` to accept connections from other hosts. Container/k8s deployments set `"0.0.0.0"` explicitly (loopback is unreachable through Docker port-mapping). |
+| `allowedOrigins` | string[] | `[]` | Browser `Origin`s permitted on the `/ws` upgrade in addition to same-origin. The `/ws` handshake is Origin-gated (CSWSH defense): same-origin browsers and non-browser clients (no `Origin` header) are always allowed; a cross-origin browser must be listed here. A separately-hosted dev UI (e.g. Vite on `http://localhost:5173`) needs its origin listed; the self-served UI (`webRoot`) is same-origin and needs nothing. |
 | `heartbeatIntervalMs` | number | `15000` | Server→client heartbeat cadence (ms); also the tick that evicts a client that never sends `hello`. |
 | `webRoot` | string | *(unset)* | Filesystem path to the built UI (`ui/dist`) to serve on this same origin. **Opt-in**: unset ⇒ only `/healthz` + `/ws` are served. Relative paths resolve against the process cwd; absolute paths are used as-is. See [how-to → self-contained](../how-to-guides.md#deploy-self-contained-serve-the-built-ui-from-the-server--no-vite-no-nginx). |
 
@@ -189,8 +190,8 @@ keep it out of the fleet it watches. The console's dynamic grouping renders **wh
   "component": {
     "global": {
       "console": {
-        "ws":        { "port": 8443, "bindAddress": "0.0.0.0", "heartbeatIntervalMs": 15000,
-                       "webRoot": "../ui/dist" },
+        "ws":        { "port": 8443, "bindAddress": "0.0.0.0", "allowedOrigins": [],
+                       "heartbeatIntervalMs": 15000, "webRoot": "../ui/dist" },
         "staleness": { "warnMultiplier": 2, "staleMultiplier": 2.5, "offlineMultiplier": 5,
                        "defaultIntervalSecs": 5, "sweepIntervalMs": 1000 },
         "cache":     { "maxChannelsPerComponent": 1024 },

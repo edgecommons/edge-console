@@ -86,11 +86,18 @@ async fn run(launch: LaunchRuntimeConfig) -> anyhow::Result<()> {
         core_config.clone(),
         console.clone(),
     ));
+    // Default role resolver: every connection gets console.rbac.defaultRole — the trusted-
+    // network posture the TS original stubbed. Production auth replaces this closure (verify
+    // the principal from headers/cert → console role) without touching the session loop.
+    let default_role = console.rbac.default_role.clone();
+    let role_resolver: edge_console_gateway::RoleResolver =
+        Arc::new(move |_headers| default_role.clone());
     let app = Arc::new(GatewayApp {
         model: model.clone(),
         events: events.clone(),
         command,
         console: console.clone(),
+        role_resolver,
         settings_frame,
         runtime,
         self_vitals: Arc::new(Mutex::new(SelfVitals::new())),

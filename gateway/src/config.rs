@@ -19,6 +19,10 @@ pub struct WsConfig {
     pub bind_address: String,
     pub heartbeat_interval_ms: u64,
     pub web_root: Option<String>,
+    /// CSWSH allowlist: browser Origins permitted on the `/ws` upgrade beyond same-origin.
+    /// Default empty = same-origin only. A separately-hosted dev UI (e.g. Vite on another
+    /// port) must list its origin here; the self-served UI is same-origin and needs nothing.
+    pub allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,9 +103,13 @@ impl Default for ConsoleConfig {
         Self {
             ws: WsConfig {
                 port: 8443,
-                bind_address: "0.0.0.0".to_string(),
+                // Secure-by-default: bare-host/dev binds to loopback only. Container/k8s
+                // deployments set 0.0.0.0 explicitly (loopback is unreachable through Docker
+                // port-mapping), so this hardens only the default.
+                bind_address: "127.0.0.1".to_string(),
                 heartbeat_interval_ms: 15_000,
                 web_root: None,
+                allowed_origins: Vec::new(),
             },
             staleness: StalenessConfig {
                 warn_multiplier: 2.0,
@@ -196,6 +204,7 @@ impl ConsoleConfig {
                     ws.get("heartbeatIntervalMs"),
                     defaults.ws.heartbeat_interval_ms,
                 ),
+                allowed_origins: string_array(ws.get("allowedOrigins")),
                 web_root: ws
                     .get("webRoot")
                     .and_then(Value::as_str)
@@ -628,12 +637,35 @@ mod tests {
     fn defaults_match_protocol_contract() {
         let config = ConsoleConfig::from_global(&json!({}));
         assert_eq!(config.ws.port, 8443);
+        // §9.2: secure-by-default bind — loopback unless an operator opts into wider binding.
+        assert_eq!(config.ws.bind_address, "127.0.0.1");
+        assert!(config.ws.allowed_origins.is_empty());
         assert!(rbac_can(&config.rbac, "operator", "sb/write"));
         assert!(rbac_can(&config.rbac, "viewer", "sb/read"));
         assert!(!rbac_can(&config.rbac, "viewer", "sb/write"));
         assert_eq!(config.runtime.worker_threads, 4);
         assert_eq!(config.runtime.malloc_arena_max, Some(2));
         assert_eq!(config.runtime.event_buffer_capacity, 512);
+    }
+
+    /// §9.1: `console.ws.allowedOrigins` parses as a lenient string array (default empty).
+    #[test]
+    fn allowed_origins_parse_and_bind_override() {
+        let config = ConsoleConfig::from_global(&json!({
+            "console": { "ws": {
+                "bindAddress": "0.0.0.0",
+                "allowedOrigins": ["https://ops.example.com", "http://localhost:5173", 42]
+            } }
+        }));
+        // Explicit bind wins; the string array keeps only the string entries.
+        assert_eq!(config.ws.bind_address, "0.0.0.0");
+        assert_eq!(
+            config.ws.allowed_origins,
+            vec![
+                "https://ops.example.com".to_string(),
+                "http://localhost:5173".to_string(),
+            ]
+        );
     }
 
     #[test]

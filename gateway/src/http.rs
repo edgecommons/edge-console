@@ -9,8 +9,8 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, Utf8Bytes, WebSocket, WebSocketUpgrade};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderValue, StatusCode, Uri};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HOST, ORIGIN};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
@@ -62,17 +62,53 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn ws_handler(State(app): State<Arc<GatewayApp>>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(app, socket))
+async fn ws_handler(
+    State(app): State<Arc<GatewayApp>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    // CSWSH defense (§9.1): gate the /ws upgrade on Origin BEFORE completing the handshake.
+    // Static assets + /healthz are ordinary same-origin-policy resources and stay open.
+    let origin = headers.get(ORIGIN).and_then(|v| v.to_str().ok());
+    let host = headers.get(HOST).and_then(|v| v.to_str().ok());
+    if !origin_allowed(origin, host, &app.console.ws.allowed_origins) {
+        tracing::warn!(?origin, ?host, "rejected /ws upgrade: origin not allowed");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    // The upgrade-time auth seam: resolve the connection's role from its request headers
+    // (default = console.rbac.defaultRole). The session loop only sees the resolved string.
+    let role = (app.role_resolver)(&headers);
+    ws.on_upgrade(move |socket| handle_socket(app, socket, role))
 }
 
-async fn handle_socket(app: Arc<GatewayApp>, socket: WebSocket) {
+/// CSWSH defense. Absent Origin (non-browser client — no ambient-credential attack surface) is
+/// allowed. A present Origin must be same-origin (its authority == the request Host) or in the
+/// configured allowlist. Empty allowlist (default) = same-origin only.
+fn origin_allowed(origin: Option<&str>, host: Option<&str>, allowlist: &[String]) -> bool {
+    let Some(origin) = origin.map(str::trim) else {
+        return true; // no Origin ⇒ non-browser client
+    };
+    if allowlist.iter().any(|allowed| allowed.trim() == origin) {
+        return true;
+    }
+    // Same-origin: the Origin's authority (scheme stripped, path/query dropped) equals the
+    // request Host, case-insensitive on the host component.
+    let authority = origin
+        .split_once("://")
+        .map_or(origin, |(_scheme, rest)| rest)
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("");
+    host.is_some_and(|host| authority.eq_ignore_ascii_case(host))
+}
+
+async fn handle_socket(app: Arc<GatewayApp>, socket: WebSocket, role: String) {
     let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
     let (mut sender, mut receiver) = socket.split();
     let mut bus_rx = app.events.subscribe();
     let (out_tx, mut out_rx) = mpsc::channel::<Utf8Bytes>(64);
     let mut heartbeat = interval(Duration::from_millis(app.console.ws.heartbeat_interval_ms));
-    let mut session = SessionState::new(app.console.rbac.default_role.clone());
+    let mut session = SessionState::new(role);
     tracing::debug!(session = id, "websocket connected");
 
     loop {
@@ -663,5 +699,85 @@ mod tests {
         // cpu% is omitted (not a fabricated 0/null) until the sampler is primed.
         assert!(v.get("cpuPercent").is_none());
         assert_eq!(v["memoryMb"], 180.0);
+    }
+
+    /// §9.1 CSWSH decision table. Empty allowlist = same-origin only; absent Origin is a
+    /// non-browser client and is allowed; the host component matches case-insensitively.
+    #[test]
+    fn origin_allowed_decision_table() {
+        let empty: &[String] = &[];
+        // Absent Origin (non-browser client) ⇒ allow, regardless of Host.
+        assert!(origin_allowed(None, Some("gw:8443"), empty));
+        assert!(origin_allowed(None, None, empty));
+        // Same-origin (scheme stripped, ports must match) ⇒ allow.
+        assert!(origin_allowed(
+            Some("https://gw.local:8443"),
+            Some("gw.local:8443"),
+            empty
+        ));
+        assert!(origin_allowed(
+            Some("http://127.0.0.1"),
+            Some("127.0.0.1"),
+            empty
+        ));
+        // Host component is case-insensitive.
+        assert!(origin_allowed(
+            Some("https://Console.EXAMPLE.com:8443"),
+            Some("console.example.com:8443"),
+            empty
+        ));
+        // Cross-origin with an empty allowlist ⇒ reject.
+        assert!(!origin_allowed(
+            Some("https://evil.example.com"),
+            Some("gw.local:8443"),
+            empty
+        ));
+        // Port mismatch is cross-origin ⇒ reject.
+        assert!(!origin_allowed(
+            Some("https://gw.local:9999"),
+            Some("gw.local:8443"),
+            empty
+        ));
+        // A present Origin with no Host to compare against, empty allowlist ⇒ reject.
+        assert!(!origin_allowed(Some("https://gw.local"), None, empty));
+        // Cross-origin explicitly allowlisted ⇒ allow (exact after trim); others still reject.
+        let allow = vec!["http://localhost:5173".to_string()];
+        assert!(origin_allowed(
+            Some("http://localhost:5173"),
+            Some("gw.local:8443"),
+            &allow
+        ));
+        assert!(!origin_allowed(
+            Some("http://localhost:4173"),
+            Some("gw.local:8443"),
+            &allow
+        ));
+    }
+
+    /// §9.3: the default role resolver returns the console default role; a custom resolver is
+    /// honored and threads into the session seed.
+    #[test]
+    fn role_resolver_default_and_custom() {
+        let default_resolver: crate::RoleResolver = {
+            let role = "operator".to_string();
+            Arc::new(move |_headers| role.clone())
+        };
+        let headers = HeaderMap::new();
+        assert_eq!(default_resolver(&headers), "operator");
+        assert_eq!(
+            SessionState::new(default_resolver(&headers)).role,
+            "operator"
+        );
+
+        // A custom resolver maps a header to a role — the session seed reflects it.
+        let custom: crate::RoleResolver = Arc::new(|headers: &HeaderMap| {
+            match headers.get("x-console-role").and_then(|v| v.to_str().ok()) {
+                Some("viewer") => "viewer".to_string(),
+                _ => "operator".to_string(),
+            }
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("x-console-role", HeaderValue::from_static("viewer"));
+        assert_eq!(SessionState::new(custom(&headers)).role, "viewer");
     }
 }

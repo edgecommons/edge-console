@@ -188,3 +188,22 @@ broadcasts and the per-component `…/cmd/{verb}` command requests, always throu
 
 `subscribedFilters()` exposes the active filters for diagnostics; the startup log prints them
 (`edge-console ingress subscribed: …`).
+
+## Security posture
+
+The browser↔console surface is a **trusted-network** posture: the read surface is unauthenticated
+and every connection resolves to `console.rbac.defaultRole`. Two edge protections apply:
+
+- **Origin-gated WebSocket.** The `/ws` upgrade is rejected (`403`, before the handshake) unless the
+  request is same-origin, carries no `Origin` (a non-browser client), or its `Origin` is listed in
+  `console.ws.allowedOrigins` — a CSWSH defense so a cross-site page in an operator's browser cannot
+  open the socket. Static assets and `/healthz` are ordinary same-origin-policy resources and stay
+  open.
+- **Loopback by default.** `console.ws.bindAddress` defaults to `127.0.0.1`; wider binding is an
+  explicit opt-in (containers set `0.0.0.0`).
+
+Role resolution runs at upgrade time through a pluggable resolver that maps request headers to a
+console role. The default resolver returns `defaultRole` for everyone; **this resolver is where
+production authentication attaches** (bearer / client-certificate / OIDC → console role) without
+changing the session loop. Authenticating the read surface and the auth mechanism itself are
+product decisions tracked for the prod-auth epic.

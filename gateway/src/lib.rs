@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::extract::ws::Utf8Bytes;
+use axum::http::HeaderMap;
 use edgecommons::config::model::Config;
 use edgecommons::messaging::MessagingService;
 use edgecommons::uns::Uns;
@@ -80,12 +81,22 @@ pub struct SelfRuntime {
     pub malloc_arena_max: Option<usize>,
 }
 
+/// Upgrade-time auth seam (mirrors the TS `WsServer.resolveRole(req)`): resolves a connection's
+/// console role from its request headers. The default implementation returns
+/// `console.rbac.defaultRole` for every connection — today's trusted-network posture. THIS is
+/// where production auth attaches: a real implementation verifies the principal from a bearer
+/// token / client certificate / OIDC assertion in the headers and maps it to a console role,
+/// WITHOUT touching the session loop (the pure loop only ever sees the resolved role string).
+pub type RoleResolver = Arc<dyn Fn(&HeaderMap) -> String + Send + Sync>;
+
 #[derive(Clone)]
 pub struct GatewayApp {
     pub model: Arc<RwLock<Model>>,
     pub events: broadcast::Sender<GatewayEvent>,
     pub command: Arc<CommandGateway>,
     pub console: ConsoleConfig,
+    /// The upgrade-time role resolver — the production-auth attachment point (see [`RoleResolver`]).
+    pub role_resolver: RoleResolver,
     /// The `{"type":"settings",...}` frame, encoded once at startup (see `main.rs`); the hello
     /// path clones it (a refcount bump), never re-encodes.
     pub settings_frame: Utf8Bytes,
