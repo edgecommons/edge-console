@@ -2,7 +2,7 @@
   "name": "@edgecommons/edge-console-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "Edge Console workspace: server (Node backend on @edgecommons/edgecommons), ui (IBM Carbon/React), protocol (shared WS API + envelope types).",
+  "description": "Edge Console workspace: Rust gateway, React/TypeScript UI, and shared browser protocol.",
   "license": "Apache-2.0",
   "workspaces": [
     "protocol",
@@ -11,11 +11,14 @@
     "local/*"
   ],
   "scripts": {
-    "build": "npm run build -w protocol && npm run build -w server && npm run build -w ui",
+    "build": "npm run build -w protocol && npm run build -w ui && npm run build:gateway",
+    "build:legacy-server": "npm run build -w server",
+    "build:gateway": "npm run link:rust && cargo build -p edge-console-gateway --release",
     "test": "npm run test -w server && npm run test -w ui",
     "coverage": "npm run coverage -w server && npm run coverage -w ui",
     "lint": "eslint .",
-    "link:lib": "node scripts/link-sibling-lib.mjs"
+    "link:lib": "node scripts/link-sibling-lib.mjs",
+    "link:rust": "node scripts/link-sibling-rust.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

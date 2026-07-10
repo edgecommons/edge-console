@@ -43,6 +43,11 @@
         },
         "cache": {
           "maxChannelsPerComponent": 1024
+        },
+        "runtime": {
+          "workerThreads": 4,
+          "mallocArenaMax": 2,
+          "eventBufferCapacity": 512
         }
       }
     },

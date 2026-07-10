@@ -1,6 +1,7 @@
 # Dependencies / build output
 node_modules/
 dist/
+target/
 coverage/
 logs/
 *.log
@@ -12,6 +13,7 @@ test-artifacts/
 # sibling checkout at ../core/libs/ts. CI has no local/ and resolves the
 # published package instead.
 local/
+proto/
 
 # The lockfile is deliberately untracked while the sibling link is the dev path:
 # it would record the local/edgecommons stub, which does not exist in CI. Revisit

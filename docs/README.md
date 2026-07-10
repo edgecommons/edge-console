@@ -8,11 +8,12 @@ bus — the *site broker*, the aggregation point every device's
 [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — subscribes six UNS class
 wildcards, and needs **zero per-component knowledge** to render the whole fleet.
 
-It is itself a **standard edgecommons TypeScript component** (a Node server built on
-`@edgecommons/edgecommons`), so it deploys the same way as everything else — HOST, Greengrass, or
-Kubernetes — and the library owns its config, messaging, logging, metrics, state keepalive and graceful
-shutdown. The console adds the fleet model, the WebSocket gateway, the command gateway, and an IBM
-**Carbon / React** UI on top.
+It is itself a **standard edgecommons Rust component** (`edge-console-gateway`), so it deploys the
+same way as everything else — HOST, Greengrass, or Kubernetes — and the library owns its config,
+messaging, logging, metrics, state keepalive and graceful shutdown. The console adds the fleet model,
+the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on top. The old
+TypeScript/Node server remains in the repository only as a transition oracle, not as the official
+runtime.
 
 | Doc | Start here when you want to… |
 |-----|------------------------------|
@@ -47,7 +48,7 @@ screens, all fed live from one WebSocket connection:
 | **Configuration** | a component picker beside its effective, source-redacted running config (Structured / Raw JSON), live, with a Refresh |
 | **Events & Alarms** | the merged, newest-first alarm + event feed with a real Active/Ack/Contained alarm lifecycle |
 | **Metrics** | the generic UNS `metric` stream as latest values and trend sparklines |
-| **Signals** | a data-plane browser over the UNS `data` class — latest value, quality, trend sparkline, age, on-demand Read |
+| **Signals** | a data-plane browser over the UNS `data` class, grouped by signal path — name-led rows with latest value, quality, trend sparkline, receipt freshness + publish lag; quality / device / component filters and a per-row detail expansion |
 | **Settings** | the console's own effective policy (RBAC, connection, staleness ladder, command deadlines, retention caps), read-only |
 
 ### Current limitations
@@ -60,7 +61,7 @@ The console surfaces each of these in the product as well as here:
   enforced, but the console does not resolve who is connecting: every connection is assigned the
   configured default role. Keep the console on a trusted network. See
   [Explanation → Security](explanation.md#a-note-on-security).
-- **No Kubernetes chart is included.** The server runs under the library's `KUBERNETES` platform, but you
+- **No Kubernetes chart is included.** The gateway runs under the library's `KUBERNETES` platform, but you
   provide the Service + Ingress that reaches its WebSocket port.
 - **The console consumes component panel descriptors where advertised**, but a component that does not
   publish a descriptor still shows only the generic tabs. Custom verbs and per-signal engineering

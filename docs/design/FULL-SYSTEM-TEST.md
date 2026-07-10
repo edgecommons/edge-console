@@ -39,7 +39,8 @@ cd <SCRATCH>/c7/components/TsSensor && npm install && npm run build
 ## 3. Build the bridge + console (once)
 ```bash
 cd <BRIDGE> && cargo build --features standalone         # or run the prebuilt target/debug/uns-bridge.exe
-cd <CONSOLE> && npm run link:lib && npm install && npm run build   # protocol -> server -> ui
+cd <CONSOLE> && npm run link:lib && npm run link:rust && npm install && npm run build
+# protocol -> ui -> Rust edge-console-gateway
 ```
 
 ## 4. Run configs (in <SCRATCH>/c7/run-configs) — messaging → DEVICE :1883, metricEmission=messaging
@@ -62,8 +63,8 @@ cd <SCRATCH>/c7/components/PyMeter && python main.py \
   --platform HOST --transport MQTT <SCRATCH>/c7/run-configs/pymeter-messaging.json \
   -c FILE <SCRATCH>/c7/run-configs/pymeter-config.json -t gw-01
 
-# CONSOLE server (site :1884), distinct thing so it doesn't self-appear under gw-01:
-cd <CONSOLE> && node server/dist/main.js \
+# CONSOLE gateway (site :1884), distinct thing so it doesn't self-appear under gw-01:
+cd <CONSOLE> && target/release/edge-console-gateway \
   --platform HOST --transport MQTT ./test-configs/config.json \
   -c FILE ./test-configs/config.json -t site-console        # WS gateway on 0.0.0.0:8443/ws
 
@@ -75,16 +76,16 @@ cd <CONSOLE> && npm run dev -w ui -- --force                # http://localhost:5
 
 ### 5b. Alternative: a BUILT, self-contained deployment (no Vite, no nginx)
 
-Since the static-UI-serving slice, the console server can serve its own built UI on the
+Since the static-UI-serving slice, the console gateway can serve its own built UI on the
 SAME port as the WS gateway — set `component.global.console.ws.webRoot` to the built
-`ui/dist` (relative paths resolve against the server's cwd) and skip step 5's Vite
+`ui/dist` (relative paths resolve against the gateway's cwd) and skip step 5's Vite
 process entirely:
 
 ```bash
-# test-configs/config.json: add `"webRoot": "../ui/dist"` under component.global.console.ws
-# (relative to <CONSOLE>/server, the server's cwd when launched with `cd <CONSOLE>`) - or
+# test-configs/config.json: add `"webRoot": "ui/dist"` under component.global.console.ws
+# (relative to <CONSOLE>, the gateway's cwd when launched with `cd <CONSOLE>`) - or
 # point it at an absolute path to a built ui/dist.
-cd <CONSOLE> && node server/dist/main.js \
+cd <CONSOLE> && target/release/edge-console-gateway \
   --platform HOST --transport MQTT ./test-configs/config.json \
   -c FILE ./test-configs/config.json -t site-console
 # Browse straight to http://localhost:8443/ — the console serves index.html + the

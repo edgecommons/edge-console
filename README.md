@@ -25,9 +25,10 @@ log — is deferred by decision (see "The WS gateway").
 
 | Package | What it is |
 |---|---|
-| `server/` | The Node backend — a standard **edgecommons TypeScript component** (`com.mbreissi.edgecommons.EdgeConsole`): the library owns config/messaging/logging/metrics/heartbeat/shutdown; the console adds BusIngress + FleetModel (this slice), then the WS gateway + CommandGateway. |
+| `gateway/` | The official Rust backend — a standard **edgecommons Rust component** (`com.mbreissi.edgecommons.EdgeConsole`) that owns BusIngress, the fleet/activity stores, the command/descriptor gateway, `/ws`, `/healthz`, and static `ui/dist` serving. |
+| `server/` | The legacy TypeScript/Node backend retained during the cutover as a parity oracle and test surface, not the official runtime. |
 | `ui/` | The IBM **Carbon/React** front end (Vite, `g100` dark per the signed-off hi-fi). Ships the **edge-health view** (C3): a WS client + client-side fleet store mirroring the FleetModel, and the Overview screen (health tiles → issue notes → fleet table grouped by device). |
-| `protocol/` | Shared TypeScript types: the WS API contract (snapshots, deltas, liveness) + UNS envelope shapes. A hard contract between `server/` and `ui/`. |
+| `protocol/` | Shared TypeScript types: the browser WS API contract (snapshots, deltas, liveness) + UNS envelope shapes. A hard contract between the Rust gateway and `ui/`. |
 | `test-configs/` | A runnable sample config (the console's own knobs live under `component.global.console`). |
 | `docs/` | DESIGN.md v0.3, the UNS reconciliation + Phase-1 plan, and the lo-fi/hi-fi mockups. |
 
@@ -71,15 +72,15 @@ WS gateway fans out.
 
 **Late-join rehydration**: on first sight of a device the console publishes the per-device
 broadcast pair `ecv1/{device}/_bcast/main/cmd/republish-state` + `…/republish-cfg`
-(fire-and-forget `cmd` notifications). Components answer once the edgecommons `_bcast` listener
-slice (G-S1) lands; until then the periodic `state` keepalive converges liveness within one
-interval, and `cfg` of long-running components is the known gap.
+(fire-and-forget `cmd` notifications). The edgecommons library's `RepublishListener` answers
+them in every component (all four languages), re-announcing `state` and `cfg`; the periodic
+`state` keepalive independently converges liveness within one interval.
 
 ## The WS gateway (slice C2)
 
-An HTTP + WebSocket server (`ws` + `node:http`/`node:fs` — no framework: this slice serves
-`/ws`, a trivial `/healthz` probe, and — opt-in — the console's own built UI as static files
-on that SAME origin) fans the FleetModel's snapshot + delta stream out to browsers,
+An HTTP + WebSocket server (Rust `axum`: this slice serves `/ws`, a trivial `/healthz`
+probe, and — opt-in — the console's own built UI as static files on that SAME origin)
+fans the FleetModel's snapshot + delta stream out to browsers,
 **snapshot-then-deltas**:
 
 - On connect, a client's first frame must be `{"type":"hello","protocolVersion":7}`
@@ -97,9 +98,8 @@ on that SAME origin) fans the FleetModel's snapshot + delta stream out to browse
   delivery to any other client.
 - A periodic `heartbeat` frame doubles as the tick that evicts a connected socket that never
   sends `hello`.
-- The fanout/resume/backpressure core (`server/src/ws/gateway.ts`) is pure and injects the
-  client transport — the real `ws` sockets are a thin IO edge (`server/src/ws/ws-server.ts`),
-  mirroring the BusIngress/FleetModel split.
+- The fanout/resume/backpressure behavior is implemented in the Rust gateway. The legacy
+  TypeScript implementation remains in `server/` as a transition oracle for protocol parity.
 - **RBAC integrated; IdP/auth-seam wiring deferred.** The C4 command write path is
   RBAC-gated: a config-driven `console.rbac` policy (allow/deny per verb, per role) is
   **enforced** in the CommandGateway (`server/src/command/`), and `resolveRole` at the WS
@@ -122,8 +122,7 @@ built deployment.
   GET (including `/`) 404s.
 - **Routing precedence**: `/healthz` first, then (only when `webRoot` is set) static
   file serving for every other `GET`; the `/ws` upgrade never competes with either —
-  Node's `http` module hands an `Upgrade: websocket` request straight to the `upgrade`
-  event (owned by `ws`), never to the plain `request` handler these routes live in.
+  the Rust HTTP router handles the WebSocket upgrade before static fallback.
 - **SPA fallback**: a request whose path has no file extension (an app route, not an
   asset like `/assets/app-<hash>.js`) and doesn't resolve to a real file serves the root
   `index.html` instead, so deep-linking into the UI's client-side router works. A
@@ -256,33 +255,39 @@ The console is configured like any edgecommons component; its own knobs live in 
       "events":    { "maxEvents": 1000, "maxPerComponent": 100 },   // C6 rolling evt history
       "metrics":   { "maxSeriesPoints": 60, "maxSeries": 2000 },    // C6 metric series bounds
       "logs":      { "maxRecords": 5000, "maxPerComponent": 1000,
-                     "defaultTail": 500, "maxTail": 2000 }          // v7 log history bounds
+                     "defaultTail": 500, "maxTail": 2000 },         // v7 log history bounds
+      "runtime":   { "workerThreads": 4, "mallocArenaMax": 2,
+                     "eventBufferCapacity": 512 }                   // process + WS buffer knobs
     }
   }
 }
 ```
 
-All fields are optional (lenient parsing with the defaults shown). See
+All fields are optional (lenient parsing with the defaults shown). `workerThreads` and
+`mallocArenaMax` are launch-time controls: the deployed process must start with matching
+`EDGECONSOLE_WORKER_THREADS` and `MALLOC_ARENA_MAX` environment values for them to be effective.
+`eventBufferCapacity` bounds the gateway's internal live-event broadcast ring. See
 `test-configs/config.json` for a complete runnable document — its `messaging.local` points at
 the **site broker**, and the same file doubles as the `--transport MQTT` payload.
 
 ## Build, test, run
 
 ```bash
-# Local dev: satisfy @edgecommons/edgecommons from the sibling checkout (../core/libs/ts).
-# This generates the GITIGNORED local/edgecommons workspace stub - the npm analog of the
-# bridge's .cargo/config.toml paths override. CI skips this and resolves the published
-# package from GitHub Packages instead. (Requires the sibling lib to be built.)
+# Local dev: satisfy @edgecommons/edgecommons from sibling core checkouts.
+# link:lib creates the gitignored TypeScript workspace stub; link:rust creates the
+# gitignored Rust crate/proto links used by the official gateway build.
 npm run link:lib
+npm run link:rust
 
 npm install
-npm run build        # protocol -> server -> ui
+npm run build        # protocol -> ui -> Rust edge-console-gateway
+cargo test -p edge-console-gateway
 npm test             # server + ui unit suites (fake bus/socket + injected clock - no live IO)
 npm run coverage     # vitest v8 coverage for both, thresholds 90/90/85/80 (ecosystem gate)
 npm run lint         # eslint (flat config) over the whole workspace
 
-# Run the server against the dev rig's site broker (uns-bridge dual-EMQX compose, port 1884):
-node server/dist/main.js \
+# Run the gateway against the dev rig's site broker (uns-bridge dual-EMQX compose, port 1884):
+target/release/edge-console-gateway \
   --platform HOST --transport MQTT ./test-configs/config.json \
   -c FILE ./test-configs/config.json \
   -t gw-01

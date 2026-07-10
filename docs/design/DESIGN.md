@@ -607,7 +607,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 | D3 | Repo name | **`edge-console`** — ✅ **approved 2026-07-02.** |
 | D4 | MQTT LWT/retain | ✅ **Revised 2026-07-02 → LWT only** (M7). LWT is required by the bridge (whole-device UNREACHABLE on the always-MQTT site-broker hop). **Retain deferred** — MQTT-only, redundant with broadcast `republish-state` + the console's timestamped cache (§6.1), and can't express staleness. See DESIGN-uns D9/§9.3. |
 | D5 | Staleness thresholds | Warn shading at 2×, STALE at 2.5×, OFFLINE at 5× of the in-band `keepalive_secs`; tunable in Settings. |
-| D6 | Console server language | **TypeScript/Node** on the edgecommons TS lib (shared `protocol` package with the React/Carbon UI); WS protocol kept as a hard contract so a Rust server could swap in later. |
+| D6 | Console server language | **Rust gateway + TypeScript/React UI.** The official `edge-console-gateway` process is an edgecommons Rust component that connects to the site broker, serves `/ws`, `/healthz`, and built `ui/dist` assets, and preserves browser protocol v7. The TypeScript/Node server remains temporarily as a legacy parity oracle, not the official runtime. |
 | D7 | Config write path in v1 | Read-only + `reload-config`; feature-flagged whole-document push in Phase 2; per-key patching deferred to a future hierarchical-config administration design. |
 | D8 | Multi-device topology | **`uns-bridge` + site broker** (M1) as primary; console multi-connection federation and per-line-console UI federation as documented fallbacks. |
 | D9 | Descriptor DSL evolution | Hold the no-logic line; the `treeBrowser`/`signalGrid` widgets are the pressure-relief valve. Revisit derive primitives only against a "three concrete demands" bar. |
