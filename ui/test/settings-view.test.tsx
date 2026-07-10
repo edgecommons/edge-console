@@ -58,6 +58,12 @@ describe("SettingsView (R6)", () => {
     expect(screen.getByTestId("settings-cmd-ttl").textContent).toContain("60 s");
     expect(screen.getByTestId("settings-cmd-verb-ping").textContent).toContain("10 s");
 
+    // Runtime: launch-latched process knobs reported by the Rust gateway.
+    expect(screen.getByTestId("settings-runtime-workers").textContent).toContain("4");
+    expect(screen.getByTestId("settings-runtime-arenas").textContent).toContain("2");
+    expect(screen.getByTestId("settings-runtime-events").textContent).toContain("512");
+    expect(screen.getByText("restart required")).toBeTruthy();
+
     // Retention caps.
     expect(screen.getByTestId("settings-ret-channels").textContent).toContain("1024");
     expect(screen.getByTestId("settings-ret-series").textContent).toContain("2000");
@@ -118,6 +124,23 @@ describe("SettingsView (R6)", () => {
     const state = clientState(fleetWithLines(), { settings, role: "viewer" });
     render(<SettingsView state={state} />);
     expect(within(screen.getByTestId("settings-conn-serves-ui")).getByText("yes")).toBeTruthy();
+  });
+
+  it("flags runtime config that does not match the launched process", () => {
+    const settings = consoleSettings({
+      runtime: {
+        workerThreads: 8,
+        effectiveWorkerThreads: 4,
+        mallocArenaMax: 3,
+        launchLatched: true,
+      },
+    });
+    const state = clientState(fleetWithLines(), { settings, role: "viewer" });
+    render(<SettingsView state={state} />);
+
+    expect(within(screen.getByTestId("settings-runtime-workers")).getByText("configured 8")).toBeTruthy();
+    expect(within(screen.getByTestId("settings-runtime-arenas")).getByText("not exported")).toBeTruthy();
+    expect(within(screen.getByTestId("settings-runtime-arenas")).getByText("configured 3")).toBeTruthy();
   });
 
   it("shows an honest empty state before the settings frame arrives", () => {

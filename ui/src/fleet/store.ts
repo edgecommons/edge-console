@@ -400,6 +400,12 @@ export class FleetStore {
         this.ensureComponent(delta.key).instances = delta.instances.map((i) => ({ ...i }));
         return;
       }
+      case "cadence-changed": {
+        const comp = this.ensureComponent(delta.key);
+        comp.expectedIntervalSecs = delta.expectedIntervalSecs;
+        comp.cadenceSource = delta.cadenceSource;
+        return;
+      }
       case "device-reachability-changed": {
         const device = this.ensureDevice(delta.device);
         device.unreachable = delta.unreachable;

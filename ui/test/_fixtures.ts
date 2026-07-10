@@ -255,6 +255,14 @@ export function consoleSettings(overrides: Partial<ConsoleSettings> = {}): Conso
       maxTimeoutMs: 60000,
       verbTimeouts: [{ verb: "ping", ms: 10000 }],
     },
+    runtime: {
+      workerThreads: 4,
+      effectiveWorkerThreads: 4,
+      mallocArenaMax: 2,
+      effectiveMallocArenaMax: 2,
+      eventBufferCapacity: 512,
+      launchLatched: true,
+    },
     retention: {
       maxChannelsPerComponent: 1024,
       maxEvents: 1000,

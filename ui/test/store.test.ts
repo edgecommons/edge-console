@@ -85,6 +85,24 @@ describe("FleetStore - snapshot apply", () => {
       { instance: "kep2", connected: false },
     ]);
   });
+
+  it("applies a cadence-changed delta live without requiring a snapshot", () => {
+    const store = liveStore();
+    store.applyDeltas(
+      seqRun(11, [
+        {
+          type: "cadence-changed",
+          at: T0 + 100,
+          key: key(),
+          expectedIntervalSecs: 15,
+          cadenceSource: "cfg",
+        },
+      ]),
+      T0 + 120,
+    );
+    expect(firstComp(store).expectedIntervalSecs).toBe(15);
+    expect(firstComp(store).cadenceSource).toBe("cfg");
+  });
 });
 
 describe("FleetStore - delta fold (seq order)", () => {

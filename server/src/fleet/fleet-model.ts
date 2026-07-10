@@ -316,7 +316,7 @@ export class FleetModel {
     if (event.cls === "state") {
       this.applyState(device, comp, event, now, deltas);
     } else if (event.cls === "cfg") {
-      this.applyCfg(comp, event);
+      this.applyCfg(comp, event, now, deltas);
     }
   }
 
@@ -435,7 +435,7 @@ export class FleetModel {
    * (lenient: a missing/invalid value keeps the current cadence; min 1 s, floats
    * truncated — mirroring the lib's own HeartbeatConfig parsing).
    */
-  private applyCfg(comp: ComponentRecord, event: EnvelopeEvent): void {
+  private applyCfg(comp: ComponentRecord, event: EnvelopeEvent, now: number, deltas: FleetDelta[]): void {
     const body =
       event.body !== null && typeof event.body === "object" && !Array.isArray(event.body)
         ? (event.body as Record<string, unknown>)
@@ -454,8 +454,18 @@ export class FleetModel {
     if (typeof raw === "number" && Number.isFinite(raw)) {
       const interval = Math.trunc(raw);
       if (interval >= 1) {
+        const changed = comp.intervalSecs !== interval || comp.cadenceSource !== "cfg";
         comp.intervalSecs = interval;
         comp.cadenceSource = "cfg";
+        if (changed) {
+          this.push(deltas, {
+            type: "cadence-changed",
+            at: now,
+            key: comp.key,
+            expectedIntervalSecs: interval,
+            cadenceSource: "cfg",
+          });
+        }
       }
     }
   }

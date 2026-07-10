@@ -288,6 +288,82 @@ function ConnectionSection({ conn }: { conn: ConsoleSettings["connection"] }): R
   );
 }
 
+/** Launch-latched runtime knobs for the Rust gateway process. */
+function RuntimeSection({ runtime }: { runtime: ConsoleSettings["runtime"] }): React.JSX.Element {
+  const workerMismatch =
+    runtime !== undefined && runtime.workerThreads !== runtime.effectiveWorkerThreads;
+  const arenaMismatch =
+    runtime !== undefined &&
+    runtime.mallocArenaMax !== undefined &&
+    runtime.effectiveMallocArenaMax !== undefined &&
+    runtime.mallocArenaMax !== runtime.effectiveMallocArenaMax;
+
+  return (
+    <Section
+      title="Runtime"
+      testId="settings-runtime"
+      note="Launch-time process tuning for the Rust console gateway."
+      badge={
+        runtime?.launchLatched === true ? (
+          <Tag size="sm" type="outline" className="ec-tag" title="changing these values requires restarting the gateway process">
+            restart required
+          </Tag>
+        ) : undefined
+      }
+    >
+      <SList testId="settings-runtime-list">
+        <SRow label="Tokio workers" testId="settings-runtime-workers">
+          {runtime === undefined ? (
+            <ValueOrPending value={undefined} pendingTitle="not reported by this gateway" />
+          ) : (
+            <>
+              <span className="ec-mono">{runtime.effectiveWorkerThreads}</span>
+              {workerMismatch && (
+                <Tag size="sm" type="warm-gray" className="ec-tag" title="configured value differs from the process currently running">
+                  configured {runtime.workerThreads}
+                </Tag>
+              )}
+            </>
+          )}
+        </SRow>
+        <SRow label="Malloc arenas" testId="settings-runtime-arenas">
+          {runtime === undefined ? (
+            <ValueOrPending value={undefined} pendingTitle="not reported by this gateway" />
+          ) : runtime.effectiveMallocArenaMax !== undefined ? (
+            <>
+              <span className="ec-mono">{runtime.effectiveMallocArenaMax}</span>
+              {arenaMismatch && (
+                <Tag size="sm" type="warm-gray" className="ec-tag" title="configured value differs from the environment captured at process start">
+                  configured {runtime.mallocArenaMax}
+                </Tag>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="ec-dim">not exported</span>
+              {runtime.mallocArenaMax !== undefined && (
+                <Tag size="sm" type="warm-gray" className="ec-tag" title="MALLOC_ARENA_MAX must be exported before the process starts">
+                  configured {runtime.mallocArenaMax}
+                </Tag>
+              )}
+            </>
+          )}
+        </SRow>
+        <SRow label="Event buffer" testId="settings-runtime-events">
+          {runtime?.eventBufferCapacity === undefined ? (
+            <ValueOrPending value={undefined} pendingTitle="not reported by this gateway" />
+          ) : (
+            <>
+              <span className="ec-mono">{runtime.eventBufferCapacity}</span>
+              <span className="ec-dim"> recent gateway events</span>
+            </>
+          )}
+        </SRow>
+      </SList>
+    </Section>
+  );
+}
+
 /** The miss-detection ladder + command deadlines + store retention (the numeric knobs). */
 function KnobsSections({ settings }: { settings: ConsoleSettings }): React.JSX.Element {
   const { staleness, commands, retention } = settings;
@@ -341,6 +417,8 @@ function KnobsSections({ settings }: { settings: ConsoleSettings }): React.JSX.E
           ))}
         </SList>
       </Section>
+
+      <RuntimeSection runtime={settings.runtime} />
 
       <Section
         title="Store retention"

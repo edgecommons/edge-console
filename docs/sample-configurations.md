@@ -16,7 +16,7 @@ The smallest useful config — essentially the `test-configs/config.json` in the
 local site broker and takes every console default. Run it with:
 
 ```bash
-node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
+target/release/edge-console-gateway --platform HOST --transport MQTT ./config.json -c FILE ./config.json -t site-console
 ```
 
 ```jsonc
@@ -41,7 +41,8 @@ node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE 
           "warnMultiplier": 2, "staleMultiplier": 2.5, "offlineMultiplier": 5,
           "defaultIntervalSecs": 5, "sweepIntervalMs": 1000
         },
-        "cache": { "maxChannelsPerComponent": 1024 }
+        "cache": { "maxChannelsPerComponent": 1024 },
+        "runtime": { "workerThreads": 4, "mallocArenaMax": 2, "eventBufferCapacity": 512 }
       }
     },
     "instances": [{ "id": "main" }]
@@ -51,7 +52,7 @@ node server/dist/main.js --platform HOST --transport MQTT ./config.json -c FILE 
 
 ---
 
-## 2. Self-contained built deployment (server serves the UI — no Vite/nginx)
+## 2. Self-contained built deployment (gateway serves the UI — no Vite/nginx)
 
 Add `console.ws.webRoot` pointing at the built `ui/dist`. The one process now serves the WebSocket **and**
 the UI on `:8443`. Browse straight to `http://<host>:8443/`.
@@ -77,9 +78,9 @@ the UI on `:8443`. Browse straight to `http://<host>:8443/`.
           "port": 8443,
           "bindAddress": "0.0.0.0",
           "heartbeatIntervalMs": 15000,
-          // Relative to the SERVER process cwd (e.g. run from <repo>/server -> "../ui/dist"),
+          // Relative to the gateway process cwd (e.g. run from <repo> -> "ui/dist"),
           // or an absolute path to a built ui/dist.
-          "webRoot": "../ui/dist"
+          "webRoot": "ui/dist"
         }
       }
     },
@@ -88,7 +89,7 @@ the UI on `:8443`. Browse straight to `http://<host>:8443/`.
 }
 ```
 
-Build first (`npm run build` produces `ui/dist`). Put a TLS terminator in front for HTTPS/WSS — the server
+Build first (`npm run build` produces `ui/dist`). Put a TLS terminator in front for HTTPS/WSS — the gateway
 is plain HTTP either way.
 
 ---
@@ -179,7 +180,8 @@ any one component evict others.
         "cache":   { "maxChannelsPerComponent": 4096 },
         "events":  { "maxEvents": 5000, "maxPerComponent": 250 },
         "metrics": { "maxSeriesPoints": 120, "maxSeries": 8000 },
-        "logs": { "maxRecords": 10000, "maxPerComponent": 2000, "defaultTail": 500, "maxTail": 2000 }
+        "logs": { "maxRecords": 10000, "maxPerComponent": 2000, "defaultTail": 500, "maxTail": 2000 },
+        "runtime": { "workerThreads": 4, "mallocArenaMax": 2, "eventBufferCapacity": 512 }
       }
     },
     "instances": [{ "id": "main" }]
@@ -189,6 +191,11 @@ any one component evict others.
 
 Note the four-level `hierarchy`/`identity` — that is the *console's own* identity. The console renders
 **each observed component's** own declared hierarchy dynamically, regardless of its own.
+
+`runtime.workerThreads` and `runtime.mallocArenaMax` are launch-latched. Set matching
+`EDGECONSOLE_WORKER_THREADS` and `MALLOC_ARENA_MAX` environment values before starting the gateway.
+`runtime.eventBufferCapacity` bounds the hidden live-event ring retained for connected WebSocket
+sessions.
 
 ---
 
@@ -264,7 +271,7 @@ spec:
                 port: { number: 8443 }
 ```
 
-The Deployment runs the server image with `--platform KUBERNETES` and **one** replica. Because the page is
+The Deployment runs the gateway image with `--platform KUBERNETES` and **one** replica. Because the page is
 served over `https://`, the UI derives `wss://console.dallas.example.com/ws` automatically — no UI config
 change.
 

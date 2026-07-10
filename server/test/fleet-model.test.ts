@@ -171,7 +171,15 @@ describe("FleetModel - cadence derivation (Q3: console-side, from cfg)", () => {
   it("derives the cadence from cfg heartbeat.intervalSecs (floats truncated, like the lib)", () => {
     const model = new FleetModel(new TestClock().fn);
     model.ingest(state("RUNNING", 1));
-    model.ingest(cfg(2.0));
+    const deltas = model.ingest(cfg(2.0));
+    expect(types(deltas)).toEqual(["value-updated", "cadence-changed"]);
+    expect(deltas[1]).toEqual(
+      expect.objectContaining({
+        type: "cadence-changed",
+        expectedIntervalSecs: 2,
+        cadenceSource: "cfg",
+      }),
+    );
     const comp = model.snapshot().devices[0]!.components[0]!;
     expect(comp.expectedIntervalSecs).toBe(2);
     expect(comp.cadenceSource).toBe("cfg");
