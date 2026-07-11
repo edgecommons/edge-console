@@ -592,10 +592,19 @@ async fn static_response(root: &Path, uri_path: &str) -> Result<Response, Status
         HeaderValue::from_str(mime.as_ref())
             .unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
-    let cache = if path.file_name().and_then(|n| n.to_str()) == Some("index.html") {
-        "no-cache"
-    } else {
+    // Only Vite's content-hashed bundles under assets/ may be cached immutably — their name
+    // changes when their content does. Everything else the UI serves from the web root
+    // (index.html, favicon.svg) keeps a stable name, so an immutable cache would pin a stale
+    // copy in browsers until it expired.
+    let fingerprinted = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        == Some("assets");
+    let cache = if fingerprinted {
         "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
     };
     response
         .headers_mut()
