@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920, initial-scale=1, maximum-scale=1">
+  <title>EdgeCommons Gemba TV experiment</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Tizen WebSocket feasibility client</p>
+      <h1>Dallas Gemba Board</h1>
+    </div>
+    <div id="status" class="status disconnected">Starting</div>
+  </header>
+
+  <main>
+    <section class="metrics">
+      <article>
+        <span class="label">Update envelopes</span>
+        <strong id="envelope-count">0</strong>
+      </article>
+      <article>
+        <span class="label">Current rate</span>
+        <strong id="message-rate">0.0 Hz</strong>
+      </article>
+      <article>
+        <span class="label">Frames observed</span>
+        <strong id="frame-count">0</strong>
+      </article>
+      <article>
+        <span class="label">Reconnects</span>
+        <strong id="reconnect-count">0</strong>
+      </article>
+    </section>
+
+    <section class="details">
+      <article class="connection-card">
+        <h2>Connection</h2>
+        <label for="gateway-url">Gateway WebSocket URL</label>
+        <input id="gateway-url" type="url" autocomplete="off" spellcheck="false">
+        <div class="buttons">
+          <button id="connect-button" type="button">Save and connect</button>
+          <button id="disconnect-button" type="button">Disconnect</button>
+        </div>
+        <dl>
+          <dt>Application origin</dt><dd id="app-origin"></dd>
+          <dt>Last message</dt><dd id="last-message">None</dd>
+          <dt>Last error</dt><dd id="last-error">None</dd>
+        </dl>
+      </article>
+
+      <article class="payload-card">
+        <h2>Latest update</h2>
+        <pre id="latest-update">Waiting for the gateway...</pre>
+      </article>
+    </section>
+  </main>
+
+  <footer>Remote: use arrow keys to move focus and Enter to activate. Data delivery is capped at 30 Hz.</footer>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

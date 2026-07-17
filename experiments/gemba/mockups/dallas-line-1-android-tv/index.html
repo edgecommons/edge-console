@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Dallas Line 1 — Filling overview</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="board" aria-label="Dallas filling line status dashboard">
+    <header class="masthead">
+      <div class="plant-mark" aria-label="Bottles R Us Dallas">
+        <span class="plant-mark__bars"><i></i><i></i><i></i></span>
+        <span><b>DALLAS</b><small>Filling hall</small></span>
+      </div>
+      <div class="line-title">
+        <span class="line-title__number">01</span>
+        <span><small>Filling line</small><b>12 oz Sparkling · Lime</b></span>
+      </div>
+      <div class="masthead__right">
+        <div class="connection"><span class="pulse"></span> Live · 0.5 s</div>
+        <time id="clock">14:26:18</time>
+        <span class="shift">SHIFT A · 06:00–14:30</span>
+      </div>
+    </header>
+
+    <section class="flow-hero" aria-labelledby="line-state">
+      <div class="rate-block">
+        <span class="eyebrow">Actual speed</span>
+        <div><strong id="bpm" data-signal="LineSpeedBpm">126</strong><em>BPM</em></div>
+        <p><span class="up-arrow">↗</span> 95.5% of <b>132 target</b></p>
+      </div>
+
+      <div class="flow-ribbon">
+        <div class="flow-ribbon__heading">
+          <span id="line-state">Running steady</span>
+          <small>Recipe LS-355-07 · Lot D0713-A</small>
+        </div>
+        <div class="conveyor" aria-label="Bottle flow from infeed through filler to outfeed">
+          <span class="stage stage--infeed"><i></i>INFEED</span>
+          <span class="stage stage--filler"><i></i>40-VALVE FILLER</span>
+          <span class="stage stage--capper"><i></i>CAPPER</span>
+          <span class="stage stage--outfeed"><i></i>OUTFEED</span>
+          <div class="belt"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+
+      <div class="oee-block">
+        <svg class="oee-ring" viewBox="0 0 120 120" role="img" aria-label="OEE 92.4 percent">
+          <circle class="oee-ring__track" cx="60" cy="60" r="48" pathLength="100"></circle>
+          <circle class="oee-ring__value" cx="60" cy="60" r="48" pathLength="100" stroke-dasharray="92.4 100"></circle>
+          <text id="oee-value" data-signal="OeePct" x="60" y="58" text-anchor="middle">92.4</text>
+          <text class="oee-ring__unit" x="60" y="76" text-anchor="middle">OEE %</text>
+        </svg>
+        <div class="oee-factors"><span><b data-signal="AvailabilityPct">97.1</b>Avail.</span><span><b data-signal="PerformancePct">95.8</b>Perf.</span><span><b data-signal="QualityPct">99.3</b>Quality</span></div>
+      </div>
+    </section>
+
+    <section class="metrics-grid">
+      <article class="panel pressure-panel">
+        <div class="panel__heading">
+          <div><span class="eyebrow">Fill circuit</span><h2>Pressure stability</h2></div>
+          <div class="reading"><b id="pressure" data-signal="FillPressureKpa">112.4</b><small>kPa</small></div>
+        </div>
+        <svg class="trend" viewBox="0 0 760 158" preserveAspectRatio="none" aria-label="Fill pressure trend">
+          <defs>
+            <linearGradient id="pressure-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#8ea6ff" stop-opacity="0.35"></stop>
+              <stop offset="1" stop-color="#8ea6ff" stop-opacity="0"></stop>
+            </linearGradient>
+          </defs>
+          <line x1="0" y1="32" x2="760" y2="32" class="limit"></line>
+          <text x="8" y="24" class="limit-label">140 HIGH</text>
+          <line x1="0" y1="126" x2="760" y2="126" class="gridline"></line>
+          <path id="pressure-area" class="trend__area" d=""></path>
+          <path id="pressure-line" class="trend__line" d=""></path>
+        </svg>
+        <div class="stability-row"><span><i class="good-dot"></i>Target band 105–125 kPa</span><span>σ <b id="pressure-sigma">2.8</b> kPa</span><span>40 / 40 valves tracking</span></div>
+      </article>
+
+      <article class="panel quality-panel">
+        <div class="panel__heading">
+          <div><span class="eyebrow">Last 15 minutes</span><h2>Fill quality</h2></div>
+          <span class="quality-chip">IN CONTROL</span>
+        </div>
+        <div class="fill-visual">
+          <div class="bottle-gauge" aria-label="Average fill volume">
+            <div class="bottle-gauge__neck"></div>
+            <div class="bottle-gauge__body"><div id="bottle-liquid" class="bottle-gauge__liquid"></div></div>
+          </div>
+          <div class="fill-reading"><strong id="fill-volume" data-signal="FillVolumeMl">500.2</strong><em>mL</em><span>Target 500.0 ± 2.0</span></div>
+          <div class="quality-stats">
+            <span><small>Underfill</small><b id="underfill-rate">0.18%</b></span>
+            <span><small>Overfill</small><b>0.09%</b></span>
+            <span><small>Cap rejects</small><b>0.41%</b></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel shift-panel">
+        <div class="panel__heading"><div><span class="eyebrow">Shift A</span><h2>Production</h2></div><span class="pace">+384 ahead</span></div>
+        <div class="count-row"><strong id="bottle-count" data-signal="GoodBottleCount">58,742</strong><span>good bottles</span></div>
+        <div class="target-bar"><i id="shift-progress"></i></div>
+        <div class="target-copy"><span>58,742 actual</span><span>58,358 plan</span><span>64,000 goal</span></div>
+        <div class="mini-stats"><span><small>Rejects</small><b id="reject-count" data-signal="RejectCount">412</b></span><span><small>Downtime</small><b>11m 42s</b></span><span><small>Changeover</small><b>07:18</b></span></div>
+      </article>
+
+      <article class="panel process-panel">
+        <div class="panel__heading"><div><span class="eyebrow">Process window</span><h2>Product conditions</h2></div><span class="sensor-count">6 sensors good</span></div>
+        <div class="process-reading"><span><small>Product temperature</small><b><i id="temperature" data-signal="ProductTempC">4.3</i> °C</b><em>Target 3.5–5.0</em></span><span><small>Filler bowl</small><b><i id="bowl-level" data-signal="BowlLevelPct">78</i>%</b><em>Stable · ±1.2%</em></span></div>
+        <div class="temperature-scale"><i></i><mark></mark></div>
+        <div class="process-foot"><span>CO₂ <b>2.62 vol</b></span><span>Foam risk <b>Low</b></span><span>Last CIP <b>05:14</b></span></div>
+      </article>
+    </section>
+
+    <footer class="board-footer">
+      <div class="attention" id="attention"><span class="attention__icon">!</span><span><small>WATCH</small><b id="attention-text">Capper bowl trending 3% above normal vibration</b></span><em>Monitor next 10 min</em></div>
+      <div class="footer-note">MODBUS · conveyor1 &nbsp;&nbsp; OPC UA · filler1</div>
+      <button id="scenario-button" type="button" aria-pressed="false"><span>A</span> Pressure scenario</button>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

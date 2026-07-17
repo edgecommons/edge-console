@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Dallas bottling plant supervisor view with live Filling and Packaging shop-floor dashboards.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230b1017'/%3E%3Cpath d='M12 42h9V25h-9zm15 0h9V14h-9zm15 0h9V7h-9z' fill='%235bd8c7'/%3E%3C/svg%3E">
+  <title>Dallas operations</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="control-room">
+    <aside class="control-rail" aria-label="Dallas operations navigation">
+      <a class="plant-mark" data-app-link="dallas-overview" href="/apps/dallas-overview/">
+        <span class="plant-mark__bars" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><b>DALLAS</b><small>OPERATIONS</small></span>
+      </a>
+
+      <div class="rail-label">Control-room views</div>
+      <nav class="line-nav">
+        <a data-app-link="dallas-overview" href="/apps/dallas-overview/">
+          <span class="nav-index">00</span>
+          <span><b>Plant overview</b><small>Both production lines</small></span>
+          <i class="nav-state" data-nav-state="overview"></i>
+        </a>
+        <a data-app-link="dallas-line-1" href="/apps/dallas-line-1/">
+          <span class="nav-index nav-index--fill">01</span>
+          <span><b>Filling</b><small>12 oz sparkling · lime</small></span>
+          <i class="nav-state" data-nav-state="fill"></i>
+        </a>
+        <a data-app-link="dallas-line-2" href="/apps/dallas-line-2/">
+          <span class="nav-index nav-index--pack">02</span>
+          <span><b>Packaging</b><small>24 pack · pallet 018</small></span>
+          <i class="nav-state" data-nav-state="pack"></i>
+        </a>
+      </nav>
+
+      <section class="rail-shift" aria-label="Current shift">
+        <span>SHIFT A</span>
+        <b>06:00–14:30</b>
+        <div><i></i><span>00:24 remaining</span></div>
+      </section>
+
+      <div class="rail-keys" aria-label="Keyboard shortcuts">
+        <span><kbd>0</kbd>Overview</span>
+        <span><kbd>1</kbd>Filling</span>
+        <span><kbd>2</kbd>Packaging</span>
+      </div>
+
+      <footer class="bridge-state">
+        <span id="bridge-dot" class="bridge-dot"></span>
+        <span><b id="bridge-status">Connecting to bridge</b><small id="bridge-detail">No application session</small></span>
+      </footer>
+    </aside>
+
+    <div class="workspace">
+      <header class="workspace-bar">
+        <div><span>DALLAS / <b id="view-crumb">PLANT</b></span><small id="view-purpose">Supervisor mirror</small></div>
+        <div class="mirror-badge"><i></i><span><b>SHOP-FLOOR MIRROR</b><small>Same operating picture · control-room scale</small></span></div>
+        <time id="clock">--:--:--</time>
+      </header>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <template id="view-overview">
+    <div class="overview-view view-enter">
+      <section class="overview-heading">
+        <div><span class="section-code">CONTROL ROOM / CURRENT SHIFT</span><h1>Dallas at a glance</h1></div>
+        <p>Choose a line to open the exact operating picture shown on its shop-floor display.</p>
+      </section>
+
+      <section class="plant-summary" aria-label="Plant production summary">
+        <article><span>LINES PRODUCING</span><strong><b data-live-line-count>2</b> / 2</strong><small>Both schedules active</small></article>
+        <article><span>GOOD UNITS</span><strong data-aggregate-count>65,584</strong><small>58,742 bottles · 6,842 cases</small></article>
+        <article><span>ACTIVE ATTENTION</span><strong data-attention-count>2</strong><small data-attention-detail>Two configured watch items</small></article>
+        <article><span>BRIDGE EGRESS</span><strong><b id="envelope-rate">0.0</b> Hz</strong><small>Per-client ceiling 30 Hz</small></article>
+      </section>
+
+      <section class="line-selector">
+        <a class="line-card line-card--fill" data-app-link="dallas-line-1" href="/apps/dallas-line-1/">
+          <header><span><i></i>LINE 01 · FILLING</span><b data-line-state="fill">RUNNING STEADY</b></header>
+          <div class="line-card__hero">
+            <div><small>ACTUAL SPEED</small><strong><b data-signal="LineSpeedBpm" data-device="fill" data-format="integer">126</b><em>BPM</em></strong><span>132 target</span></div>
+            <div class="mini-oee"><strong data-signal="OeePct" data-device="fill" data-format="one">92.4</strong><span>OEE %</span></div>
+          </div>
+          <div class="overview-bottle-rail" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="line-card__metrics"><span><small>GOOD BOTTLES</small><b data-signal="GoodBottleCount" data-device="fill" data-format="integer">58,742</b></span><span><small>FILL PRESSURE</small><b><i data-signal="FillPressureKpa" data-device="fill" data-format="one">112.4</i> kPa</b></span><span><small>QUALITY</small><b><i data-signal="QualityPct" data-device="fill" data-format="one">99.3</i>%</b></span></div>
+          <footer><span>WATCH · Capper vibration above normal</span><b>Open floor view <i>→</i></b></footer>
+        </a>
+
+        <a class="line-card line-card--pack" data-app-link="dallas-line-2" href="/apps/dallas-line-2/">
+          <header><span><i></i>LINE 02 · PACKAGING</span><b data-line-state="pack">RUNNING CLEAN</b></header>
+          <div class="line-card__hero">
+            <div><small>ACTUAL RATE</small><strong><b data-signal="CaseRateCpm" data-device="pack" data-format="one">27.6</b><em>CPM</em></strong><span>28.0 target</span></div>
+            <div class="mini-pallet"><span><b data-signal="PalletCaseCount" data-device="pack" data-format="integer">91</b> / 120</span><i><b style="width:76%"></b></i><small>PALLET 018 · LAYER 4/5</small></div>
+          </div>
+          <div class="overview-pack-flow" aria-hidden="true"><i>A</i><span></span><i>B</i><span></span><i>C</i><span></span><i>D</i><span></span><i>E</i></div>
+          <div class="line-card__metrics"><span><small>GOOD CASES</small><b data-signal="GoodCaseCount" data-device="pack" data-format="integer">6,842</b></span><span><small>PACKER LOAD</small><b><i data-signal="PackerMotorCurrentA" data-device="pack" data-format="one">6.2</i> A</b></span><span><small>VISION PASS</small><b><i data-signal="VisionPassPct" data-device="pack" data-format="one">99.4</i>%</b></span></div>
+          <footer><span data-pack-attention>NEXT · Carton refill in 11 minutes</span><b>Open floor view <i>→</i></b></footer>
+        </a>
+      </section>
+
+      <section class="overview-foot">
+        <div><span>LIVE SIGNAL COVERAGE</span><b><i data-live-signals="fill">0</i> Filling · <i data-live-signals="pack">0</i> Packaging</b></div>
+        <p>Values remain the approved demo baseline until their matching simulator signals arrive.</p>
+      </section>
+    </div>
+  </template>
+
+  <template id="view-line-1">
+    <div class="floor-view floor-view--fill view-enter" data-line="fill">
+      <section class="floor-title">
+        <div><span class="section-code">FLOOR MIRROR / GW-FILL-01</span><h1>Line 01 · Filling</h1></div>
+        <div class="source-health"><i></i><span><b data-source-status>DEMO BASELINE</b><small><b data-live-signals="fill">0</b> mapped signals</small></span></div>
+      </section>
+
+      <section class="fill-hero">
+        <div class="fill-speed"><small>ACTUAL SPEED</small><strong><b data-signal="LineSpeedBpm" data-device="fill" data-format="integer">126</b><em>BPM</em></strong><span>↗ 95.5% of <b>132 target</b></span></div>
+        <div class="fill-flow"><header><h2 data-line-state="fill">Running steady</h2><small>Recipe LS-355-07 · Lot D0713-A</small></header><div class="bottle-rail" aria-label="Animated filling process"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><i></i></div><footer><b>INFEED</b><b>40-VALVE FILLER</b><b>CAPPER</b><b>OUTFEED</b></footer></div>
+        <div class="fill-oee"><div class="oee-dial" data-oee-ring><strong data-signal="OeePct" data-device="fill" data-format="one">92.4</strong><span>OEE %</span></div><div><span><b data-signal="AvailabilityPct" data-device="fill" data-format="one">97.1</b>Avail.</span><span><b data-signal="PerformancePct" data-device="fill" data-format="one">95.8</b>Perf.</span><span><b data-signal="QualityPct" data-device="fill" data-format="one">99.3</b>Quality</span></div></div>
+      </section>
+
+      <section class="fill-grid">
+        <article class="fill-panel pressure-panel"><header><div><span>FILL CIRCUIT</span><h2>Pressure stability</h2></div><strong><b data-signal="FillPressureKpa" data-device="fill" data-format="one">112.4</b><small>kPa</small></strong></header><div class="trend-chart trend-chart--pressure"><span>140 HIGH</span><svg viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true"><path class="trend-area" data-trend-area="FillPressureKpa" d="M0 88 L70 76 L140 78 L210 70 L280 75 L350 84 L420 87 L500 87 L600 93 L600 120 L0 120Z"></path><path class="trend-line" data-trend-line="FillPressureKpa" d="M0 88 L70 76 L140 78 L210 70 L280 75 L350 84 L420 87 L500 87 L600 93"></path></svg></div><footer><span>● Target band 105–125 kPa</span><b>40 / 40 valves tracking</b></footer></article>
+        <article class="fill-panel fill-quality"><header><div><span>LAST 15 MINUTES</span><h2>Fill quality</h2></div><b>IN CONTROL</b></header><div class="quality-core"><div class="bottle-gauge"><i></i></div><strong><b data-signal="FillVolumeMl" data-device="fill" data-format="one">500.2</b><small>mL</small><em>Target 500.0 ± 2.0</em></strong><dl><div><dt>Underfill</dt><dd>0.18%</dd></div><div><dt>Overfill</dt><dd>0.09%</dd></div><div><dt>Cap rejects</dt><dd>0.41%</dd></div></dl></div></article>
+        <article class="fill-panel production-panel"><header><div><span>SHIFT A</span><h2>Production</h2></div><b>+384 AHEAD</b></header><strong class="production-count"><b data-signal="GoodBottleCount" data-device="fill" data-format="integer">58,742</b><small>good bottles</small></strong><div class="attainment"><i style="width:91.8%"></i></div><div class="attainment-labels"><span>58,742 actual</span><span>58,358 plan</span><span>64,000 goal</span></div><dl><div><dt>Rejects</dt><dd data-signal="RejectCount" data-device="fill" data-format="integer">412</dd></div><div><dt>Downtime</dt><dd>11m 42s</dd></div><div><dt>Changeover</dt><dd>07:18</dd></div></dl></article>
+        <article class="fill-panel conditions-panel"><header><div><span>PROCESS WINDOW</span><h2>Product conditions</h2></div><b>6 SENSORS GOOD</b></header><div class="condition-cards"><span><small>Product temperature</small><b><i data-signal="ProductTempC" data-device="fill" data-format="one">4.3</i> °C</b><em>Target 3.5–5.0</em></span><span><small>Filler bowl</small><b><i data-signal="BowlLevelPct" data-device="fill" data-format="integer">78</i>%</b><em>Stable · ±1.2%</em></span></div><div class="process-window"><i></i><b></b></div><footer><span>CO₂ <b>2.62 vol</b></span><span>Foam risk <b>Low</b></span><span>Last CIP <b>05:14</b></span></footer></article>
+      </section>
+
+      <footer class="floor-attention floor-attention--fill"><i>!</i><span><small>WATCH</small><b>Capper bowl trending 3% above normal vibration</b></span><em>Monitor next 10 min</em><strong>MODBUS · conveyor1&nbsp;&nbsp; OPC UA · filler1</strong></footer>
+    </div>
+  </template>
+
+  <template id="view-line-2">
+    <div class="floor-view floor-view--pack view-enter" data-line="pack">
+      <section class="floor-title floor-title--paper"><div><span class="section-code">FLOOR MIRROR / GW-PACK-01</span><h1>Line 02 · Packaging</h1></div><div class="source-health source-health--paper"><i></i><span><b data-source-status>DEMO BASELINE</b><small><b data-live-signals="pack">0</b> mapped signals</small></span></div></section>
+
+      <section class="pack-status"><div><small>PACKAGING STATUS</small><h2 data-line-state="pack">RUNNING CLEAN</h2><span>Case packer synchronized with palletizer</span></div><div><small>ACTIVE ORDER</small><b>SPRK-LIME-355 · 24 PACK</b><span>WO 71042 · Customer DC-04</span></div><div><small>ACTUAL RATE</small><strong data-signal="CaseRateCpm" data-device="pack" data-format="one">27.6</strong><b>CASES / MIN</b><span>Target 28.0</span></div></section>
+
+      <div class="pack-layout">
+        <section class="pack-operations">
+          <article class="pack-flow"><header><div><span>01 · PROCESS</span><h2>Pack flow</h2></div><b>All interlocks made</b></header><div class="machine-track"><span><i>A</i><small>CASE ERECTOR</small><b>Running</b><em>62% blanks</em></span><strong>›</strong><span data-packer-machine><i>B</i><small>ROBOTIC PACKER</small><b data-packer-state>Running</b><em><i data-signal="PackerMotorCurrentA" data-device="pack" data-format="one">6.2</i> A load</em></span><strong>›</strong><span><i>C</i><small>CASE SEALER</small><b>Running</b><em><i data-signal="GlueTempC" data-device="pack" data-format="integer">176</i> °C glue</em></span><strong>›</strong><span><i>D</i><small>LABEL + VISION</small><b>Passing</b><em><i data-signal="VisionPassPct" data-device="pack" data-format="one">99.4</i>% verify</em></span><strong>›</strong><span><i>E</i><small>PALLETIZER</small><b>Building</b><em>Layer 4 of 5</em></span></div></article>
+          <div class="pack-midgrid">
+            <article class="paper-panel throughput"><header><div><span>02 · SHIFT</span><h2>Throughput</h2></div><b>+18 CASES AHEAD</b></header><strong><b data-signal="GoodCaseCount" data-device="pack" data-format="integer">6,842</b><small>good cases</small></strong><div class="case-progress"><i style="width:96.9%"></i></div><footer><span>Actual 6,842</span><span>Plan 6,824</span><span>Goal 7,056</span></footer><dl><div><dt>Reject cases</dt><dd data-signal="CaseRejectCount" data-device="pack" data-format="integer">38</dd></div><div><dt>Microstops</dt><dd>7</dd></div><div><dt>Blocked time</dt><dd>03:12</dd></div></dl></article>
+            <article class="paper-panel jam-panel"><header><div><span>03 · PACKER LOAD</span><h2>Jam early warning</h2></div><b data-jam-risk>LOW RISK</b></header><strong><b data-signal="PackerMotorCurrentA" data-device="pack" data-format="one">6.2</b><small>A</small><em>Normal 5.4–7.1 A</em></strong><div class="trend-chart trend-chart--current"><span>9.0 A JAM RISK</span><svg viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true"><path class="trend-area" data-trend-area="PackerMotorCurrentA" d="M0 88 L70 80 L140 83 L210 75 L280 90 L350 82 L420 91 L500 86 L600 94 L600 120 L0 120Z"></path><path class="trend-line" data-trend-line="PackerMotorCurrentA" d="M0 88 L70 80 L140 83 L210 75 L280 90 L350 82 L420 91 L500 86 L600 94"></path></svg></div><footer><span>● Jam switch <b data-jam-state>CLEAR</b></span><span>Last jam <b>13:42 · 18s</b></span></footer></article>
+          </div>
+          <section class="pack-quality" aria-label="Packaging quality"><article><i>V</i><span><small>VISION PASS</small><b><em data-signal="VisionPassPct" data-device="pack" data-format="one">99.4</em>%</b><strong>Target ≥ 99.0%</strong></span></article><article><i>°</i><span><small>GLUE TEMPERATURE</small><b><em data-signal="GlueTempC" data-device="pack" data-format="integer">176</em> °C</b><strong>Band 172–180 °C</strong></span></article><article><i>kg</i><span><small>CASE WEIGHT</small><b><em data-signal="CaseWeightKg" data-device="pack" data-format="two">12.18</em> kg</b><strong>±0.08 kg</strong></span></article><article><i>✓</i><span><small>LABEL VERIFY</small><b data-signal="LabelCode" data-device="pack">0713A-1426</b><strong>Grade A · readable</strong></span></article></section>
+        </section>
+
+        <aside class="pallet-panel"><header><div><span>LIVE LOAD</span><h2>Pallet 018</h2></div><b>DOCK 04</b></header><strong class="pallet-percent"><b data-pallet-percent>76</b><small>% complete</small></strong><div class="pallet-progress"><i data-pallet-progress style="width:76%"></i></div><dl><div><dt>Current layer</dt><dd data-pallet-layer>4 / 5</dd></div><div><dt>Cases loaded</dt><dd><i data-signal="PalletCaseCount" data-device="pack" data-format="integer">91</i> / 120</dd></div></dl><div class="pallet-grid" data-pallet-grid aria-label="Current pallet layer pattern"></div><div class="pallet-key"><span><i></i>Loaded</span><span><i></i>Next pick</span><span><i></i>Open</span></div><footer><span><small>Pattern</small><b>24-A · Interlock</b></span><span><small>Est. complete</small><b>03:28</b></span></footer></aside>
+      </div>
+
+      <footer class="floor-attention floor-attention--pack"><i></i><span><small>NEXT ATTENTION</small><b data-pack-attention>Carton magazine refill in approximately 11 minutes</b></span><em><b data-signal="CartonMagazinePct" data-device="pack" data-format="integer">62</b>% remaining</em><strong>OPC UA Kepware · palletizer1&nbsp;&nbsp; MODBUS Host sim · casepacker1</strong></footer>
+    </div>
+  </template>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

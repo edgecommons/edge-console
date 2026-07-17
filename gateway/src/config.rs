@@ -84,9 +84,66 @@ pub struct ClockConfig {
     pub clear_after_quiet_secs: u64,
 }
 
+/// Read-only model projections an experimental Gemba application may subscribe to.
+///
+/// This closed enum is the configuration boundary: unknown values, including `commands`,
+/// invalidate an application manifest rather than widening its access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AppCapability {
+    Fleet,
+    Events,
+    Metrics,
+    Logs,
+    Signals,
+    Attributes,
+    Alarms,
+}
+
+impl AppCapability {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fleet => "fleet",
+            Self::Events => "events",
+            Self::Metrics => "metrics",
+            Self::Logs => "logs",
+            Self::Signals => "signals",
+            Self::Attributes => "attributes",
+            Self::Alarms => "alarms",
+        }
+    }
+}
+
+impl TryFrom<&str> for AppCapability {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "fleet" => Ok(Self::Fleet),
+            "events" => Ok(Self::Events),
+            "metrics" => Ok(Self::Metrics),
+            "logs" => Ok(Self::Logs),
+            "signals" => Ok(Self::Signals),
+            "attributes" => Ok(Self::Attributes),
+            "alarms" => Ok(Self::Alarms),
+            _ => Err(()),
+        }
+    }
+}
+
+/// A validated entry in the experimental application registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppConfig {
+    pub id: String,
+    pub web_root: String,
+    pub allowed_origins: Vec<String>,
+    pub allowed_roles: Vec<String>,
+    pub capabilities: Vec<AppCapability>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConsoleConfig {
     pub ws: WsConfig,
+    pub apps: Vec<AppConfig>,
     pub staleness: StalenessConfig,
     pub cache: CacheConfig,
     pub events: EventsConfig,
@@ -111,6 +168,7 @@ impl Default for ConsoleConfig {
                 web_root: None,
                 allowed_origins: Vec::new(),
             },
+            apps: Vec::new(),
             staleness: StalenessConfig {
                 warn_multiplier: 2.0,
                 stale_multiplier: 2.5,
@@ -211,6 +269,7 @@ impl ConsoleConfig {
                     .filter(|s| !s.is_empty())
                     .map(resolve_path),
             },
+            apps: parse_apps(console.get("apps")),
             staleness: StalenessConfig {
                 warn_multiplier: warn,
                 stale_multiplier: stale,
@@ -460,6 +519,132 @@ fn parse_commands(value: Option<&Value>, defaults: CommandsConfig) -> CommandsCo
     }
 }
 
+fn parse_apps(value: Option<&Value>) -> Vec<AppConfig> {
+    let Some(entries) = value.and_then(Value::as_array) else {
+        if value.is_some() {
+            tracing::warn!("console.apps must be an array; ignoring application registry");
+        }
+        return Vec::new();
+    };
+
+    let mut apps = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let Some(app) = entry.as_object() else {
+            tracing::warn!(
+                app_index = index,
+                "console.apps entry must be an object; ignoring entry"
+            );
+            continue;
+        };
+        let Some(id) = app
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| valid_app_id(id))
+        else {
+            tracing::warn!(
+                app_index = index,
+                "console.apps entry has an invalid id; ignoring entry"
+            );
+            continue;
+        };
+        if apps.iter().any(|existing: &AppConfig| existing.id == id) {
+            tracing::warn!(
+                app_index = index,
+                app_id = id,
+                "console.apps contains a duplicate id; ignoring entry"
+            );
+            continue;
+        }
+        let Some(web_root) = app
+            .get("webRoot")
+            .and_then(Value::as_str)
+            .filter(|root| !root.trim().is_empty())
+        else {
+            tracing::warn!(
+                app_index = index,
+                app_id = id,
+                "console.apps entry has an invalid webRoot; ignoring entry"
+            );
+            continue;
+        };
+        let Some(allowed_origins) = parse_required_string_array(app.get("allowedOrigins")) else {
+            tracing::warn!(
+                app_index = index,
+                app_id = id,
+                "console.apps entry has invalid allowedOrigins; ignoring entry"
+            );
+            continue;
+        };
+        let Some(allowed_roles) = parse_required_non_empty_string_array(app.get("allowedRoles"))
+        else {
+            tracing::warn!(
+                app_index = index,
+                app_id = id,
+                "console.apps entry has invalid allowedRoles; ignoring entry"
+            );
+            continue;
+        };
+        let Some(capabilities) = parse_app_capabilities(app.get("capabilities")) else {
+            tracing::warn!(
+                app_index = index,
+                app_id = id,
+                "console.apps entry has invalid capabilities; ignoring entry"
+            );
+            continue;
+        };
+
+        apps.push(AppConfig {
+            id: id.to_string(),
+            web_root: resolve_path(web_root),
+            allowed_origins,
+            allowed_roles,
+            capabilities,
+        });
+    }
+    apps
+}
+
+fn valid_app_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 64
+        && bytes[0].is_ascii_lowercase()
+        && bytes[bytes.len() - 1].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+fn parse_required_string_array(value: Option<&Value>) -> Option<Vec<String>> {
+    value.and_then(Value::as_array).and_then(|values| {
+        values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_string)
+            })
+            .collect()
+    })
+}
+
+fn parse_required_non_empty_string_array(value: Option<&Value>) -> Option<Vec<String>> {
+    parse_required_string_array(value).filter(|values| !values.is_empty())
+}
+
+fn parse_app_capabilities(value: Option<&Value>) -> Option<Vec<AppCapability>> {
+    let values = value.and_then(Value::as_array)?;
+    let mut capabilities = Vec::with_capacity(values.len());
+    for value in values {
+        let capability = AppCapability::try_from(value.as_str()?).ok()?;
+        if !capabilities.contains(&capability) {
+            capabilities.push(capability);
+        }
+    }
+    Some(capabilities)
+}
+
 fn default_roles() -> Map<String, Value> {
     Map::from_iter([
         (
@@ -665,6 +850,139 @@ mod tests {
                 "https://ops.example.com".to_string(),
                 "http://localhost:5173".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn app_registry_parses_typed_entries_and_resolves_web_roots() {
+        let config = ConsoleConfig::from_global(&json!({
+            "console": { "apps": [
+                {
+                    "id": "andon",
+                    "webRoot": "experiments/gemba/apps/andon",
+                    "allowedOrigins": ["https://andon.example.com"],
+                    "allowedRoles": ["viewer", "operator"],
+                    "capabilities": ["signals", "alarms", "signals"]
+                },
+                {
+                    "id": "gemba-board",
+                    "webRoot": "C:/opt/gemba-board",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["fleet", "events", "attributes"]
+                }
+            ] }
+        }));
+
+        assert_eq!(config.apps.len(), 2);
+        assert_eq!(config.apps[0].id, "andon");
+        assert!(std::path::Path::new(&config.apps[0].web_root).is_absolute());
+        assert!(
+            std::path::Path::new(&config.apps[0].web_root)
+                .ends_with("experiments/gemba/apps/andon")
+        );
+        assert_eq!(
+            config.apps[0].allowed_origins,
+            vec!["https://andon.example.com".to_string()]
+        );
+        assert_eq!(
+            config.apps[0].allowed_roles,
+            vec!["viewer".to_string(), "operator".to_string()]
+        );
+        assert_eq!(
+            config.apps[0].capabilities,
+            vec![AppCapability::Signals, AppCapability::Alarms]
+        );
+        assert_eq!(
+            config.apps[1].capabilities,
+            vec![
+                AppCapability::Fleet,
+                AppCapability::Events,
+                AppCapability::Attributes,
+            ]
+        );
+    }
+
+    #[test]
+    fn app_registry_omits_invalid_and_duplicate_entries_fail_closed() {
+        let config = ConsoleConfig::from_global(&json!({
+            "console": { "apps": [
+                {
+                    "id": "valid-app",
+                    "webRoot": "valid",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": []
+                },
+                {
+                    "id": "valid-app",
+                    "webRoot": "duplicate",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["fleet"]
+                },
+                {
+                    "id": "../escape",
+                    "webRoot": "invalid-id",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["fleet"]
+                },
+                {
+                    "id": "unknown-capability",
+                    "webRoot": "unknown",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["fleet", "raw-uns"]
+                },
+                {
+                    "id": "commands-denied",
+                    "webRoot": "commands",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["commands"]
+                },
+                {
+                    "id": "missing-capabilities",
+                    "webRoot": "missing",
+                    "allowedOrigins": [],
+                    "allowedRoles": ["viewer"]
+                },
+                {
+                    "id": "invalid-origin",
+                    "webRoot": "origin",
+                    "allowedOrigins": [42],
+                    "allowedRoles": ["viewer"],
+                    "capabilities": ["fleet"]
+                },
+                {
+                    "id": "missing-roles",
+                    "webRoot": "roles",
+                    "allowedOrigins": [],
+                    "capabilities": ["fleet"]
+                },
+                {
+                    "id": "empty-roles",
+                    "webRoot": "roles",
+                    "allowedOrigins": [],
+                    "allowedRoles": [],
+                    "capabilities": ["fleet"]
+                }
+            ] }
+        }));
+
+        assert_eq!(config.apps.len(), 1);
+        assert_eq!(config.apps[0].id, "valid-app");
+        assert!(config.apps[0].capabilities.is_empty());
+    }
+
+    #[test]
+    fn app_registry_defaults_to_empty_for_missing_or_non_array_config() {
+        assert!(ConsoleConfig::from_global(&json!({})).apps.is_empty());
+        assert!(
+            ConsoleConfig::from_global(&json!({ "console": { "apps": {} } }))
+                .apps
+                .is_empty()
         );
     }
 

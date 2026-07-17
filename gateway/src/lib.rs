@@ -1,5 +1,6 @@
 pub mod command;
 pub mod config;
+pub mod gemba;
 pub mod http;
 pub mod ingress;
 pub mod model;

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920, initial-scale=1, maximum-scale=1">
+  <title>Dallas Line 2 — Packaging overview</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="board" class="board" aria-label="Dallas packaging line status dashboard">
+    <header class="header">
+      <div class="brand">
+        <span class="brand__mark"><i></i><i></i><i></i></span>
+        <span><b>BOTTLES R US</b><small>DALLAS · PACKAGING HALL</small></span>
+      </div>
+      <div class="line-id"><span>LINE</span><strong>02</strong></div>
+      <div class="header__meta">
+        <span class="source-state"><i></i> SOURCES HEALTHY</span>
+        <time id="clock">14:26:18</time>
+        <small>SHIFT A · 00:24 REMAINING</small>
+      </div>
+    </header>
+
+    <section class="status-band">
+      <div class="status-band__label"><span>PACKAGING STATUS</span><strong id="status-text">RUNNING CLEAN</strong><small id="status-detail">Case packer synchronized with palletizer</small></div>
+      <div class="status-band__sku"><span>ACTIVE ORDER</span><b>SPRK-LIME-355 · 24 PACK</b><small>WO 71042 · Customer DC-04</small></div>
+      <div class="status-band__rate"><span>ACTUAL RATE</span><strong id="case-rate" data-signal="CaseRateCpm">27.6</strong><b>CASES / MIN</b><small>Target 28.0 · <i id="rate-delta">−0.4</i></small></div>
+    </section>
+
+    <section class="content">
+      <div class="operations">
+        <section class="machine-flow" aria-labelledby="flow-heading">
+          <div class="section-heading"><span><small>01 · PROCESS</small><h1 id="flow-heading">Pack flow</h1></span><em>All interlocks made</em></div>
+          <div class="flow-track">
+            <article class="machine machine--good"><span class="machine__index">A</span><div><small>CASE ERECTOR</small><b>Running</b><em>62% blanks</em></div><i></i></article>
+            <span class="flow-arrow">›</span>
+            <article id="packer-machine" class="machine machine--good"><span class="machine__index">B</span><div><small>ROBOTIC PACKER</small><b id="packer-state">Running</b><em id="packer-detail">6.2 A load</em></div><i></i></article>
+            <span class="flow-arrow">›</span>
+            <article class="machine machine--good"><span class="machine__index">C</span><div><small>CASE SEALER</small><b>Running</b><em>176 °C glue</em></div><i></i></article>
+            <span class="flow-arrow">›</span>
+            <article class="machine machine--good"><span class="machine__index">D</span><div><small>LABEL + VISION</small><b>Passing</b><em>99.4% verify</em></div><i></i></article>
+            <span class="flow-arrow">›</span>
+            <article class="machine machine--good"><span class="machine__index">E</span><div><small>PALLETIZER</small><b>Building</b><em>Layer 4 of 5</em></div><i></i></article>
+          </div>
+        </section>
+
+        <div class="operation-grid">
+          <section class="panel throughput-panel">
+            <div class="section-heading"><span><small>02 · SHIFT</small><h2>Throughput</h2></span><em class="ahead">+18 cases ahead</em></div>
+            <div class="throughput-main"><strong id="case-count" data-signal="GoodCaseCount">6,842</strong><span>good cases</span></div>
+            <div class="plan-line"><i id="plan-fill"></i><mark></mark></div>
+            <div class="plan-labels"><span>Actual 6,842</span><span>Plan 6,824</span><span>Goal 7,056</span></div>
+            <div class="throughput-stats"><span><small>Reject cases</small><b id="reject-count" data-signal="CaseRejectCount">38</b></span><span><small>Microstops</small><b>7</b></span><span><small>Blocked time</small><b id="blocked-time">03:12</b></span></div>
+          </section>
+
+          <section class="panel jam-panel">
+            <div class="section-heading"><span><small>03 · PACKER LOAD</small><h2>Jam early warning</h2></span><em id="risk-chip" class="risk-chip">LOW RISK</em></div>
+            <div class="current-reading"><strong id="motor-current" data-signal="PackerMotorCurrentA">6.2</strong><span>A</span><small>Normal 5.4–7.1 A</small></div>
+            <svg class="current-chart" viewBox="0 0 600 128" preserveAspectRatio="none" aria-label="Packer motor current trend">
+              <line class="warn-line" x1="0" y1="27" x2="600" y2="27"></line>
+              <text x="6" y="19">9.0 A JAM RISK</text>
+              <path id="current-area" d=""></path>
+              <path id="current-line" d=""></path>
+            </svg>
+            <div class="jam-state"><span><i></i>Jam switch <b id="jam-status" data-signal="JamStatus">CLEAR</b></span><span>Last jam <b>13:42 · 18s</b></span></div>
+          </section>
+        </div>
+
+        <section class="quality-row">
+          <article><span class="quality-icon quality-icon--vision">V</span><div><small>VISION PASS</small><b id="vision-pass" data-signal="VisionPassPct">99.4%</b><em>Target ≥ 99.0%</em></div></article>
+          <article><span class="quality-icon quality-icon--glue">°</span><div><small>GLUE TEMPERATURE</small><b><i id="glue-temp" data-signal="GlueTempC">176</i> °C</b><em>Band 172–180 °C</em></div></article>
+          <article><span class="quality-icon quality-icon--weight">kg</span><div><small>CASE WEIGHT</small><b><i id="case-weight" data-signal="CaseWeightKg">12.18</i> kg</b><em>±0.08 kg</em></div></article>
+          <article><span class="quality-icon quality-icon--label">✓</span><div><small>LABEL VERIFY</small><b id="label-code">0713A-1426</b><em>Grade A · readable</em></div></article>
+        </section>
+      </div>
+
+      <aside class="pallet-panel" aria-labelledby="pallet-heading">
+        <div class="pallet-panel__top">
+          <span><small>LIVE LOAD</small><h2 id="pallet-heading">Pallet 018</h2></span>
+          <em>DOCK 04</em>
+        </div>
+        <div class="pallet-progress"><strong id="pallet-percent">76%</strong><span>complete</span><i><b id="pallet-progress-bar"></b></i></div>
+        <div class="pallet-copy"><span><small>Current layer</small><b>4 / 5</b></span><span><small>Cases loaded</small><b id="pallet-cases" data-signal="PalletCaseCount">91 / 120</b></span></div>
+        <div id="pallet-grid" class="pallet-grid" aria-label="Pallet build pattern"></div>
+        <div class="pallet-key"><span><i class="loaded"></i>Loaded</span><span><i class="next"></i>Next pick</span><span><i></i>Open</span></div>
+        <div class="pallet-foot"><span><small>Pattern</small><b>24-A · Interlock</b></span><span><small>Est. complete</small><b id="pallet-eta">03:28</b></span></div>
+      </aside>
+    </section>
+
+    <footer class="footer">
+      <div class="material-watch"><span class="material-watch__stripe"></span><span><small>NEXT ATTENTION</small><b id="attention-text">Carton magazine refill in approximately 11 minutes</b></span><em id="magazine-level" data-signal="CartonMagazinePct">62% remaining</em></div>
+      <div class="source-note"><b>OPC UA</b> Kepware · palletizer1 <span></span> <b>MODBUS</b> Host sim · casepacker1</div>
+      <button id="scenario-button" type="button" aria-pressed="false"><span>J</span> Jam scenario</button>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

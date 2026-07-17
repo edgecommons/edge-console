@@ -47,10 +47,12 @@ single-device deployment that broker is the device's own local bus; on Kubernete
 broker. The console needs no list of devices or components up front: it discovers the entire fleet by
 **subscription**.
 
-## The Unified Namespace, and six wildcards for the whole fleet
+## The Unified Namespace, and the whole-fleet wildcards
 
-Every edgecommons topic is `ecv1/{device}/{component}/{instance}/{class}[/channel]`. The console consumes
-the **six consumer classes** with one wildcard each — the entire subscription surface, built through the
+Every edgecommons topic is `ecv1/{device}/{component}[/{instance}]/{class}[/channel]` — the instance token
+is optional, so a topic is component-scoped when it is absent and instance-scoped when it is present. The
+console consumes the **six consumer classes**, each at **both scopes** (component `ecv1/+/+/{class}` and
+instance `ecv1/+/+/+/{class}`) — the entire subscription surface, built through the
 library's `uns().filter()` (never a hand-assembled string):
 
 ```text

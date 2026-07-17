@@ -22,5 +22,12 @@ package-lock.json
 
 # Runtime artifacts (house rule: never commit .vault, caches, TLS certs)
 .vault/
+.codex-tmp/
 *.pem
 *.key
+
+# Gemba TV experiment build output
+experiments/gemba/tv/google-tv-gemba/.gradle/
+experiments/gemba/tv/google-tv-gemba/build/
+experiments/gemba/tv/google-tv-gemba/app/build/
+experiments/gemba/tv/tizen-gemba/.buildResult/
