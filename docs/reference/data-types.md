@@ -104,7 +104,7 @@ transition rules. `CadenceSource` = `"default" | "cfg"` records where the expect
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `instance` | string | Source instance (`main` for `state`/`cfg`; a connection id for per-instance `data`/`evt`). |
+| `instance` | string | Source instance — a connection id for per-instance `data`/`evt`. Component-scoped messages (`state`/`cfg`) carry no instance on the wire; the console labels the absent instance `main` in its model. |
 | `cls` | `ConsumerClass` | `state`\|`cfg`\|`evt`\|`metric`\|`data`\|`log`. |
 | `channel` | string? | `/`-joined channel tokens; absent for the leaf classes (`state`, `cfg`). |
 | `body` | unknown | The envelope body (already lib-redacted for `cfg`). |

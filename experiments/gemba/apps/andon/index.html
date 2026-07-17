@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dallas Andon experiment</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.45 system-ui, sans-serif; background: #101820; color: #f4f7f9; }
+    body { margin: 0; padding: 2rem; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    h1 { font-size: clamp(2rem, 5vw, 4.5rem); margin: 0; }
+    .status { padding: .5rem .8rem; border-radius: 999px; background: #525252; }
+    .status.live { background: #198038; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; }
+    article { border: 1px solid #394b56; border-radius: .5rem; padding: 1.25rem; min-height: 12rem; }
+    .count { font-size: 4rem; font-variant-numeric: tabular-nums; }
+    pre { white-space: pre-wrap; word-break: break-word; max-height: 18rem; overflow: auto; }
+  </style>
+</head>
+<body data-capabilities="signals,alarms">
+  <header><div><small>Gemba feasibility app</small><h1>Dallas Andon</h1></div><span id="status" class="status">Connecting</span></header>
+  <main class="grid">
+    <article><h2>Update envelopes</h2><div id="count" class="count">0</div><p id="rate">0.0 messages/s</p></article>
+    <article><h2>Latest plant data</h2><pre id="latest">Waiting for the bridge…</pre></article>
+  </main>
+  <script>
+    const protocolVersion = 1;
+    const capabilities = document.body.dataset.capabilities.split(",");
+    const bridge = new URL(new URLSearchParams(location.search).get("bridge") ?? location.origin);
+    bridge.protocol = bridge.protocol === "https:" ? "wss:" : "ws:";
+    bridge.pathname = "/apps/andon/ws";
+    const ws = new WebSocket(bridge);
+    const status = document.querySelector("#status");
+    const count = document.querySelector("#count");
+    const rate = document.querySelector("#rate");
+    const latest = document.querySelector("#latest");
+    let envelopes = 0;
+    let windowStart = performance.now();
+    ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion })));
+    ws.addEventListener("message", ({ data }) => {
+      const message = JSON.parse(data);
+      if (message.type === "welcome") {
+        status.textContent = "Live";
+        status.classList.add("live");
+        ws.send(JSON.stringify({ type: "subscribe", protocolVersion, capabilities }));
+      }
+      if (message.type === "updates") {
+        envelopes += 1;
+        const elapsed = Math.max((performance.now() - windowStart) / 1000, 0.001);
+        count.textContent = String(envelopes);
+        rate.textContent = `${(envelopes / elapsed).toFixed(1)} messages/s (30 max)`;
+        latest.textContent = JSON.stringify(message, null, 2);
+      }
+      if (message.type === "error") latest.textContent = JSON.stringify(message, null, 2);
+    });
+    ws.addEventListener("close", () => { status.textContent = "Disconnected"; status.classList.remove("live"); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://edgecommons.dev/gemba/tizen"
+        version="0.1.0"
+        viewmodes="maximized">
+  <tizen:application id="ECGEMBATV1.GembaBoard"
+                     package="ECGEMBATV1"
+                     required_version="2.3"/>
+  <content src="index.html"/>
+  <feature name="http://tizen.org/feature/screen.size.normal"/>
+  <icon src="icon.png"/>
+  <name>EdgeCommons Gemba</name>
+  <access origin="*" subdomains="true"/>
+  <tizen:privilege name="http://tizen.org/privilege/internet"/>
+  <tizen:profile name="tv-samsung"/>
+  <tizen:setting screen-orientation="landscape"
+                 context-menu="disable"
+                 background-support="disable"
+                 encryption="disable"
+                 install-location="auto"
+                 hwkey-event="enable"
+                 pointing-device-support="disable"/>
+</widget>

@@ -8,10 +8,12 @@
  *
  * Grammar/source-of-truth: `docs/UNS-RECONCILIATION-AND-PHASE1-PLAN.md` (the
  * reconciliation of DESIGN.md v0.3 against the shipped UNS core) — topics are
- * `ecv1/{device}/{component}/{instance}/{class}[/channel…]`, identity is the
- * top-level envelope `identity` element (`{hier, path, component, instance}`,
- * device = last `hier` value), and the six consumer classes are the console's
- * whole subscription surface.
+ * `ecv1/{device}/{component}[/{instance}]/{class}[/channel…]` (D-U28: the instance
+ * token is optional — present ⇒ instance-scoped, absent ⇒ component-scoped), identity
+ * is the top-level envelope `identity` element (`{hier, path, component, instance?}`,
+ * device = last `hier` value, instance omitted when component-scoped), and the six
+ * consumer classes are the console's whole subscription surface — each subscribed at
+ * BOTH scopes (`ecv1/+/+/{class}` and `ecv1/+/+/+/{class}`).
  */
 
 /**
@@ -64,7 +66,9 @@
 export const PROTOCOL_VERSION = 7;
 
 /**
- * The six UNS classes a fleet consumer subscribes (`ecv1/+/+/+/{cls}` wildcards).
+ * The six UNS classes a fleet consumer subscribes. D-U28: the instance token is
+ * optional, so each class is subscribed at BOTH scopes — component `ecv1/+/+/{cls}`
+ * and instance `ecv1/+/+/+/{cls}`.
  * `cmd` is published (never subscribed) and `app` is not consumed — per the plan §3.
  */
 export type ConsumerClass = "state" | "cfg" | "evt" | "metric" | "data" | "log";
@@ -956,7 +960,7 @@ export interface AlarmSnapshot {
  * C4 — commanding: the console's first WRITE surface (invoke a UNS command verb on a
  * target component). The browser sends `invoke-command`; the gateway RBAC-checks it,
  * issues a `messaging().request()` to the component's own `cmd` inbox
- * (`ecv1/{device}/{component}/{instance}/cmd/{verb}`, `header.name` = verb, body =
+ * (D-U28 component-scoped `ecv1/{device}/{component}/cmd/{verb}`, `header.name` = verb, body =
  * args), awaits the reply (the uns-bridge rewrites `reply_to` so a site→device
  * request/reply is transparent), and answers with exactly one `command-result`.
  *

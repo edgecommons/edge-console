@@ -178,7 +178,10 @@ impl CommandGateway {
                 value: key.device.clone(),
             }],
             key.component.clone(),
-            Some(MessageIdentity::DEFAULT_INSTANCE.to_string()),
+            // D-U28: the console targets a component (ComponentKey has no instance), so commands
+            // are component-scoped — `ecv1/{device}/{component}/cmd/{verb}` (no `main`). The
+            // component's inbox subscribes both `.../cmd/#` and `.../+/cmd/#`, so it is received.
+            None,
         )?;
         self.uns.topic_for(&target, UnsClass::Cmd, Some(verb))
     }

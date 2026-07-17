@@ -37,58 +37,64 @@ pub async fn start_ingress(
     ];
     let mut filters = Vec::new();
     for (token, cls) in classes {
-        let filter = uns.filter(cls, &UnsScope::all())?;
-        let model_for_handler = model.clone();
-        let events_for_handler = events.clone();
-        let token_for_handler = token.to_string();
-        let messaging_for_handler = messaging.clone();
-        let uns_for_handler = uns.clone();
-        let core_config_for_handler = core_config.clone();
-        messaging
-            .subscribe(
-                &filter,
-                message_handler(move |topic, msg| {
-                    let model = model_for_handler.clone();
-                    let events = events_for_handler.clone();
-                    let token = token_for_handler.clone();
-                    let messaging = messaging_for_handler.clone();
-                    let uns = uns_for_handler.clone();
-                    let core_config = core_config_for_handler.clone();
-                    async move {
-                        let Some(event) = normalize_message(&token, &topic, msg) else {
-                            return;
-                        };
-                        let outcome = {
-                            let mut guard = model.write().await;
-                            guard.ingest(event)
-                        };
-                        for device in outcome.discovered_devices {
-                            spawn_republish_verbs(
-                                messaging.clone(),
-                                uns.clone(),
-                                core_config.clone(),
-                                device,
-                                REPUBLISH_ALL_VERBS,
-                            );
+        // D-U28: the instance token is optional, so a fleet consumer must subscribe BOTH the
+        // component-scope (`ecv1/+/+/{class}`) and instance-scope (`ecv1/+/+/+/{class}`) filters.
+        // The two are disjoint (an instance id may not be a reserved class token) and neither
+        // alone sees the whole fleet.
+        for include_instance in [false, true] {
+            let filter = uns.filter_scoped(cls, &UnsScope::all(), include_instance)?;
+            let model_for_handler = model.clone();
+            let events_for_handler = events.clone();
+            let token_for_handler = token.to_string();
+            let messaging_for_handler = messaging.clone();
+            let uns_for_handler = uns.clone();
+            let core_config_for_handler = core_config.clone();
+            messaging
+                .subscribe(
+                    &filter,
+                    message_handler(move |topic, msg| {
+                        let model = model_for_handler.clone();
+                        let events = events_for_handler.clone();
+                        let token = token_for_handler.clone();
+                        let messaging = messaging_for_handler.clone();
+                        let uns = uns_for_handler.clone();
+                        let core_config = core_config_for_handler.clone();
+                        async move {
+                            let Some(event) = normalize_message(&token, &topic, msg) else {
+                                return;
+                            };
+                            let outcome = {
+                                let mut guard = model.write().await;
+                                guard.ingest(event)
+                            };
+                            for device in outcome.discovered_devices {
+                                spawn_republish_verbs(
+                                    messaging.clone(),
+                                    uns.clone(),
+                                    core_config.clone(),
+                                    device,
+                                    REPUBLISH_ALL_VERBS,
+                                );
+                            }
+                            if let Some(step) = outcome.clock_step {
+                                spawn_clock_event(
+                                    messaging.clone(),
+                                    uns.clone(),
+                                    core_config.clone(),
+                                    clock_step_body(step.step_ms),
+                                );
+                            }
+                            for effect in outcome.events {
+                                let _ = events.send(effect);
+                            }
                         }
-                        if let Some(step) = outcome.clock_step {
-                            spawn_clock_event(
-                                messaging.clone(),
-                                uns.clone(),
-                                core_config.clone(),
-                                clock_step_body(step.step_ms),
-                            );
-                        }
-                        for effect in outcome.events {
-                            let _ = events.send(effect);
-                        }
-                    }
-                }),
-                MAX_QUEUED_MESSAGES,
-                1,
-            )
-            .await?;
-        filters.push(filter);
+                    }),
+                    MAX_QUEUED_MESSAGES,
+                    1,
+                )
+                .await?;
+            filters.push(filter);
+        }
     }
     Ok(filters)
 }
@@ -118,7 +124,8 @@ async fn broadcast_republish_verbs(
             value: device.clone(),
         }],
         BCAST_COMPONENT,
-        Some(MessageIdentity::DEFAULT_INSTANCE.to_string()),
+        // D-U28: component-scoped broadcast — `ecv1/{device}/_bcast/cmd/{verb}` (no `main`).
+        None,
     ) {
         Ok(target) => target,
         Err(e) => {
@@ -248,7 +255,8 @@ mod tests {
     #[test]
     fn clock_step_event_round_trips_to_alarm() {
         let core = Config::from_value("edge-console", "gw-1", json!({})).unwrap();
-        let topic = "ecv1/gw-1/edge-console/main/evt/warning/clock-step";
+        // D-U28: the console is component-scoped, so its own evt is `.../edge-console/evt/...`.
+        let topic = "ecv1/gw-1/edge-console/evt/warning/clock-step";
         let alarms_of = |outcome: &crate::model::IngestOutcome| -> Option<Value> {
             outcome.events.iter().find_map(|e| match e {
                 GatewayEvent::Alarms(frame) => Some(serde_json::from_str(frame.as_str()).unwrap()),

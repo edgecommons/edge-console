@@ -1,30 +1,32 @@
 # Reference — Messaging Interface (console ↔ bus)
 
 Everything the console **subscribes**, **publishes**, and **requests** on the site UNS bus. Addressing
-follows the **Unified Namespace (UNS)**: `ecv1/{device}/{component}/{instance}/{class}[/channel]`, built
-and validated by the library (`@edgecommons/edgecommons`) — never a hand-assembled string. For the
-browser↔console WebSocket side, see [data-types.md](data-types.md); for the model, see
-[explanation.md](../explanation.md).
+follows the **Unified Namespace (UNS)**: `ecv1/{device}/{component}[/{instance}]/{class}[/channel]`, built
+and validated by the library — never a hand-assembled string. For the browser↔console WebSocket side,
+see [data-types.md](data-types.md); for the model, see [explanation.md](../explanation.md).
 
 - `{device}` — the resolved Thing name (the last `hierarchy` level of the *publishing* component).
 - `{component}` — the publisher's component short name.
-- `{instance}` — a per-connection instance for `data`/`evt`; `main` for `state`/`cfg`/`metric` and the
-  `cmd` inbox.
+- `{instance}` — **optional**. Present ⇒ instance-scoped (a per-connection instance, e.g. for `data`/`evt`);
+  absent ⇒ component-scoped. Component-level messages (`state`/`cfg`/`metric` and the `cmd` inbox) omit it,
+  so their topics are `ecv1/{device}/{component}/{class}`.
 
 ## What the console consumes: six class wildcards
 
-The console has **one** connection — the site broker — and subscribes the **six consumer-class
-wildcards**, built via `uns().filter(cls, UnsScope.all())`. This is its entire read surface; it needs no
-per-component topic templates.
+The console has **one** connection — the site broker — and subscribes the **six consumer classes**. Because
+the instance token is optional (D-U28), each class is subscribed at **both scopes** — component
+`ecv1/+/+/{class}` and instance `ecv1/+/+/+/{class}` — built via `uns().filter_scoped(cls, UnsScope.all(),
+include_instance)` for `include_instance` of both `false` and `true`. This is its entire read surface; it
+needs no per-component topic templates.
 
-| Class | Wildcard | What the console does with it |
-|-------|----------|-------------------------------|
-| `state` | `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]`; the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge protobuf LWT (below). |
-| `cfg` | `ecv1/+/+/+/cfg` | Effective, source-redacted config → the Configuration screen; the cadence source (`config.heartbeat.intervalSecs`). |
-| `evt` | `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
-| `metric` | `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
-| `data` | `ecv1/+/+/+/data/#` | The data plane → the Signals screen (latest value + quality + trend). |
-| `log` | `ecv1/+/+/+/log/#` | Component log tails. The gateway normalizes `edgecommons.log.v1` records into the Components-page Logs tab. |
+| Class | Wildcards (component + instance scope) | What the console does with it |
+|-------|----------------------------------------|-------------------------------|
+| `state` | `ecv1/+/+/state` · `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]`; the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge protobuf LWT (below). |
+| `cfg` | `ecv1/+/+/cfg` · `ecv1/+/+/+/cfg` | Effective, source-redacted config → the Configuration screen; the cadence source (`config.heartbeat.intervalSecs`). |
+| `evt` | `ecv1/+/+/evt/#` · `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
+| `metric` | `ecv1/+/+/metric/#` · `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
+| `data` | `ecv1/+/+/data/#` · `ecv1/+/+/+/data/#` | The data plane → the Signals screen (latest value + quality + trend). |
+| `log` | `ecv1/+/+/log/#` · `ecv1/+/+/+/log/#` | Component log tails. The gateway normalizes `edgecommons.log.v1` records into the Components-page Logs tab. |
 
 `cmd` is **published, never subscribed**, and `app` is not consumed.
 
@@ -86,8 +88,8 @@ The console publishes fire-and-forget `cmd` broadcasts to the reserved `_bcast` 
 already-running components on a device to re-announce (the platform uses no broker retain):
 
 ```text
-ecv1/{device}/_bcast/main/cmd/republish-state
-ecv1/{device}/_bcast/main/cmd/republish-cfg
+ecv1/{device}/_bcast/cmd/republish-state
+ecv1/{device}/_bcast/cmd/republish-cfg
 ```
 
 - **Discovery** — on first sight of a device (and for already-known devices at startup) the console fires
@@ -108,7 +110,7 @@ When the gateway observes its own wall clock stepping backward past
 canonical event on its **own** UNS identity:
 
 ```text
-ecv1/{own-device}/{console-component}/main/evt/warning/clock-step
+ecv1/{own-device}/{console-component}/evt/warning/clock-step
 body: { "message": "gateway wall clock stepped backward <n> ms; receipt timeline clamped (see console.clock)",
         "stepMs": <n>, "active": true }
 ```
@@ -133,16 +135,16 @@ sequenceDiagram
   participant C as Component cmd inbox
   UI->>GW: invoke-command { key, verb, args }
   Note over GW: RBAC check<br/>(denied -> FORBIDDEN, never hits the bus)
-  GW->>Bus: request ecv1/{device}/{component}/main/cmd/{verb}<br/>header.name=verb, body=args
+  GW->>Bus: request ecv1/{device}/{component}/cmd/{verb}<br/>header.name=verb, body=args
   Bus->>C: (bridge rewrites reply_to)
   C-->>Bus: { ok, result | error }
   Bus-->>GW: reply
   GW-->>UI: command-result { ok, result|error, elapsedMs }
 ```
 
-- **Topic**: `ecv1/{device}/{component}/main/cmd/{verb}`, built with `uns().topicFor(target, Cmd, verb)`.
-  The inbox is the component's `main` instance (verbs register there; per-instance dispatch is by a body
-  selector, not the topic).
+- **Topic**: `ecv1/{device}/{component}/cmd/{verb}`, built with `uns().topicFor(target, Cmd, verb)`.
+  The console targets the component scope (verbs register on the component's `cmd/#` inbox; per-instance
+  dispatch is by a body selector, not the topic).
 - **Request**: `header.name` **must equal** the verb; the body is the `args` object (`{}` when omitted).
 - **`reply_to`** is rewritten transparently by the `uns-bridge`, so a site→device request/reply just
   works on the console's single connection.

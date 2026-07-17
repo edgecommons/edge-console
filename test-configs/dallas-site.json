@@ -51,11 +51,7 @@
         }
       }
     },
-    "instances": [
-      {
-        "id": "main"
-      }
-    ],
+    "instances": [],
     "token": "edge-console"
   }
 }
