@@ -35,9 +35,11 @@ at the WS upgrade, and the read path (fleet snapshot + live stream) is unauthent
 
 ## How the console consumes the UNS
 
-**One connection** — the site broker (`messaging.local` in the config; on a single-device
-deployment, the device's local bus; on Kubernetes, the in-cluster broker). Through it,
-the **ingress** subscribes the six consumer-class wildcards, built via the library
+**One connection** — the site broker (`messaging.local` in the config; on Kubernetes, the
+in-cluster broker) or, on a **single edge device with no site broker**, the device-local
+Greengrass IPC bus (built with the gateway's `greengrass` feature and shipped as a Greengrass
+component via the repo-root `recipe.yaml` — see [docs/how-to-guides.md](docs/how-to-guides.md#deploy-on-a-single-device-over-greengrass-ipc)).
+Through it, the **ingress** subscribes the six consumer-class wildcards, built via the library
 (`gg.uns().filter(cls, UnsScope.all())`, never by hand):
 
 ```text

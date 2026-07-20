@@ -1,0 +1,112 @@
+---
+RecipeFormatVersion: "2020-01-25"
+ComponentName: "com.mbreissi.edgecommons.EdgeConsole"
+ComponentVersion: "1.0.0"
+ComponentDescription: >-
+  EdgeCommons edge-console: the single browser-facing bridge for a site UNS. This recipe is the
+  single-device (degraded) deployment — one edge device with no site MQTT broker and no uns-bridge.
+  The console connects to the device-local bus over Greengrass IPC, holds the in-memory fleet model,
+  and serves its own HTTP + WebSocket UI on the device (default :8443).
+ComponentPublisher: "EdgeCommons"
+# No ComponentDependencies: the single-device IPC-local console needs only the Nucleus' local
+# publish/subscribe IPC. It does NOT bridge to AWS IoT Core in this mode (no mqttproxy accessControl,
+# no TokenExchangeService), which is exactly the "no site broker, no bridge" degraded scenario.
+ComponentConfiguration:
+  DefaultConfiguration:
+    ComponentConfig:
+      logging:
+        level: "INFO"
+        rust_format: "{timestamp} [{level}] [{component}] {target} - {message}"
+      # The console is itself a component: its own keepalive state and self metrics ride the local bus.
+      heartbeat:
+        enabled: true
+        intervalSecs: 5
+        measures:
+          cpu: true
+          memory: true
+          disk: false
+      metricEmission:
+        target: "log"
+        targetConfig:
+          logFileName: "/greengrass/v2/work/{ComponentFullName}/metric.log"
+      tags: {}
+      # UNS component token. The console addresses peers and stamps its own identity as `edge-console`;
+      # the IPC accessControl below is scoped to this token, so keep them in sync if you change it.
+      component:
+        token: "edge-console"
+        global:
+          console:
+            ws:
+              # Serve the UI + WebSocket on the device. 0.0.0.0 so an operator on the device LAN can
+              # reach it (loopback-only is the bare-host default). Terminate TLS in front if exposed.
+              port: 8443
+              bindAddress: "0.0.0.0"
+              heartbeatIntervalMs: 15000
+              # Relative path — resolves against the process cwd, which the Run lifecycle sets to the
+              # unpacked artifact dir, so the console serves the bundled `ui/` (built ui/dist).
+              webRoot: "ui"
+            staleness:
+              warnMultiplier: 2
+              staleMultiplier: 2.5
+              offlineMultiplier: 5
+              defaultIntervalSecs: 5
+              sweepIntervalMs: 1000
+        instances: []
+    accessControl:
+      aws.greengrass.ipc.pubsub:
+        # SUBSCRIBE — the six reserved/application UNS classes the console ingests, plus the ephemeral
+        # request/reply inbox. In Nucleus v2.6.0+ a SubscribeToTopic policy resource matches the
+        # subscribe FILTER STRING literally: `+` and `#` are literal characters (they authorize a
+        # subscribe to that exact filter), and `*` matches any run of characters. The console
+        # subscribes both component-scope (`ecv1/+/+/{class}`) and instance-scope (`ecv1/+/+/+/{class}`)
+        # filters per D-U28, so both are listed. Reply topics are dynamic (`edgecommons/reply-<uuid>`),
+        # so those use the `*` glob.
+        "com.mbreissi.edgecommons.EdgeConsole:subscribe:1":
+          policyDescription: >-
+            Subscribe to the UNS classes the console ingests (state/cfg/evt/metric/data/log, both
+            component- and instance-scope) and to request/reply inbox topics.
+          operations:
+            - "aws.greengrass#SubscribeToTopic"
+          resources:
+            - "ecv1/+/+/state"
+            - "ecv1/+/+/+/state"
+            - "ecv1/+/+/cfg"
+            - "ecv1/+/+/+/cfg"
+            - "ecv1/+/+/evt/#"
+            - "ecv1/+/+/+/evt/#"
+            - "ecv1/+/+/metric/#"
+            - "ecv1/+/+/+/metric/#"
+            - "ecv1/+/+/data/#"
+            - "ecv1/+/+/+/data/#"
+            - "ecv1/+/+/log/#"
+            - "ecv1/+/+/+/log/#"
+            - "edgecommons/reply-*"
+        # PUBLISH — the console publishes commands to any component's `cmd` inbox (targeted commands +
+        # the `_bcast` republish primer) and its own reserved-class housekeeping (heartbeat `state`,
+        # `cfg` republish responses, self `metric`/`log`, and `evt` clock-fault events) on its own
+        # `edge-console` identity. PublishToTopic does NOT support MQTT wildcards (`+`/`#`); `*` matches
+        # any run of characters (including `/`), so these two globs cover every publish the console makes.
+        "com.mbreissi.edgecommons.EdgeConsole:publish:1":
+          policyDescription: >-
+            Publish commands to any component cmd inbox and the console's own reserved-class messages.
+          operations:
+            - "aws.greengrass#PublishToTopic"
+          resources:
+            - "ecv1/*/cmd/*"
+            - "ecv1/*/edge-console/*"
+Manifests:
+  - Platform:
+      os: linux
+    Artifacts:
+      # The zip bundles the Linux gateway binary (built with the `greengrass` feature — Greengrass IPC)
+      # and the built UI under `ui/`. See build.sh / gdk-config.json.
+      - URI: "s3://BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION/EdgeConsole.zip"
+        Unarchive: ZIP
+    Lifecycle:
+      Run:
+        # cwd = the unpacked artifact dir so the console resolves `webRoot: "ui"` and finds the binary.
+        Script: |-
+          set -e
+          cd {artifacts:decompressedPath}/EdgeConsole
+          chmod +x ./edge-console-gateway
+          ./edge-console-gateway --platform GREENGRASS -c GG_CONFIG

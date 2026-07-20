@@ -4,9 +4,11 @@
 [edgecommons](https://github.com/edgecommons/edgecommons) site. It **monitors and commands** every
 component on the site — and it is the site's **sole browser↔bus bridge**: browsers speak HTTP + WebSocket
 to the console, and only the console speaks MQTT / the Unified Namespace (UNS). It attaches to **one**
-bus — the *site broker*, the aggregation point every device's
-[`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — subscribes six UNS class
-wildcards, and needs **zero per-component knowledge** to render the whole fleet.
+bus, subscribes six UNS class wildcards, and needs **zero per-component knowledge** to render the whole
+fleet. That one bus is either the *site broker* — the aggregation point every device's
+[`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — or, on a **single edge device with
+no site broker**, the device-local Greengrass IPC bus (see
+[How-to → Deploy on a single device over Greengrass IPC](how-to-guides.md#deploy-on-a-single-device-over-greengrass-ipc)).
 
 The console runs as `edge-console-gateway`, a **standard edgecommons Rust component**, so it deploys the
 same way as everything else — HOST, Greengrass, or Kubernetes — and the library owns its config,

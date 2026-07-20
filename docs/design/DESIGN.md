@@ -100,6 +100,27 @@ Two grounded facts about today's `edgecommons` shape the whole design and recur 
   the Greengrass shared-connection quota). So command handling has to own timeouts and cleanup. This is fixed in the
   library (DESIGN-uns §7.4), not just in the console.
 
+### 1.1 Deployment topologies — site-broker and single-device (IPC-local)
+
+Because the console is a standard edgecommons component that talks to whatever bus the runtime gives it (it holds an
+`Arc<dyn MessagingService>`, never a hardcoded transport), the *same gateway binary* runs in two topologies:
+
+- **Site-broker (the diagram above).** Multiple edge devices publish to per-device buses; `uns-bridge` relays each
+  device's UNS to a **site MQTT broker**; the console consumes the site broker and is the single browser-facing
+  bridge for the whole site. This is the `standalone` build (dual-broker MQTT), the HOST/Kubernetes path the
+  bottling-company harness uses.
+- **Single-device / IPC-local (the degraded case).** One edge device, **no site MQTT broker and no `uns-bridge`.**
+  The console deploys as a Greengrass component alongside the device's components and connects to the **device-local
+  bus over Greengrass IPC**, then serves its UI on a device port. It sees exactly the one device it runs on — the
+  same six-wildcard ingress, the same command/republish path, the same in-memory model — just without the site
+  aggregation layer. This is the `greengrass` build of the gateway crate (`cargo build --features greengrass`,
+  Linux-only because the AWS GG IPC SDK is a C-FFI crate); it ships via `recipe.yaml` + `gdk-config.json` + `build.sh`
+  in the repo root.
+
+Nothing in the ingress, model, or command gateway changes between the two — only the compiled transport provider and
+the recipe's IPC pubsub `accessControl` (which scopes the console to SUBSCRIBE the six ingested UNS classes plus
+request/reply inboxes, and PUBLISH commands to any component `cmd` inbox and its own reserved-class messages).
+
 ---
 
 ## 2. The site model

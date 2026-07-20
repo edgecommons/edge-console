@@ -89,6 +89,40 @@ target/release/edge-console-gateway --platform HOST --transport MQTT ./config.js
 
 ---
 
+## Deploy on a single device over Greengrass IPC
+
+For a **single edge device with no site broker and no `uns-bridge`**, deploy the console as a Greengrass
+component that connects to the **device-local IPC bus** and serves its UI on a device port. The repo root
+carries the Greengrass artifacts: `recipe.yaml`, `gdk-config.json`, and `build.sh`.
+
+The gateway is built with the `greengrass` Cargo feature (Greengrass IPC instead of MQTT). That provider
+is a **Linux-only** C-FFI build, so build it on the device or in WSL/Linux:
+
+```bash
+# Linux / WSL — build the IPC gateway binary (proves the IPC provider links)
+cargo build -p edge-console-gateway --release --no-default-features --features greengrass
+```
+
+Package and deploy with the Greengrass Development Kit (GDK), which runs `build.sh` to build the UI and
+the IPC binary and stage a zip artifact (binary + `ui/`):
+
+```bash
+gdk component build      # runs build.sh -> greengrass-build/ (Linux/WSL)
+gdk component publish     # upload artifact + recipe (set the bucket in gdk-config.json)
+# then create a deployment targeting the device, or deploy the local recipe with greengrass-cli
+```
+
+- The recipe runs the console with `--platform GREENGRASS -c GG_CONFIG`; there is **no `messaging`
+  block** — the runtime connects to the local IPC bus, so no broker is configured or required.
+- It serves the bundled UI (`webRoot: "ui"`) on `0.0.0.0:8443` by default. Reach it at
+  `http://<device>:8443/` (put TLS in front for browsers — see below).
+- The recipe's IPC pubsub `accessControl` grants the console **SubscribeToTopic** on the six UNS classes
+  it ingests (`state`/`cfg`/`evt`/`metric`/`data`/`log`, both component- and instance-scope) plus
+  request/reply inbox topics, and **PublishToTopic** on every component `cmd` inbox and the console's own
+  reserved-class topics. Keep the `component.token` (`edge-console`) in sync with those policy topics.
+
+---
+
 ## Deploy on Kubernetes
 
 The console is a standard edgecommons component, so it runs under the library's `KUBERNETES` platform —
