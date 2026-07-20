@@ -21,6 +21,7 @@ the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on 
 | **[Reference — Configuration](reference/configuration.md)** | look up every `component.global.console` option and its default |
 | **[Reference — Data types](reference/data-types.md)** | look up the browser↔console **WebSocket protocol** — every frame, the snapshot/delta shapes, the liveness enum |
 | **[Reference — Messaging interface](reference/messaging-interface.md)** | look up the console↔bus **UNS interface** — the six wildcards it consumes, the LWT path, and the command write path |
+| **[Reference — Metrics](reference/metrics.md)** | look up what the console emits about itself, what it consumes from the fleet, and its own self-vitals |
 | **[Explanation](explanation.md)** | understand how it works and why — the single bridge, the retain substitute, console-side miss-detection, the two planes |
 
 ## Quick routing
@@ -30,6 +31,7 @@ the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on 
 - **"What config knob does X?"** → [Reference — Configuration](reference/configuration.md).
 - **"What does my browser send/receive over the WebSocket?"** → [Reference — Data types](reference/data-types.md).
 - **"Which UNS topics does it subscribe, and how does a command reach a component?"** → [Reference — Messaging interface](reference/messaging-interface.md).
+- **"What metrics does the console emit, and what does it do with the fleet's metrics?"** → [Reference — Metrics](reference/metrics.md).
 - **"Why is the console the *only* thing that talks to the bus?"** → [Explanation](explanation.md).
 
 ## What the console provides
