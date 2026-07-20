@@ -81,6 +81,13 @@ ComponentConfiguration:
             - "ecv1/+/+/log/#"
             - "ecv1/+/+/+/log/#"
             - "edgecommons/reply-*"
+            # The console's OWN command inbox (it registers a cmd surface like any component), both
+            # D-U28 scopes. `+` and `#` are literal in the resource; `*` covers the resolved thing name.
+            - "ecv1/*/edge-console/cmd/#"
+            - "ecv1/*/edge-console/+/cmd/#"
+            # The `_bcast` reconnect-rehydration listener (`.../republish-state` + `.../republish-cfg`);
+            # `*` after `cmd/` covers both concrete republish topics.
+            - "ecv1/*/_bcast/cmd/*"
         # PUBLISH — the console publishes commands to any component's `cmd` inbox (targeted commands +
         # the `_bcast` republish primer) and its own reserved-class housekeeping (heartbeat `state`,
         # `cfg` republish responses, self `metric`/`log`, and `evt` clock-fault events) on its own
