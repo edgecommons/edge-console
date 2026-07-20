@@ -99,12 +99,19 @@ The gateway is built with the `greengrass` Cargo feature (Greengrass IPC instead
 is a **Linux-only** C-FFI build, so build it on the device or in WSL/Linux:
 
 ```bash
-# Linux / WSL — build the IPC gateway binary (proves the IPC provider links)
-cargo build -p edge-console-gateway --release --no-default-features --features greengrass
+# Linux / WSL — build the IPC gateway binary (proves the IPC provider links).
+# CFLAGS raises the SDK's concurrent-stream ceiling (see below); build.sh sets this automatically.
+CFLAGS="-DGG_IPC_MAX_STREAMS=64" \
+  cargo build -p edge-console-gateway --release --no-default-features --features greengrass
 ```
 
+The console opens more concurrent IPC subscription streams than the `aws-greengrass-component-sdk`
+default `GG_IPC_MAX_STREAMS` (16) allows, so the greengrass build raises the ceiling to **64** with
+`CFLAGS=-DGG_IPC_MAX_STREAMS=64`. `build.sh` sets this for you; only a manual `cargo build` needs it
+exported by hand.
+
 Package and deploy with the Greengrass Development Kit (GDK), which runs `build.sh` to build the UI and
-the IPC binary and stage a zip artifact (binary + `ui/`):
+the IPC binary and stage a zip artifact (binary + `ui/` at the archive root):
 
 ```bash
 gdk component build      # runs build.sh -> greengrass-build/ (Linux/WSL)

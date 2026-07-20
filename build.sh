@@ -28,6 +28,15 @@ FEATURES="${EDGECOMMONS_FEATURES:-greengrass}"
 TARGET="${EDGECOMMONS_TARGET:-}"
 TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 
+# Raise the AWS GG IPC SDK's concurrent-stream ceiling. aws-greengrass-component-sdk vendors a C
+# header that caps concurrent IPC subscription streams at GG_IPC_MAX_STREAMS (default 16). The console
+# opens ~13 concurrent IPC subscription streams at startup, so the default 16 is too tight and the
+# component crash-loops on the nucleus. The header is #ifndef-guarded, so 64 is a supported override.
+# The `cc` crate that compiles the SDK reads CFLAGS, so baking the define in here makes the committed
+# greengrass build deployable with no manual env. (Only affects this greengrass build; the define is
+# inert for any other C crate. HOST/standalone builds don't run this script.)
+export CFLAGS="${CFLAGS:-} -DGG_IPC_MAX_STREAMS=64"
+
 # The gateway depends on the gitignored sibling-library link at local/edgecommons-rust. Create it if
 # absent (npm run link:rust / scripts/link-sibling-rust.mjs). CI/on-device sets EDGECOMMONS_RUST_LIB.
 if [[ ! -e "local/edgecommons-rust" ]]; then
@@ -54,9 +63,13 @@ if [[ ! -f "${BIN_PATH}" ]]; then
   exit 1
 fi
 
-# Stage a zip whose top directory is `EdgeConsole/` (so it unpacks to
-# {artifacts:decompressedPath}/EdgeConsole/... to match the recipe Run lifecycle).
-STAGE_DIR="$(mktemp -d)/EdgeConsole"
+# Stage the binary + `ui/` at the ZIP ROOT (no extra top-level dir). Greengrass unpacks a ZIP
+# artifact into a folder named after the archive minus its extension, i.e. EdgeConsole.zip ->
+# {artifacts:decompressedPath}/EdgeConsole/<zip contents>. So the zip must contain the files at its
+# root; a top-level EdgeConsole/ dir here would double-nest to
+# {artifacts:decompressedPath}/EdgeConsole/EdgeConsole/... (broken on-device). The recipe Run
+# lifecycle `cd {artifacts:decompressedPath}/EdgeConsole` then finds ./edge-console-gateway and ./ui.
+STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/ui"
 cp "${BIN_PATH}" "${STAGE_DIR}/${BIN_NAME}"
 chmod +x "${STAGE_DIR}/${BIN_NAME}" || true
@@ -68,7 +81,7 @@ mkdir -p "${ARTIFACT_DIR}" "${RECIPE_DIR}"
 
 ZIP_PATH="$(pwd)/${ARTIFACT_DIR}/EdgeConsole.zip"
 rm -f "${ZIP_PATH}"
-( cd "$(dirname "${STAGE_DIR}")" && zip -rq "${ZIP_PATH}" "EdgeConsole" )
+( cd "${STAGE_DIR}" && zip -rq "${ZIP_PATH}" . )
 cp recipe.yaml "${RECIPE_DIR}/recipe.yaml"
 
 echo "Staged artifact -> ${ARTIFACT_DIR}/EdgeConsole.zip"

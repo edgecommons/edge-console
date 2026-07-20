@@ -121,6 +121,15 @@ Nothing in the ingress, model, or command gateway changes between the two — on
 the recipe's IPC pubsub `accessControl` (which scopes the console to SUBSCRIBE the six ingested UNS classes plus
 request/reply inboxes, and PUBLISH commands to any component `cmd` inbox and its own reserved-class messages).
 
+**IPC stream ceiling.** The console opens one IPC subscription stream per ingress filter — 13 concurrent streams
+(the six UNS classes in both component- and instance-scope, plus its own reply/republish paths), which exceeds the
+`aws-greengrass-component-sdk` default `GG_IPC_MAX_STREAMS` of 16 once the SDK's own bookkeeping streams are counted.
+The greengrass build therefore **raises `GG_IPC_MAX_STREAMS` to 64** at compile time — `build.sh` exports
+`CFLAGS=-DGG_IPC_MAX_STREAMS=64` before the `cargo build --features greengrass`, and the vendored SDK header is
+`#ifndef`-guarded, so the override takes. This is baked into the committed build, so the shipped artifact deploys with
+no manual environment. A manual local greengrass dev build (`cargo build --features greengrass` outside `build.sh`)
+must export the same `CFLAGS` to reproduce the ceiling.
+
 ---
 
 ## 2. The site model
