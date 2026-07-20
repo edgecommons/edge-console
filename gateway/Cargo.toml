@@ -9,11 +9,28 @@ description = "Rust EdgeCommons gateway for the Edge Console React UI"
 name = "edge-console-gateway"
 path = "src/main.rs"
 
+[features]
+# Runtime selection mirrors the edgecommons library (and the sibling Rust components
+# telemetry-processor / file-replicator). Exactly one transport provider is normally compiled in:
+#
+#   standalone (default) — dual-broker MQTT. The HOST / Kubernetes build the bottling-company
+#                          harness and the current site-broker console deployment rely on. Builds
+#                          natively on Windows.
+#   greengrass           — Greengrass IPC, for the single-device "degraded" deployment that has no
+#                          site broker and no uns-bridge: the console connects to the device-local
+#                          bus over IPC and still serves its UI. The AWS GG IPC SDK is a Linux-only
+#                          C-FFI crate (bindgen + cc), so this feature only builds on a Linux
+#                          toolchain (build it on the device or in WSL). The device build opts in via
+#                          gdk build.sh: `cargo build --no-default-features --features greengrass`.
+default = ["standalone"]
+standalone = ["edgecommons/standalone"]
+greengrass = ["edgecommons/greengrass"]
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 bytes = "1"
-edgecommons = { path = "../local/edgecommons-rust", default-features = false, features = ["standalone"] }
+edgecommons = { path = "../local/edgecommons-rust", default-features = false }
 futures-util = "0.3"
 mime_guess = "2"
 mimalloc = "0.1"
