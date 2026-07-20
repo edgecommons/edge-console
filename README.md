@@ -5,8 +5,9 @@ command** every [edgecommons](https://github.com/edgecommons/edgecommons) compon
 and the site's **sole browser↔bus bridge** (browsers speak HTTPS+WS to the console; only the
 console speaks MQTT/UNS). It attaches to the **site broker** (the aggregation point every
 device's [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into), consumes the
-Unified Namespace (`ecv1/{device}/{component}/{instance}/{class}[/channel]`), and needs **zero
-per-component knowledge**: six class wildcards cover the whole fleet.
+Unified Namespace (`ecv1/{device}/{component}[/{instance}]/{class}[/channel]`, the instance token
+optional), and needs **zero per-component knowledge**: the six consumer classes, each subscribed at
+both the component (`ecv1/+/+/{class}`) and instance (`ecv1/+/+/+/{class}`) scope, cover the whole fleet.
 
 Its focus is **edge health** (fleet liveness, per-value freshness, whole-device reachability)
 and **config review** (every component's effective, redacted config from its `cfg`
@@ -34,9 +35,11 @@ at the WS upgrade, and the read path (fleet snapshot + live stream) is unauthent
 
 ## How the console consumes the UNS
 
-**One connection** — the site broker (`messaging.local` in the config; on a single-device
-deployment, the device's local bus; on Kubernetes, the in-cluster broker). Through it,
-the **ingress** subscribes the six consumer-class wildcards, built via the library
+**One connection** — the site broker (`messaging.local` in the config; on Kubernetes, the
+in-cluster broker) or, on a **single edge device with no site broker**, the device-local
+Greengrass IPC bus (built with the gateway's `greengrass` feature and shipped as a Greengrass
+component via the repo-root `recipe.yaml` — see [docs/how-to-guides.md](docs/how-to-guides.md#deploy-on-a-single-device-over-greengrass-ipc)).
+Through it, the **ingress** subscribes the six consumer-class wildcards, built via the library
 (`gg.uns().filter(cls, UnsScope.all())`, never by hand):
 
 ```text
@@ -71,7 +74,7 @@ event stream** (`FleetDelta`, monotonic `seq`) — the exact snapshot-then-delta
 WS gateway fans out.
 
 **Late-join rehydration**: on first sight of a device the console publishes the per-device
-broadcast pair `ecv1/{device}/_bcast/main/cmd/republish-state` + `…/republish-cfg`
+broadcast pair `ecv1/{device}/_bcast/cmd/republish-state` + `…/republish-cfg`
 (fire-and-forget `cmd` notifications). The edgecommons library's `RepublishListener` answers
 them in every component (all four languages), re-announcing `state` and `cfg`; the periodic
 `state` keepalive independently converges liveness within one interval.

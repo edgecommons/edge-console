@@ -21,7 +21,7 @@ section/field falls back to its default rather than failing the component.
 
 | Section | Required | Purpose |
 |---------|----------|---------|
-| `messaging` | HOST/KUBERNETES | The **site broker** connection (`messaging.local`), or supplied via `--transport MQTT <file>`. The console's one connection. |
+| `messaging` | HOST/KUBERNETES | The **site broker** connection (`messaging.local`), or supplied via `--transport MQTT <file>`. The console's one connection. On **GREENGRASS with `--transport IPC`** there is no broker: the console connects to the device-local IPC bus, so no `messaging` block is configured or required. |
 | `component.global.console` | optional | All console-specific knobs (this document). Absent ⇒ all defaults. |
 | `hierarchy` | optional | UNS enterprise-hierarchy level names; last level is the device. Drives the console's dynamic grouping/tree. Absent ⇒ `["device"]`. |
 | `identity` | optional | Values for every hierarchy level except the last (the resolved thing). Sets the *console's own* identity — give it a distinct thing so it doesn't self-appear. |

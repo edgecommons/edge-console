@@ -7,6 +7,9 @@ logs/
 *.log
 test-artifacts/
 
+# GDK Greengrass packaging output (`gdk component build` stages here from build.sh)
+greengrass-build/
+
 # The local sibling-library link (the npm analog of the bridge's gitignored
 # .cargo/config.toml paths override): `npm run link:lib` generates local/edgecommons,
 # a zero-dependency workspace stub that satisfies @edgecommons/edgecommons from the
@@ -22,5 +25,12 @@ package-lock.json
 
 # Runtime artifacts (house rule: never commit .vault, caches, TLS certs)
 .vault/
+.codex-tmp/
 *.pem
 *.key
+
+# Gemba TV experiment build output
+experiments/gemba/tv/google-tv-gemba/.gradle/
+experiments/gemba/tv/google-tv-gemba/build/
+experiments/gemba/tv/google-tv-gemba/app/build/
+experiments/gemba/tv/tizen-gemba/.buildResult/

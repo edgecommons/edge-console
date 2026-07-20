@@ -1,0 +1,86 @@
+{
+  "logging": {
+    "level": "DEBUG"
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalSecs": 5
+  },
+  "messaging": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": 18830,
+      "clientId": "edge-console-gemba-tv-local"
+    },
+    "requestTimeoutSeconds": 30
+  },
+  "hierarchy": {
+    "levels": [
+      "site",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "dallas"
+  },
+  "component": {
+    "token": "edge-console-gemba-tv-experiment",
+    "global": {
+      "console": {
+        "ws": {
+          "port": 18445,
+          "bindAddress": "0.0.0.0",
+          "heartbeatIntervalMs": 15000,
+          "allowedOrigins": []
+        },
+        "apps": [
+          {
+            "id": "tv-board",
+            "webRoot": "experiments/gemba/tv/tizen-gemba",
+            "allowedOrigins": [
+              "https://google-tv.edgecommons.local",
+              "http://192.168.1.224:18445",
+              "file://"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "fleet",
+              "events",
+              "signals",
+              "attributes",
+              "alarms"
+            ]
+          }
+        ],
+        "runtime": {
+          "workerThreads": 4,
+          "mallocArenaMax": 2,
+          "eventBufferCapacity": 512
+        },
+        "rbac": {
+          "defaultRole": "viewer",
+          "roles": {
+            "viewer": {
+              "allow": [
+                "ping",
+                "describe",
+                "get-configuration",
+                "sb/status",
+                "sb/browse",
+                "sb/read"
+              ],
+              "deny": []
+            }
+          }
+        }
+      }
+    },
+    "instances": [
+      {
+        "id": "tv"
+      }
+    ]
+  }
+}

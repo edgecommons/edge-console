@@ -100,6 +100,36 @@ Two grounded facts about today's `edgecommons` shape the whole design and recur 
   the Greengrass shared-connection quota). So command handling has to own timeouts and cleanup. This is fixed in the
   library (DESIGN-uns §7.4), not just in the console.
 
+### 1.1 Deployment topologies — site-broker and single-device (IPC-local)
+
+Because the console is a standard edgecommons component that talks to whatever bus the runtime gives it (it holds an
+`Arc<dyn MessagingService>`, never a hardcoded transport), the *same gateway binary* runs in two topologies:
+
+- **Site-broker (the diagram above).** Multiple edge devices publish to per-device buses; `uns-bridge` relays each
+  device's UNS to a **site MQTT broker**; the console consumes the site broker and is the single browser-facing
+  bridge for the whole site. This is the `standalone` build (dual-broker MQTT), the HOST/Kubernetes path the
+  bottling-company harness uses.
+- **Single-device / IPC-local (the degraded case).** One edge device, **no site MQTT broker and no `uns-bridge`.**
+  The console deploys as a Greengrass component alongside the device's components and connects to the **device-local
+  bus over Greengrass IPC**, then serves its UI on a device port. It sees exactly the one device it runs on — the
+  same six-wildcard ingress, the same command/republish path, the same in-memory model — just without the site
+  aggregation layer. This is the `greengrass` build of the gateway crate (`cargo build --features greengrass`,
+  Linux-only because the AWS GG IPC SDK is a C-FFI crate); it ships via `recipe.yaml` + `gdk-config.json` + `build.sh`
+  in the repo root.
+
+Nothing in the ingress, model, or command gateway changes between the two — only the compiled transport provider and
+the recipe's IPC pubsub `accessControl` (which scopes the console to SUBSCRIBE the six ingested UNS classes plus
+request/reply inboxes, and PUBLISH commands to any component `cmd` inbox and its own reserved-class messages).
+
+**IPC stream ceiling.** The console opens one IPC subscription stream per ingress filter — 13 concurrent streams
+(the six UNS classes in both component- and instance-scope, plus its own reply/republish paths), which exceeds the
+`aws-greengrass-component-sdk` default `GG_IPC_MAX_STREAMS` of 16 once the SDK's own bookkeeping streams are counted.
+The greengrass build therefore **raises `GG_IPC_MAX_STREAMS` to 64** at compile time — `build.sh` exports
+`CFLAGS=-DGG_IPC_MAX_STREAMS=64` before the `cargo build --features greengrass`, and the vendored SDK header is
+`#ifndef`-guarded, so the override takes. This is baked into the committed build, so the shipped artifact deploys with
+no manual environment. A manual local greengrass dev build (`cargo build --features greengrass` outside `build.sh`)
+must export the same `CFLAGS` to reproduce the ceiling.
+
 ---
 
 ## 2. The site model
@@ -611,7 +641,7 @@ platform bug the console surfaced — the Java `ConfigManager.getFullConfig()` f
 | D7 | Config write path in v1 | Read-only + `reload-config`; feature-flagged whole-document push in Phase 2; per-key patching deferred to a future hierarchical-config administration design. |
 | D8 | Multi-device topology | **`uns-bridge` + site broker** (M1) as primary; console multi-connection federation and per-line-console UI federation as documented fallbacks. |
 | D9 | Descriptor DSL evolution | Hold the no-logic line; the `treeBrowser`/`signalGrid` widgets are the pressure-relief valve. Revisit derive primitives only against a "three concrete demands" bar. |
-| D10 | Topic depth vs hierarchy | **Superseded in v0.3.** The topic is **device-only** (`ecv1/{device}/{component}/{instance}/{class}`) so depth is constant; the enterprise-configurable hierarchy lives in the top-level `identity`, not the topic. Optional single root level via `topic.includeRoot` for a multi-site broker. |
+| D10 | Topic depth vs hierarchy | **Superseded in v0.3.** The topic is **device-only** (`ecv1/{device}/{component}[/{instance}]/{class}`, instance optional per D-U28) so depth stays bounded; the enterprise-configurable hierarchy lives in the top-level `identity`, not the topic. Optional single root level via `topic.includeRoot` for a multi-site broker. |
 | D11 | Merge heartbeat + announce into `state` | Yes — one timer, one subscription, one staleness rule, and the keepalive doubles as the late-join answer. |
 | D12 | Hierarchy shape | ✅ **v0.3: enterprise-configurable** — an ordered, named `hierarchy.levels` list (arbitrary depth) with one `deviceLevel`; `component`/`instance` are the fixed edgecommons suffix. |
 | D13 | Identity placement | ✅ **v0.3: top-level `identity` element** (not `tags`), carrying ordered `hier` + precomputed `path` + `device`. `tags` kept for business context (app/org/cost); `tags.thing` removed. |
@@ -685,7 +715,7 @@ Responds to the identity + facade discussion; each row is a settled decision (se
 |---|---|
 | **Configurable hierarchy** | No longer hardcoded `site→area→device`. A deployment declares an ordered, freely-named `hierarchy.levels` list of arbitrary depth with one `deviceLevel` (§2, §4.4, §5.1). |
 | **Identity placement** | Moved out of `tags` to a **top-level `identity` element** (§4.4) carrying ordered `hier`, precomputed `path`, and `device`. `tags.thing` removed (redundant); `tags` retained for business context (app / org / cost). |
-| **Device-only topic** | `ecv1/{device}/{component}/{instance}/{class}` — the hierarchy no longer appears in the topic, so depth is **constant** and IoT-Core-safe regardless of hierarchy depth (§4.1). Optional `topic.includeRoot` for multi-site brokers. |
+| **Device-only topic** | `ecv1/{device}/{component}[/{instance}]/{class}` — the instance token is optional (D-U28), and the hierarchy no longer appears in the topic, so depth stays bounded and IoT-Core-safe regardless of hierarchy depth (§4.1). Optional `topic.includeRoot` for multi-site brokers. |
 | **Messaging model** | `gg.messaging()` kept as the general bus taking **arbitrary literal topics** (UNS or external, for legacy-system integration); an explicit **`gg.uns()`** builds + validates UNS topics (charset + depth). Platform facades are the reserved, mostly-automatic surface; `commands()` is the console-exposed request/reply subset (§5.2). Enforcement narrowed to a reserved-platform-class guard + broker ACLs (§5.3). |
 | **`request()` hardening** | Internal default deadline + optional `request(topic, msg, timeout)` overload guarantee completion + reply-topic cleanup even if the caller never waits; `reply()` / `subscribe()` / the future pattern unchanged (§5.4). |
 | **`/`-delimited convention** | Topics, verbs, and channels use `/` (MQTT-native), never dot-as-delimiter; verbs lowercase-hyphenated, families namespaced (`cmd/sb/read`). Diagrams and tables swept (§4.2, §5.2, §7, §8). |
@@ -693,7 +723,7 @@ Responds to the identity + facade discussion; each row is a settled decision (se
 | **UNS in streaming** | The durable streaming path (Kinesis/Kafka/Parquet via `gg.streams()`) auto-enriches records with identity + header + tags; columnar sinks derive hierarchy **columns** + optional partitioning from the `hierarchy` schema; telemetry-processor `stream:<name>` preserves originating identity (§4.6, M15). |
 | **Identity dedup** | Dropped the standalone `device` field — the device is the **last `hier` entry** (invariant: deepest level is the node), so `deviceLevel` also went away; a computed `device` accessor keeps code ergonomic (§4.4). |
 | **Hierarchical-config dependency** | Hierarchy + shared location levels are distributed via edgecommons **Hierarchical Config** (`layers[]` root-to-component merge), defined once at the highest useful lineage scope, not repeated per component. The console reads the resulting effective `cfg` and `identity.hier`; it does not parse ConfigComponent catalogs. Location moves out of `tags.site/shop/line` into `identity`. |
-| **Instance is per-message** | `instance` is not a static identity field — a component serves many `component.instances[]`, so the `{instance}` segment is stamped per message from the instance the message pertains to (default `main` for component-level messages). |
+| **Instance is per-message** | `instance` is not a static identity field — a component serves many `component.instances[]`, so the `{instance}` segment is stamped per message from the instance the message pertains to. Under D-U28 the token is **optional**: component-level messages omit it entirely (component-scoped), rather than defaulting to a `main` sentinel. |
 
 ### Doc split (2026-07-02)
 

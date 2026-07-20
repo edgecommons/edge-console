@@ -11,6 +11,9 @@ export default tseslint.config(
       ".edgecommons-core/**",
       "local/**",
       "docs/**",
+      // Throwaway UI prototypes (android-tv / tizen mockups), outside the linted
+      // protocol/ui/scripts workspace and written as bare browser scripts.
+      "experiments/**",
     ],
   },
   js.configs.recommended,

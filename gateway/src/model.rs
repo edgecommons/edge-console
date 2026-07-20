@@ -953,7 +953,7 @@ impl Model {
         let record = Arc::new(EventRecord {
             id: self.next_event_id,
             key: key.clone(),
-            instance: event.identity.instance().to_string(),
+            instance: instance_label(&event.identity).to_string(),
             severity,
             ty,
             channel: event.channel.clone(),
@@ -988,7 +988,8 @@ impl Model {
             .get("instance")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
-            .unwrap_or(event.identity.instance())
+            .or_else(|| event.identity.instance())
+            .unwrap_or("main")
             .to_string();
         let measures = extract_metric_measures(&event.body);
         let max_points = self.config.metrics.max_series_points;
@@ -1069,7 +1070,7 @@ impl Model {
         let dedupe = format!(
             "{}|{}|{}|{}|{}|{}|{}",
             key.id(),
-            event.identity.instance(),
+            instance_label(&event.identity),
             level,
             sequence.unwrap_or(0),
             source_timestamp.as_deref().unwrap_or(""),
@@ -1089,7 +1090,7 @@ impl Model {
         let record = Arc::new(LogRecord {
             id: self.next_log_id,
             key: key.clone(),
-            instance: event.identity.instance().to_string(),
+            instance: instance_label(&event.identity).to_string(),
             level: level.to_string(),
             logger,
             message,
@@ -1140,7 +1141,7 @@ impl Model {
             return None;
         }
         let key = key_from_identity(&event.identity);
-        let instance = event.identity.instance().to_string();
+        let instance = instance_label(&event.identity).to_string();
         let id = format!("{}|{}|{}", key.id(), instance, signal);
         if !self.signals.contains_key(&id) && self.signals.len() >= 5000 {
             self.dropped_signal_series += 1;
@@ -1900,7 +1901,7 @@ fn update_cache(
     deltas: &mut Vec<FleetDeltaBody>,
     max_channels: usize,
 ) {
-    let instance = event.identity.instance().to_string();
+    let instance = instance_label(&event.identity).to_string();
     let id = value_cache_key(&instance, &event.cls, event.channel.as_deref());
     // Cap check: a new distinct channel over the cap is dropped + counted (no delta); an
     // update to an existing channel always refreshes and emits.
@@ -2162,13 +2163,16 @@ fn is_bridge_unreachable(event: &IngressEvent) -> bool {
 
 fn channel_from_topic(cls: &str, topic: &str) -> Option<String> {
     let parts: Vec<&str> = topic.split('/').collect();
-    let idx = if parts.get(4).copied() == Some(cls) {
-        Some(4)
-    } else if parts.get(5).copied() == Some(cls) {
-        Some(5)
-    } else {
-        parts.iter().position(|p| *p == cls)
-    }?;
+    // D-U28: the instance token is optional, so the class sits at index 3 (component-scope,
+    // `ecv1/{device}/{component}/{class}`) or index 4 (instance-scope,
+    // `ecv1/{device}/{component}/{instance}/{class}`), and deeper for multi-level hierarchies.
+    // Locate the class as the first class-token segment at or after the earliest legal position
+    // (index 3) rather than assuming a fixed slot — the channel is everything after it.
+    let idx = parts
+        .iter()
+        .skip(3)
+        .position(|p| *p == cls)
+        .map(|i| i + 3)?;
     let channel = parts.get(idx + 1..).unwrap_or(&[]).join("/");
     if channel.is_empty() {
         None
@@ -2182,6 +2186,15 @@ fn key_from_identity(identity: &MessageIdentity) -> ComponentKey {
         device: identity.device().to_string(),
         component: identity.component().to_string(),
     }
+}
+
+/// D-U28: a component-scoped message carries no instance token, so `identity.instance()` is
+/// `None`. The console's internal model labels that absent instance with the conventional `main`
+/// placeholder, which the UI renders as "the unnamed instance" (no instance chip). This is a
+/// display/keying convention only — the wire itself never carries `main` (D-U28 retired it); the
+/// topics built from this identity omit the instance segment entirely.
+fn instance_label(identity: &MessageIdentity) -> &str {
+    identity.instance().unwrap_or("main")
 }
 
 fn hier_json(identity: &MessageIdentity) -> Value {
@@ -2431,14 +2444,37 @@ mod tests {
     }
 
     #[test]
+    fn channel_from_topic_handles_both_d_u28_scopes() {
+        // D-U28 component-scope: the class sits at index 3 (no instance token).
+        assert_eq!(
+            channel_from_topic("metric", "ecv1/gw-1/comp/metric/opcua"),
+            Some("opcua".to_string())
+        );
+        assert_eq!(channel_from_topic("state", "ecv1/gw-1/comp/state"), None);
+        // Instance-scope: the class sits at index 4.
+        assert_eq!(
+            channel_from_topic("metric", "ecv1/gw-1/comp/cam1/metric/opcua"),
+            Some("opcua".to_string())
+        );
+        // Multi-segment channel tails are preserved under both scopes.
+        assert_eq!(
+            channel_from_topic("evt", "ecv1/gw-1/comp/evt/warning/clock-step"),
+            Some("warning/clock-step".to_string())
+        );
+        assert_eq!(
+            channel_from_topic("evt", "ecv1/gw-1/comp/cam1/evt/warning/clock-step"),
+            Some("warning/clock-step".to_string())
+        );
+    }
+
+    #[test]
     fn metric_body_flattens_numeric_fields() {
         let mut model = Model::new(ConsoleConfig::default());
         let msg = MessageBuilder::new("Metric", "1.0")
             .identity(identity())
             .metric_update(json!({"read": 1, "_aws": {}, "label": "x"}))
             .build();
-        let ev =
-            normalize_message("metric", "ecv1/gw-1/component-a/main/metric/opcua", msg).unwrap();
+        let ev = normalize_message("metric", "ecv1/gw-1/component-a/metric/opcua", msg).unwrap();
         let out = model.ingest(ev);
         assert!(
             out.events
@@ -2457,7 +2493,7 @@ mod tests {
                 .identity(identity())
                 .payload(json!({"logger": "t", "message": format!("m{i}")}))
                 .build();
-            let ev = normalize_message("log", "ecv1/gw-1/component-a/main/log/info", msg).unwrap();
+            let ev = normalize_message("log", "ecv1/gw-1/component-a/log/info", msg).unwrap();
             model.ingest(ev);
         }
         let frame = parse(&model.logs_frame(

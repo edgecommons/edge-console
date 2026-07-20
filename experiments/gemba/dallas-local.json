@@ -1,0 +1,154 @@
+{
+  "logging": {
+    "level": "INFO"
+  },
+  "heartbeat": {
+    "enabled": true,
+    "intervalSecs": 5
+  },
+  "messaging": {
+    "local": {
+      "host": "127.0.0.1",
+      "port": 18830,
+      "clientId": "edge-console-gemba-local"
+    },
+    "requestTimeoutSeconds": 30
+  },
+  "hierarchy": {
+    "levels": [
+      "site",
+      "device"
+    ]
+  },
+  "identity": {
+    "site": "dallas"
+  },
+  "component": {
+    "token": "edge-console-gemba-experiment",
+    "global": {
+      "console": {
+        "ws": {
+          "port": 18443,
+          "bindAddress": "127.0.0.1",
+          "heartbeatIntervalMs": 15000,
+          "allowedOrigins": [
+            "http://127.0.0.1:15173"
+          ]
+        },
+        "apps": [
+          {
+            "id": "andon",
+            "webRoot": "experiments/gemba/apps/andon",
+            "allowedOrigins": [
+              "http://127.0.0.1:15174"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "signals",
+              "alarms"
+            ]
+          },
+          {
+            "id": "gemba-board",
+            "webRoot": "experiments/gemba/apps/gemba-board",
+            "allowedOrigins": [
+              "http://127.0.0.1:15175"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "fleet",
+              "events",
+              "attributes"
+            ]
+          },
+          {
+            "id": "dallas-overview",
+            "webRoot": "experiments/gemba/apps/dallas-operations",
+            "allowedOrigins": [
+              "http://127.0.0.1:18443"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "signals",
+              "alarms",
+              "fleet"
+            ]
+          },
+          {
+            "id": "dallas-line-1",
+            "webRoot": "experiments/gemba/apps/dallas-operations",
+            "allowedOrigins": [
+              "http://127.0.0.1:18443"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "signals",
+              "alarms"
+            ]
+          },
+          {
+            "id": "dallas-line-2",
+            "webRoot": "experiments/gemba/apps/dallas-operations",
+            "allowedOrigins": [
+              "http://127.0.0.1:18443"
+            ],
+            "allowedRoles": [
+              "viewer"
+            ],
+            "capabilities": [
+              "signals",
+              "alarms"
+            ]
+          },
+          {
+            "id": "restricted",
+            "webRoot": "experiments/gemba/apps/andon",
+            "allowedOrigins": [
+              "http://127.0.0.1:15176"
+            ],
+            "allowedRoles": [
+              "operator"
+            ],
+            "capabilities": [
+              "signals"
+            ]
+          }
+        ],
+        "runtime": {
+          "workerThreads": 4,
+          "mallocArenaMax": 2,
+          "eventBufferCapacity": 512
+        },
+        "rbac": {
+          "defaultRole": "viewer",
+          "roles": {
+            "viewer": {
+              "allow": [
+                "ping",
+                "describe",
+                "get-configuration",
+                "sb/status",
+                "sb/browse",
+                "sb/read"
+              ],
+              "deny": []
+            }
+          }
+        }
+      }
+    },
+    "instances": [
+      {
+        "id": "main"
+      }
+    ]
+  }
+}

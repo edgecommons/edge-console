@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, Utf8Bytes, WebSocket, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HOST, ORIGIN};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -18,12 +18,13 @@ use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
-use tokio::time::{Duration, interval};
+use tokio::time::{Duration, Instant, interval, sleep};
 
+use crate::gemba::{AppPolicy, FrameFamily, GembaSession, UI_UPDATE_INTERVAL};
 use crate::ingress::{REPUBLISH_CFG_VERBS, spawn_republish_verbs};
 use crate::model::{GatewayEvent, log_matches, log_push_frame};
 use crate::protocol::{
-    ClientFrame, ComponentKey, LogQuery, PROTOCOL_VERSION, error_frame, key_json,
+    ClientFrame, ComponentKey, LogQuery, PROTOCOL_VERSION, SignalsMode, error_frame, key_json,
     parse_client_frame,
 };
 use crate::{GatewayApp, SelfFrame};
@@ -45,11 +46,13 @@ pub async fn serve(
     let addr: SocketAddr = format!("{}:{}", app.console.ws.bind_address, app.console.ws.port)
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid console.ws bind address: {e}"))?;
-    let router = Router::new()
+    let mut router = Router::new()
         .route("/healthz", get(healthz))
-        .route("/ws", get(ws_handler))
-        .fallback(static_handler)
-        .with_state(app);
+        .route("/ws", get(ws_handler));
+    if !app.console.apps.is_empty() {
+        router = router.route("/apps/{app_id}/ws", get(gemba_ws_handler));
+    }
+    let router = router.fallback(static_handler).with_state(app);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "edge-console Rust gateway listening");
     axum::serve(listener, router)
@@ -79,6 +82,53 @@ async fn ws_handler(
     // (default = console.rbac.defaultRole). The session loop only sees the resolved string.
     let role = (app.role_resolver)(&headers);
     ws.on_upgrade(move |socket| handle_socket(app, socket, role))
+}
+
+async fn gemba_ws_handler(
+    State(app): State<Arc<GatewayApp>>,
+    AxumPath(app_id): AxumPath<String>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let Some(config) = app
+        .console
+        .apps
+        .iter()
+        .find(|candidate| candidate.id == app_id)
+        .cloned()
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let policy = AppPolicy::from_config(&config);
+    let origin = headers.get(ORIGIN).and_then(|value| value.to_str().ok());
+    if !listed_origin_allowed(origin, &policy.allowed_origins) {
+        tracing::warn!(
+            app_id,
+            ?origin,
+            "rejected Gemba WebSocket upgrade: origin not allowed"
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let role = (app.role_resolver)(&headers);
+    if !policy.allows_role(&role) {
+        tracing::warn!(
+            app_id,
+            role,
+            "rejected Gemba WebSocket upgrade: role not allowed"
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    ws.on_upgrade(move |socket| handle_gemba_socket(app, policy, socket, role))
+}
+
+/// Application WebSockets are intended for separately deployed browser applications. Requiring
+/// an explicit manifest origin prevents one app from selecting another app's route on a shared
+/// gateway origin. Non-browser clients must also provide the origin they are testing.
+fn listed_origin_allowed(origin: Option<&str>, allowlist: &[String]) -> bool {
+    let Some(origin) = origin.map(str::trim).filter(|origin| !origin.is_empty()) else {
+        return false;
+    };
+    allowlist.iter().any(|allowed| allowed.trim() == origin)
 }
 
 /// CSWSH defense. Absent Origin (non-browser client — no ambient-credential attack surface) is
@@ -185,6 +235,151 @@ async fn handle_socket(app: Arc<GatewayApp>, socket: WebSocket, role: String) {
         }
     }
     tracing::debug!(session = id, "websocket disconnected");
+}
+
+async fn handle_gemba_socket(
+    app: Arc<GatewayApp>,
+    policy: AppPolicy,
+    socket: WebSocket,
+    role: String,
+) {
+    let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+    let app_id = policy.id.clone();
+    let (mut sender, mut receiver) = socket.split();
+    let mut bus_rx = app.events.subscribe();
+    let mut delivery = Box::pin(sleep(UI_UPDATE_INTERVAL));
+    let mut hello_timeout = Box::pin(tokio::time::sleep(HELLO_TIMEOUT));
+    let mut session = GembaSession::new(policy, role);
+    tracing::debug!(session = id, app_id, "Gemba WebSocket connected");
+
+    loop {
+        tokio::select! {
+            Some(message) = receiver.next() => {
+                match message {
+                    Ok(WsMessage::Text(text)) => {
+                        let before: HashSet<FrameFamily> = session.subscriptions().collect();
+                        for response in session.handle_text(text.as_str()) {
+                            if send_text(&mut sender, json_text(response)).await.is_err() {
+                                return;
+                            }
+                        }
+                        let added: Vec<FrameFamily> = session
+                            .subscriptions()
+                            .filter(|family| !before.contains(family))
+                            .collect();
+                        enqueue_gemba_snapshots(&app, &mut session, &added).await;
+                    }
+                    Ok(WsMessage::Close(_)) => break,
+                    Ok(WsMessage::Ping(bytes)) => {
+                        if sender.send(WsMessage::Pong(bytes)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::debug!(session = id, app_id, error = %error, "Gemba WebSocket receive failed");
+                        break;
+                    }
+                }
+            }
+            event = bus_rx.recv() => {
+                match event {
+                    Ok(event) => {
+                        if let Some(family) = gemba_frame_family(&event)
+                            && session.is_subscribed(family)
+                            && let Some(frame) = gemba_frame(event)
+                        {
+                            session.push_frame(family, frame);
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(session = id, app_id, skipped, "Gemba session lagged; scheduling retained resync");
+                        session.mark_resync_required(skipped);
+                        let subscriptions: Vec<FrameFamily> = session.subscriptions().collect();
+                        enqueue_gemba_snapshots(&app, &mut session, &subscriptions).await;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = &mut delivery => {
+                if let Some(frame) = session.drain_updates()
+                    && send_text(&mut sender, json_text(frame)).await.is_err()
+                {
+                    break;
+                }
+                delivery.as_mut().reset(Instant::now() + UI_UPDATE_INTERVAL);
+            }
+            _ = &mut hello_timeout, if !session.is_ready() => {
+                let _ = send_text(&mut sender, json_text(json!({
+                    "type": "error",
+                    "protocolVersion": crate::gemba::APP_PROTOCOL_VERSION,
+                    "code": "hello-required",
+                    "message": "no hello received within timeout",
+                }))).await;
+                let _ = sender.send(WsMessage::Close(None)).await;
+                break;
+            }
+        }
+    }
+    tracing::debug!(session = id, app_id, "Gemba WebSocket disconnected");
+}
+
+async fn enqueue_gemba_snapshots(
+    app: &Arc<GatewayApp>,
+    session: &mut GembaSession,
+    families: &[FrameFamily],
+) {
+    for family in families {
+        let frame = {
+            let model = app.model.read().await;
+            match family {
+                FrameFamily::Fleet => Some(model.snapshot_frame()),
+                // Bound the retained ordered snapshot independently from live queueing. A full
+                // history can exceed the per-session byte budget and is not useful to a board
+                // reconnecting for current context.
+                FrameFamily::Events => Some(model.events_frame(Some(100))),
+                FrameFamily::Metrics => Some(model.metrics_frame()),
+                // The experimental subscription does not yet define a component/log query.
+                FrameFamily::Logs => None,
+                FrameFamily::Signals => Some(model.signals_frame(SignalsMode::Summary)),
+                FrameFamily::Attributes => Some(model.attributes_frame()),
+                FrameFamily::Alarms => Some(model.alarms_frame()),
+            }
+        };
+        if let Some(frame) = frame.and_then(|bytes| serde_json::from_str(bytes.as_str()).ok()) {
+            session.push_frame(*family, frame);
+        }
+    }
+}
+
+fn gemba_frame_family(event: &GatewayEvent) -> Option<FrameFamily> {
+    match event {
+        GatewayEvent::Deltas(_) => Some(FrameFamily::Fleet),
+        GatewayEvent::Config { .. } => None,
+        GatewayEvent::Event(_) => Some(FrameFamily::Events),
+        GatewayEvent::Metrics(_) => Some(FrameFamily::Metrics),
+        GatewayEvent::Logs { .. } => Some(FrameFamily::Logs),
+        GatewayEvent::Signals(_) => Some(FrameFamily::Signals),
+        GatewayEvent::Attributes(_) => Some(FrameFamily::Attributes),
+        GatewayEvent::Alarms(_) => Some(FrameFamily::Alarms),
+    }
+}
+
+fn gemba_frame(event: GatewayEvent) -> Option<Value> {
+    let bytes = match event {
+        GatewayEvent::Deltas(frame) => frame,
+        // Configuration needs a separate selector/authorization shape and is deliberately absent
+        // from the experiment capability list.
+        GatewayEvent::Config { .. } => return None,
+        GatewayEvent::Event(frame) | GatewayEvent::Metrics(frame) => frame,
+        GatewayEvent::Logs {
+            record, dropped, ..
+        } => log_push_frame(&record, dropped),
+        GatewayEvent::Signals(frame)
+        | GatewayEvent::Attributes(frame)
+        | GatewayEvent::Alarms(frame) => frame,
+    };
+    serde_json::from_str(bytes.as_str()).ok()
 }
 
 async fn handle_client_text(
@@ -558,6 +753,22 @@ impl SessionState {
 }
 
 async fn static_handler(State(app): State<Arc<GatewayApp>>, uri: Uri) -> Response {
+    if let Some((app_id, app_path)) = app_static_route(uri.path())
+        && !app.console.apps.is_empty()
+    {
+        let Some(config) = app
+            .console
+            .apps
+            .iter()
+            .find(|candidate| candidate.id == app_id)
+        else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        return match static_response(Path::new(&config.web_root), &app_path).await {
+            Ok(response) => response,
+            Err(status) => status.into_response(),
+        };
+    }
     let Some(root) = &app.console.ws.web_root else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -565,6 +776,18 @@ async fn static_handler(State(app): State<Arc<GatewayApp>>, uri: Uri) -> Respons
         Ok(response) => response,
         Err(status) => status.into_response(),
     }
+}
+
+/// Resolve an application static route to `(app id, path within that app's web root)`.
+/// Infrastructure endpoints are registered before the fallback, so only `/apps/...` reaches this
+/// parser. A missing trailing slash still resolves to the app's `index.html`.
+fn app_static_route(uri_path: &str) -> Option<(&str, String)> {
+    let tail = uri_path.strip_prefix("/apps/")?;
+    let (app_id, relative) = tail.split_once('/').unwrap_or((tail, ""));
+    if app_id.is_empty() {
+        return None;
+    }
+    Some((app_id, format!("/{relative}")))
 }
 
 async fn static_response(root: &Path, uri_path: &str) -> Result<Response, StatusCode> {
@@ -634,6 +857,24 @@ mod tests {
     #[test]
     fn safe_path_rejects_traversal() {
         assert!(safe_path(Path::new("/tmp/root"), "/../secret").is_err());
+    }
+
+    #[test]
+    fn app_static_routes_are_namespaced() {
+        assert_eq!(
+            app_static_route("/apps/andon"),
+            Some(("andon", "/".to_string()))
+        );
+        assert_eq!(
+            app_static_route("/apps/andon/"),
+            Some(("andon", "/".to_string()))
+        );
+        assert_eq!(
+            app_static_route("/apps/gemba-board/assets/app.js"),
+            Some(("gemba-board", "/assets/app.js".to_string()))
+        );
+        assert_eq!(app_static_route("/"), None);
+        assert_eq!(app_static_route("/apps/"), None);
     }
 
     // Live-push log filtering (sinceId + levels, no limit) is proven by
@@ -761,6 +1002,21 @@ mod tests {
             Some("gw.local:8443"),
             &allow
         ));
+    }
+
+    #[test]
+    fn application_origin_requires_an_explicit_exact_manifest_match() {
+        let allow = vec!["http://127.0.0.1:15174".to_string()];
+        assert!(listed_origin_allowed(
+            Some("http://127.0.0.1:15174"),
+            &allow
+        ));
+        assert!(!listed_origin_allowed(None, &allow));
+        assert!(!listed_origin_allowed(
+            Some("http://127.0.0.1:15175"),
+            &allow
+        ));
+        assert!(!listed_origin_allowed(Some("http://127.0.0.1:15174"), &[]));
     }
 
     /// §9.3: the default role resolver returns the console default role; a custom resolver is
