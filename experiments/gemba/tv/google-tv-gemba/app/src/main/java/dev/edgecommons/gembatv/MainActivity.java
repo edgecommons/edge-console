@@ -211,7 +211,12 @@ public final class MainActivity extends Activity {
     private View oeePart(String label, String signal) {
         LinearLayout p = panel();
         p.setGravity(Gravity.CENTER_VERTICAL);
-        p.addView(text(label, 22, MUTED, true), wc());
+        // Label shrinks to one line so "AVAILABILITY"/"PERFORMANCE" don't wrap in the narrow tile.
+        TextView lbl = text(label, 22, MUTED, true);
+        autoSize(lbl, 15, 22);
+        LinearLayout.LayoutParams lblLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.addView(lbl, lblLp);
         TextView v = text("--", 64, INK_ON_DARK, true);
         v.setGravity(Gravity.CENTER_VERTICAL);
         autoSize(v, 34, 72);
@@ -245,22 +250,25 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < specs.length; i++) {
             String[] s = specs[i];
             LinearLayout tile = panel();
-            tile.addView(text(s[0], 24, MUTED, true), wc());
-            LinearLayout valRow = new LinearLayout(this);
-            valRow.setOrientation(LinearLayout.HORIZONTAL);
-            valRow.setGravity(Gravity.BOTTOM);
-            TextView v = text("--", 54, INK_ON_DARK, true);
-            v.setGravity(Gravity.BOTTOM);
-            autoSize(v, 30, 58);
-            // value takes the cell width (bounded for autosize); the unit sits beside it
-            LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-            valRow.addView(v, vlp);
+            // Label row: signal name on the left, unit (if any) on the right. Keeping the unit here
+            // leaves the value ALONE in its cell, which is what lets autosize scale it cleanly.
+            LinearLayout labelRow = new LinearLayout(this);
+            labelRow.setOrientation(LinearLayout.HORIZONTAL);
+            TextView name = text(s[0], 22, MUTED, true);
+            autoSize(name, 15, 22);   // shrink to fit one line beside the unit — never truncate
+            labelRow.addView(name, weight(1));
             if (!s[2].isEmpty()) {
-                TextView unit = text("  " + s[2], 26, MUTED, false);
-                valRow.addView(unit, wc());
+                TextView unit = text(s[2], 20, MUTED, false);
+                unit.setGravity(Gravity.BOTTOM);
+                labelRow.addView(unit, wc());
             }
-            tile.addView(valRow, fillCell(dp(10)));
+            tile.addView(labelRow, mw());
+            // Value fills the remaining cell height and autosizes to the largest one-line size that
+            // fits — alone in the cell, so it can never clip regardless of the panel's density.
+            TextView v = text("--", 54, INK_ON_DARK, true);
+            v.setGravity(Gravity.CENTER_VERTICAL);
+            autoSize(v, 28, 56);   // capped so short values keep headroom and don't kiss the floor
+            tile.addView(v, fillCell(dp(6)));
             valueViews.put(s[1], v);
             int rm = (i == specs.length - 1) ? 0 : dp(16);
             row.addView(tile, weightMargins(1, 0, 0, rm, 0));
