@@ -122,3 +122,40 @@ button { appearance: none; border: 2px solid var(--ink); background: var(--paper
 /* the .machine i bottom-bar rule is a descendant selector that also catches the nested <i>
    layer value in step E; keep that one inline text, not an absolute bar. */
 .machine div i { position: static !important; left: auto !important; right: auto !important; bottom: auto !important; height: auto !important; background: transparent !important; display: inline !important; font-style: normal !important; }
+
+/* --- TV fit + section-header + warn-label refinements (verified on the 55" panel) ---
+   1) 02/03 headers float ABOVE their cards (the .op-col wrapper) like section 01;
+   2) 02/03 are separated by a real column gutter and set apart from 01 by a top gap; the two
+      content cards are forced to equal height and their main measure shares one font size;
+   3) the motor-current warn label is right-aligned (see index.html <text>);
+   4) the whole board is trimmed to fit 1080p with a small overscan cushion — fonts untouched,
+      only paddings/margins/box heights reclaimed.
+   NOTE: this 2019 Tizen web runtime (Chromium ~63) ignores the `gap` shorthand on grid, so the
+   02/03 gutter MUST use the grid-column-gap longhand — `gap` alone renders zero gutter. --- */
+.op-col { display: flex; flex-direction: column; min-width: 0; height: 100%; }
+.op-col .section-heading { margin-bottom: 10px; }
+.op-col .panel { margin-top: 0 !important; flex: 1 1 auto; }
+.oee-band { min-height: 90px !important; }
+.oee-band > div { padding-top: 8px !important; padding-bottom: 9px !important; }
+.oee-band__hero strong { font-size: 58px !important; }
+.status-band { min-height: 138px !important; }
+.status-band > div { padding-top: 11px !important; padding-bottom: 11px !important; }
+.status-band__rate strong { font-size: 52px !important; }
+.status-band__label strong { font-size: 40px !important; }
+.content { min-height: 0 !important; }
+.operations { padding-top: 16px !important; padding-bottom: 8px !important; }
+.machine { min-height: 104px !important; }
+.operation-grid { margin-top: 22px !important; grid-column-gap: 28px !important; column-gap: 28px !important; }
+.throughput-main strong, .current-reading strong { font-size: 48px !important; }
+.panel { min-height: 0 !important; padding-top: 10px !important; padding-bottom: 10px !important; }
+.current-chart { height: 84px !important; }
+.current-chart text { font-size: 16px !important; }
+.quality-row { margin-top: 9px !important; }
+.quality-row article { min-height: 64px !important; }
+.footer { min-height: 70px !important; }
+.pallet-panel { padding-top: 16px !important; padding-bottom: 12px !important; }
+.pallet-progress { margin-top: 10px !important; }
+.pallet-copy { margin-top: 10px !important; padding: 9px 0 !important; }
+.pallet-grid { grid-auto-rows: 40px !important; padding: 12px 10px 10px !important; }
+.pallet-key { margin-top: 8px !important; }
+.pallet-foot { margin-top: 10px !important; }

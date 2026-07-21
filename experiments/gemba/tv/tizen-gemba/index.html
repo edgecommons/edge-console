@@ -52,25 +52,29 @@
         </section>
 
         <div class="operation-grid">
+          <div class="op-col">
+          <div class="section-heading"><span><small>02 · SHIFT</small><h2>Throughput</h2></span><em class="ahead">live</em></div>
           <section class="panel throughput-panel">
-            <div class="section-heading"><span><small>02 · SHIFT</small><h2>Throughput</h2></span><em class="ahead">live</em></div>
             <div class="throughput-main"><strong id="case-count" data-signal="GoodCaseCount">--</strong><span>good cases</span></div>
             <div class="plan-line"><i id="plan-fill"></i><mark></mark></div>
             <div class="plan-labels"><span>Good cases</span><span>Reject cases</span></div>
             <div class="throughput-stats"><span><small>Reject cases</small><b id="reject-count" data-signal="CaseRejectCount">--</b></span><span><small>Microstops</small><b>7</b></span><span><small>Blocked time</small><b id="blocked-time">--</b></span></div>
           </section>
+          </div>
 
+          <div class="op-col">
+          <div class="section-heading"><span><small>03 · PACKER LOAD</small><h2>Jam early warning</h2></span><em id="risk-chip" class="risk-chip">LOW RISK</em></div>
           <section class="panel jam-panel">
-            <div class="section-heading"><span><small>03 · PACKER LOAD</small><h2>Jam early warning</h2></span><em id="risk-chip" class="risk-chip">LOW RISK</em></div>
             <div class="current-reading"><strong id="motor-current" data-signal="PackerMotorCurrentA">--</strong><span>A</span><small>Normal 5.4–7.1 A</small></div>
             <svg class="current-chart" viewBox="0 0 600 128" preserveAspectRatio="none" aria-label="Packer motor current trend">
               <line class="warn-line" x1="0" y1="27" x2="600" y2="27"></line>
-              <text x="6" y="19">9.0 A JAM RISK</text>
+              <text x="596" y="20" text-anchor="end">9.0 A JAM RISK</text>
               <path id="current-area" d=""></path>
               <path id="current-line" d=""></path>
             </svg>
             <div class="jam-state"><span><i></i>Jam switch <b id="jam-status" data-signal="JamStatus">CLEAR</b></span><span>Palletizer <b data-signal="PalletizerState">BUILDING</b></span></div>
           </section>
+          </div>
         </div>
 
         <section class="quality-row">
