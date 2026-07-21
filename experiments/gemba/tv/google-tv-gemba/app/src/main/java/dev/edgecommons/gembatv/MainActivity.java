@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
@@ -146,9 +147,12 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(52), dp(36), dp(52), dp(36)); // TV overscan-safe
         root.setBackgroundColor(BG);
 
+        // Header is fixed at the top; the OEE band and the production grid divide ALL the
+        // remaining height by weight, so the board fills the panel exactly — no bottom clip on a
+        // dense panel, no dead band on a sparse one — regardless of the TV's reported density.
         root.addView(header(), mw());
-        root.addView(oeeBand(), rowMargins(dp(22)));
-        root.addView(productionGrid(), rowMargins(dp(20)));
+        root.addView(oeeBand(), rowWeight(dp(22), 1.05f));
+        root.addView(productionGrid(), rowWeight(dp(20), 1.95f));
 
         setContentView(root);
         setStatus("Connecting…", SAFETY);
@@ -192,8 +196,10 @@ public final class MainActivity extends Activity {
         hero.setBackground(rounded(SAFETY, SAFETY, 0, 16));
         hero.addView(text("OEE", 30, Color.rgb(88, 68, 21), true), wc());
         TextView oee = text("--", 118, Color.rgb(35, 35, 61), true);
+        oee.setGravity(Gravity.CENTER);
+        autoSize(oee, 48, 132);
         valueViews.put("OEE", oee);
-        hero.addView(oee, wc());
+        hero.addView(oee, fillCell(0));
         band.addView(hero, weightMargins(34, 0, 0, dp(14), 0));
 
         band.addView(oeePart("AVAILABILITY", "Availability"), weightMargins(22, dp(14), 0, dp(14), 0));
@@ -207,14 +213,15 @@ public final class MainActivity extends Activity {
         p.setGravity(Gravity.CENTER_VERTICAL);
         p.addView(text(label, 22, MUTED, true), wc());
         TextView v = text("--", 64, INK_ON_DARK, true);
-        LinearLayout.LayoutParams lp = wc();
-        lp.topMargin = dp(6);
-        p.addView(v, lp);
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        autoSize(v, 34, 72);
+        p.addView(v, fillCell(dp(6)));
         valueViews.put(signal, v);
         return p;
     }
 
     private View productionGrid() {
+        // Two equal-weight rows so the eight tiles split the grid's height evenly and grow with it.
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         grid.addView(tileRow(new String[][]{
@@ -222,15 +229,13 @@ public final class MainActivity extends Activity {
                 {"GOOD BOTTLES", "GoodBottleCount", ""},
                 {"FILL PRESSURE", "FillPressureKpa", "kPa"},
                 {"FILL VOLUME", "FillVolumeMl", "mL"}
-        }), mw());
-        LinearLayout.LayoutParams r2 = mw();
-        r2.topMargin = dp(18);
+        }), rowWeight(0, 1f));
         grid.addView(tileRow(new String[][]{
                 {"BOWL LEVEL", "BowlLevelPct", "%"},
                 {"PRODUCT TEMP", "ProductTempC", "°C"},
                 {"FILLER STATE", "FillerState", ""},
                 {"REJECTS", "RejectCount", ""}
-        }), r2);
+        }), rowWeight(dp(18), 1f));
         return grid;
     }
 
@@ -244,15 +249,18 @@ public final class MainActivity extends Activity {
             LinearLayout valRow = new LinearLayout(this);
             valRow.setOrientation(LinearLayout.HORIZONTAL);
             valRow.setGravity(Gravity.BOTTOM);
-            LinearLayout.LayoutParams valRowLp = wc();
-            valRowLp.topMargin = dp(10);
             TextView v = text("--", 54, INK_ON_DARK, true);
-            valRow.addView(v, wc());
+            v.setGravity(Gravity.BOTTOM);
+            autoSize(v, 30, 58);
+            // value takes the cell width (bounded for autosize); the unit sits beside it
+            LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+            valRow.addView(v, vlp);
             if (!s[2].isEmpty()) {
                 TextView unit = text("  " + s[2], 26, MUTED, false);
                 valRow.addView(unit, wc());
             }
-            tile.addView(valRow, valRowLp);
+            tile.addView(valRow, fillCell(dp(10)));
             valueViews.put(s[1], v);
             int rm = (i == specs.length - 1) ? 0 : dp(16);
             row.addView(tile, weightMargins(1, 0, 0, rm, 0));
@@ -592,10 +600,27 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private LinearLayout.LayoutParams rowMargins(int top) {
-        LinearLayout.LayoutParams lp = mw();
+    /** Full-width child that takes a weighted share of its parent's height (the vertical-fill seam). */
+    private LinearLayout.LayoutParams rowWeight(int top, float w) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, w);
         lp.topMargin = top;
         return lp;
+    }
+
+    /** Full-width child that fills the remaining height of its (bounded) cell — gives an autosizing
+     *  value a concrete box to scale into, so the big numbers grow to fill without ever clipping. */
+    private LinearLayout.LayoutParams fillCell(int top) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        lp.topMargin = top;
+        return lp;
+    }
+
+    /** Legible-but-bounded: one line, scaled uniformly to the largest size that fits the cell. */
+    private void autoSize(TextView v, int minSp, int maxSp) {
+        v.setMaxLines(1);
+        v.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, 2, TypedValue.COMPLEX_UNIT_SP);
     }
 
     private LinearLayout.LayoutParams weight(float w) {
