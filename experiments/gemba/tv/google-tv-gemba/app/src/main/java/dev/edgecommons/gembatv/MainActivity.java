@@ -37,9 +37,11 @@ import okhttp3.WebSocketListener;
 
 /**
  * Native Android TV (Sony / Google TV) OEE dashboard for the Dallas FILLING line (gw-fill-01).
- * Consumes the edge-console app-WebSocket signal stream over OkHttp and binds it to large,
- * at-a-distance-legible TV tiles. The gateway delivers all site signals; this board scopes to the
- * filling device and normalizes the delta channel-path to the short signal name.
+ *
+ * A composed industrial HMI in the same visual language as the packaging board: a light "paper"
+ * theme with dark ink header + OEE band, numbered titled sections (01 FILL LINE / 02 FILL QUALITY /
+ * 03 THROUGHPUT) that break the screen into areas of focus, and a rotary-filler-ring hero anchoring
+ * the right column. Driven live from the edge-console app-WebSocket, scoped to the filling device.
  */
 public final class MainActivity extends Activity {
     private static final String PREFS = "gemba-tv";
@@ -50,14 +52,18 @@ public final class MainActivity extends Activity {
     private static final String[] CAPABILITIES = {"signals", "alarms"};
     private static final String LINE_DEVICE = "gw-fill-01";
 
-    // Colours
-    private static final int BG = Color.rgb(20, 20, 34);
-    private static final int PANEL = Color.rgb(31, 33, 52);
-    private static final int INK_ON_DARK = Color.WHITE;
-    private static final int MUTED = Color.rgb(150, 156, 184);
+    // Palette — the packaging board's light industrial HMI theme
+    private static final int PAPER = Color.rgb(246, 243, 235);
+    private static final int PANEL = Color.rgb(255, 253, 248);
+    private static final int INK = Color.rgb(35, 35, 61);
+    private static final int LINE = Color.rgb(217, 216, 209);
+    private static final int MUTED = Color.rgb(111, 112, 128);
     private static final int SAFETY = Color.rgb(234, 181, 69);
-    private static final int GOODC = Color.rgb(116, 195, 152);
     private static final int COPPER = Color.rgb(214, 122, 78);
+    private static final int GOOD = Color.rgb(63, 143, 105);
+    private static final int DANGER = Color.rgb(189, 77, 86);
+    private static final int ON_INK = Color.rgb(232, 232, 240);
+    private static final int ON_INK_MUTED = Color.rgb(160, 162, 186);
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final OkHttpClient client = new OkHttpClient.Builder()
@@ -72,6 +78,17 @@ public final class MainActivity extends Activity {
     private TextView clockView;
     private final Map<String, TextView> valueViews = new LinkedHashMap<>();
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
+
+    // Graphical elements
+    private TankGaugeView bowlGauge;
+    private ArcGaugeView pressureGauge;
+    private ArcGaugeView volumeGauge;
+    private FillerRingView fillerRing;
+    private BarMeterView rejectBar;
+    private LinearLayout fillerStep;
+    private TextView fillerStepState;
+
+    private long overfill = -1, underfill = -1;
 
     private WebSocket webSocket;
     private Runnable reconnectRunnable;
@@ -144,15 +161,13 @@ public final class MainActivity extends Activity {
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(52), dp(36), dp(52), dp(36)); // TV overscan-safe
-        root.setBackgroundColor(BG);
+        root.setPadding(dp(44), dp(22), dp(44), dp(22));
+        root.setBackgroundColor(PAPER);
 
-        // Header is fixed at the top; the OEE band and the production grid divide ALL the
-        // remaining height by weight, so the board fills the panel exactly — no bottom clip on a
-        // dense panel, no dead band on a sparse one — regardless of the TV's reported density.
         root.addView(header(), mw());
-        root.addView(oeeBand(), rowWeight(dp(22), 1.05f));
-        root.addView(productionGrid(), rowWeight(dp(20), 1.95f));
+        root.addView(oeeBand(), rowWeight(dp(14), 1.3f));
+        root.addView(content(), rowWeight(dp(14), 4.0f));
+        root.addView(footer(), rowWeight(dp(12), 0.46f));
 
         setContentView(root);
         setStatus("Connecting…", SAFETY);
@@ -162,22 +177,24 @@ public final class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(22), dp(10), dp(22), dp(10));
+        header.setBackground(rounded(INK, INK, 0, 14));
 
         LinearLayout brand = new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);
-        brand.addView(text("BOTTLES R US", 34, INK_ON_DARK, true), wc());
-        brand.addView(text("DALLAS · FILLING HALL", 20, MUTED, true), wc());
+        brand.addView(text("BOTTLES R US", 28, ON_INK, true), wc());
+        brand.addView(text("DALLAS · FILLING HALL", 16, ON_INK_MUTED, true), wc());
         header.addView(brand, weight(1));
 
-        TextView line = text("LINE 01", 40, SAFETY, true);
-        line.setPadding(dp(28), 0, dp(28), 0);
+        TextView line = text("LINE 01", 34, SAFETY, true);
+        line.setPadding(dp(22), 0, dp(22), 0);
         header.addView(line, wc());
 
         LinearLayout right = new LinearLayout(this);
         right.setOrientation(LinearLayout.VERTICAL);
         right.setGravity(Gravity.END);
-        statusView = text("Connecting…", 26, SAFETY, true);
-        clockView = text("--:--:--", 30, INK_ON_DARK, true);
+        clockView = text("--:--:--", 24, ON_INK, true);
+        statusView = text("Connecting…", 20, SAFETY, true);
         right.addView(clockView, wc());
         right.addView(statusView, wc());
         header.addView(right, wc());
@@ -187,100 +204,292 @@ public final class MainActivity extends Activity {
     private View oeeBand() {
         LinearLayout band = new LinearLayout(this);
         band.setOrientation(LinearLayout.HORIZONTAL);
+        band.setPadding(dp(14), dp(8), dp(14), dp(8));
+        band.setBackground(rounded(INK, INK, 0, 14));
 
-        // Hero OEE tile
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
         hero.setGravity(Gravity.CENTER);
-        hero.setPadding(dp(24), dp(22), dp(24), dp(22));
-        hero.setBackground(rounded(SAFETY, SAFETY, 0, 16));
-        hero.addView(text("OEE", 30, Color.rgb(88, 68, 21), true), wc());
-        TextView oee = text("--", 118, Color.rgb(35, 35, 61), true);
+        hero.setPadding(dp(16), dp(6), dp(16), dp(6));
+        hero.setBackground(rounded(SAFETY, SAFETY, 0, 12));
+        hero.addView(text("OEE", 22, Color.rgb(88, 68, 21), true), wc());
+        TextView oee = text("--", 46, INK, true);
         oee.setGravity(Gravity.CENTER);
-        autoSize(oee, 48, 132);
+        autoSize(oee, 28, 46);
         valueViews.put("OEE", oee);
         hero.addView(oee, fillCell(0));
-        band.addView(hero, weightMargins(34, 0, 0, dp(14), 0));
+        band.addView(hero, weightMargins(1.1f, 0, 0, dp(12), 0));
 
-        band.addView(oeePart("AVAILABILITY", "Availability"), weightMargins(22, dp(14), 0, dp(14), 0));
-        band.addView(oeePart("PERFORMANCE", "Performance"), weightMargins(22, dp(14), 0, dp(14), 0));
-        band.addView(oeePart("QUALITY", "Quality"), weightMargins(22, dp(14), 0, 0, 0));
+        band.addView(oeePart("AVAILABILITY", "Availability"), weightMargins(1, 0, 0, 0, 0));
+        band.addView(oeePart("PERFORMANCE", "Performance"), weightMargins(1, 0, 0, 0, 0));
+        band.addView(oeePart("QUALITY", "Quality"), weightMargins(1, 0, 0, 0, 0));
         return band;
     }
 
     private View oeePart(String label, String signal) {
-        LinearLayout p = panel();
-        p.setGravity(Gravity.CENTER_VERTICAL);
-        // Label shrinks to one line so "AVAILABILITY"/"PERFORMANCE" don't wrap in the narrow tile.
-        TextView lbl = text(label, 22, MUTED, true);
-        autoSize(lbl, 15, 22);
+        LinearLayout p = new LinearLayout(this);
+        p.setOrientation(LinearLayout.VERTICAL);
+        p.setPadding(dp(18), dp(6), dp(18), dp(6));
+        TextView lbl = text(label, 18, ON_INK_MUTED, true);
+        autoSize(lbl, 13, 18);
         LinearLayout.LayoutParams lblLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         p.addView(lbl, lblLp);
-        TextView v = text("--", 64, INK_ON_DARK, true);
+        TextView v = text("--", 44, ON_INK, true);
         v.setGravity(Gravity.CENTER_VERTICAL);
-        autoSize(v, 34, 72);
-        p.addView(v, fillCell(dp(6)));
+        autoSize(v, 22, 46);
         valueViews.put(signal, v);
+        p.addView(v, fillCell(dp(2)));
         return p;
     }
 
-    private View productionGrid() {
-        // Two equal-weight rows so the eight tiles split the grid's height evenly and grow with it.
-        LinearLayout grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
-        grid.addView(tileRow(new String[][]{
-                {"LINE SPEED", "LineSpeedBpm", "BPM"},
-                {"GOOD BOTTLES", "GoodBottleCount", ""},
-                {"FILL PRESSURE", "FillPressureKpa", "kPa"},
-                {"FILL VOLUME", "FillVolumeMl", "mL"}
-        }), rowWeight(0, 1f));
-        grid.addView(tileRow(new String[][]{
-                {"BOWL LEVEL", "BowlLevelPct", "%"},
-                {"PRODUCT TEMP", "ProductTempC", "°C"},
-                {"FILLER STATE", "FillerState", ""},
-                {"REJECTS", "RejectCount", ""}
-        }), rowWeight(dp(18), 1f));
-        return grid;
-    }
-
-    private View tileRow(String[][] specs) {
+    // --- the main content: three numbered sections on the left, the filler-ring hero on the right ---
+    private View content() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        for (int i = 0; i < specs.length; i++) {
-            String[] s = specs[i];
-            LinearLayout tile = panel();
-            // Label row: signal name on the left, unit (if any) on the right. Keeping the unit here
-            // leaves the value ALONE in its cell, which is what lets autosize scale it cleanly.
-            LinearLayout labelRow = new LinearLayout(this);
-            labelRow.setOrientation(LinearLayout.HORIZONTAL);
-            TextView name = text(s[0], 22, MUTED, true);
-            autoSize(name, 15, 22);   // shrink to fit one line beside the unit — never truncate
-            labelRow.addView(name, weight(1));
-            if (!s[2].isEmpty()) {
-                TextView unit = text(s[2], 20, MUTED, false);
-                unit.setGravity(Gravity.BOTTOM);
-                labelRow.addView(unit, wc());
-            }
-            tile.addView(labelRow, mw());
-            // Value fills the remaining cell height and autosizes to the largest one-line size that
-            // fits — alone in the cell, so it can never clip regardless of the panel's density.
-            TextView v = text("--", 54, INK_ON_DARK, true);
-            v.setGravity(Gravity.CENTER_VERTICAL);
-            autoSize(v, 28, 56);   // capped so short values keep headroom and don't kiss the floor
-            tile.addView(v, fillCell(dp(6)));
-            valueViews.put(s[1], v);
-            int rm = (i == specs.length - 1) ? 0 : dp(16);
-            row.addView(tile, weightMargins(1, 0, 0, rm, 0));
-        }
+
+        // LEFT — two roomy titled sections: the fill line and the fill-quality gauges
+        LinearLayout ops = new LinearLayout(this);
+        ops.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout s1 = section("01", "FILL LINE");
+        s1.addView(processFlow(), rowWeight(dp(8), 1f));
+        ops.addView(s1, rowWeight(0, 0.85f));
+
+        LinearLayout s2 = section("02", "FILL QUALITY");
+        s2.addView(qualityRow(), rowWeight(dp(8), 1f));
+        ops.addView(s2, rowWeight(dp(12), 2.15f));
+
+        row.addView(ops, weightMargins(1.55f, 0, 0, dp(16), 0));
+
+        // RIGHT — the filler-ring hero, with throughput + rejects beneath it
+        row.addView(heroAside(), weightMargins(1.0f, 0, 0, 0, 0));
         return row;
+    }
+
+    /** A numbered section: "01 · FILL LINE" heading floating above its content (like the pack board). */
+    private LinearLayout section(String num, String title) {
+        LinearLayout s = new LinearLayout(this);
+        s.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView badge = text(num, 15, INK, true);
+        badge.setBackground(rounded(SAFETY, SAFETY, 0, 6));
+        badge.setPadding(dp(8), dp(1), dp(8), dp(1));
+        head.addView(badge, wc());
+        TextView t = text("  " + title, 20, INK, true);
+        head.addView(t, wc());
+        s.addView(head, mw());
+        return s;
+    }
+
+    // --- 01 flow: DEPAL › RINSER › FILLER › CAPPER › LABELER ---
+    private View processFlow() {
+        LinearLayout flow = new LinearLayout(this);
+        flow.setOrientation(LinearLayout.HORIZONTAL);
+        flow.setGravity(Gravity.CENTER_VERTICAL);
+        String[][] steps = {
+                {"A", "DEPAL", "Feeding"},
+                {"B", "RINSER", "Running"},
+                {"C", "FILLER", "—"},
+                {"D", "CAPPER", "Running"},
+                {"E", "LABELER", "Running"},
+        };
+        for (int i = 0; i < steps.length; i++) {
+            LinearLayout card = flowCard(steps[i][0], steps[i][1], steps[i][2]);
+            if ("FILLER".equals(steps[i][1])) {
+                fillerStep = card;
+            }
+            flow.addView(card, weight(1));
+            if (i < steps.length - 1) {
+                TextView chev = text("›", 30, Color.rgb(150, 150, 150), true);
+                chev.setPadding(dp(5), 0, dp(5), 0);
+                flow.addView(chev, wc());
+            }
+        }
+        return flow;
+    }
+
+    private LinearLayout flowCard(String idx, String name, String state) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(rounded(PANEL, LINE, 1, 12));
+
+        TextView badge = text(idx, 16, PANEL, true);
+        badge.setGravity(Gravity.CENTER);
+        badge.setBackground(rounded(GOOD, GOOD, 0, 8));
+        badge.setPadding(dp(9), dp(2), dp(9), dp(2));
+        card.addView(badge, wc());
+
+        // status shows via the card's border/highlight (see updateFiller), so the card stays a clean
+        // badge + name — the label fits one line at any card width.
+        TextView nameV = text(name, 15, INK, true);
+        nameV.setMaxLines(1);
+        nameV.setEllipsize(null);
+        autoSize(nameV, 8, 15);
+        LinearLayout.LayoutParams nlp = weight(1);
+        nlp.leftMargin = dp(8);
+        card.addView(nameV, nlp);
+        return card;
+    }
+
+    // --- 02 fill quality: bowl tank + pressure + volume gauges ---
+    private View qualityRow() {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        bowlGauge = new TankGaugeView(this);
+        bowlGauge.setLabel("BOWL LEVEL");
+        bowlGauge.setLowThreshold(35);
+        r.addView(card(bowlGauge), weightMargins(1.2f, 0, 0, dp(12), 0));
+
+        pressureGauge = new ArcGaugeView(this);
+        pressureGauge.setRange(90, 150);
+        pressureGauge.setBand(108, 126);
+        pressureGauge.config("FILL PRESSURE", "kPa");
+        r.addView(card(pressureGauge), weightMargins(1, dp(12), 0, dp(12), 0));
+
+        volumeGauge = new ArcGaugeView(this);
+        volumeGauge.setRange(485, 515);
+        volumeGauge.setBand(498, 502);
+        volumeGauge.config("FILL VOLUME", "mL");
+        r.addView(card(volumeGauge), weightMargins(1, dp(12), 0, 0, 0));
+        return r;
+    }
+
+    // --- hero aside: rotary filler ring, then throughput + rejects beneath it ---
+    private View heroAside() {
+        LinearLayout aside = new LinearLayout(this);
+        aside.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView badge = text("LIVE", 15, PANEL, true);
+        badge.setBackground(rounded(GOOD, GOOD, 0, 6));
+        badge.setPadding(dp(8), dp(1), dp(8), dp(1));
+        head.addView(badge, wc());
+        head.addView(text("  FILL CAROUSEL", 20, INK, true), wc());
+        aside.addView(head, mw());
+
+        fillerRing = new FillerRingView(this);
+        LinearLayout ringCard = panel();
+        ringCard.addView(fillerRing, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        aside.addView(ringCard, rowWeight(dp(8), 2.1f));
+
+        // shift tally: good bottles | rejects side by side, so neither collapses in a short panel
+        LinearLayout shift = panel();
+        shift.setOrientation(LinearLayout.HORIZONTAL);
+
+        LinearLayout gcol = new LinearLayout(this);
+        gcol.setOrientation(LinearLayout.VERTICAL);
+        gcol.addView(text("GOOD BOTTLES", 15, MUTED, true), mw());
+        TextView goodV = text("--", 40, GOOD, true);
+        goodV.setGravity(Gravity.CENTER_VERTICAL);
+        autoSize(goodV, 22, 44);
+        valueViews.put("GoodBottleCount", goodV);
+        gcol.addView(goodV, fillCell(dp(2)));
+        shift.addView(gcol, weightMargins(1, 0, 0, dp(16), 0));
+
+        LinearLayout rcol = new LinearLayout(this);
+        rcol.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout rh = new LinearLayout(this);
+        rh.setOrientation(LinearLayout.HORIZONTAL);
+        rh.setGravity(Gravity.CENTER_VERTICAL);
+        rh.addView(text("REJECTS", 15, MUTED, true), weight(1));
+        TextView rejTot = text("--", 26, INK, true);
+        valueViews.put("RejectCount", rejTot);
+        rh.addView(rejTot, wc());
+        rcol.addView(rh, mw());
+        rejectBar = new BarMeterView(this);
+        LinearLayout.LayoutParams rb = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(14));
+        rb.topMargin = dp(10);
+        rcol.addView(rejectBar, rb);
+        LinearLayout leg = new LinearLayout(this);
+        leg.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ll = mw();
+        ll.topMargin = dp(6);
+        leg.addView(legend("Over", COPPER, "OverfillRejectCount"), weight(1));
+        leg.addView(legend("Under", Color.rgb(90, 150, 200), "UnderfillRejectCount"), weight(1));
+        rcol.addView(leg, ll);
+        shift.addView(rcol, weightMargins(1.15f, 0, 0, 0, 0));
+        aside.addView(shift, rowWeight(dp(10), 1.15f));
+        return aside;
+    }
+
+    private View footer() {
+        LinearLayout foot = new LinearLayout(this);
+        foot.setOrientation(LinearLayout.HORIZONTAL);
+        foot.setGravity(Gravity.CENTER_VERTICAL);
+        foot.setPadding(dp(16), dp(6), dp(16), dp(6));
+        foot.setBackground(rounded(PANEL, LINE, 1, 12));
+        View stripe = new View(this);
+        stripe.setBackground(rounded(SAFETY, SAFETY, 0, 3));
+        LinearLayout.LayoutParams st = new LinearLayout.LayoutParams(dp(8), dp(30));
+        st.rightMargin = dp(16);
+        foot.addView(stripe, st);
+        foot.addView(readout("PRODUCT TEMP", "ProductTempC", "°C"), weight(1));
+        foot.addView(readout("CO₂ VOLUMES", "CO2Volumes", "vol"), weight(1));
+        foot.addView(readout("VALVE TRACKING", "ValveTrackingCount", ""), weight(1));
+        foot.addView(readout("INFEED", "InfeedStarved", ""), weight(1));
+        return foot;
+    }
+
+    private View readout(String label, String signal, String unit) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.HORIZONTAL);
+        cell.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = text(label, 14, MUTED, true);
+        name.setMaxLines(1);
+        LinearLayout.LayoutParams nl = wc();
+        nl.rightMargin = dp(8);
+        cell.addView(name, nl);
+        TextView v = text("--", 18, INK, true);
+        v.setMaxLines(1);
+        valueViews.put(signal, v);
+        cell.addView(v, wc());
+        if (!unit.isEmpty()) {
+            TextView u = text(unit, 13, MUTED, false);
+            LinearLayout.LayoutParams up = wc();
+            up.leftMargin = dp(4);
+            cell.addView(u, up);
+        }
+        return cell;
+    }
+
+    private View legend(String label, int color, String signal) {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        View dot = new View(this);
+        dot.setBackground(rounded(color, color, 0, 4));
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(11), dp(11));
+        dl.rightMargin = dp(7);
+        l.addView(dot, dl);
+        l.addView(text(label + " ", 14, MUTED, false), wc());
+        TextView v = text("--", 18, INK, true);
+        valueViews.put(signal, v);
+        l.addView(v, wc());
+        return l;
+    }
+
+    /** Wrap a custom view in a light bordered card. */
+    private View card(View child) {
+        LinearLayout p = panel();
+        p.addView(child, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        return p;
     }
 
     private LinearLayout panel() {
         LinearLayout p = new LinearLayout(this);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setPadding(dp(26), dp(22), dp(26), dp(22));
-        p.setBackground(rounded(PANEL, Color.rgb(52, 54, 83), 1, 14));
+        p.setPadding(dp(16), dp(9), dp(16), dp(9));
+        p.setBackground(rounded(PANEL, LINE, 1, 14));
         return p;
     }
 
@@ -301,7 +510,7 @@ public final class MainActivity extends Activity {
                 for (int j = 0; series != null && j < series.length(); j++) {
                     JSONObject item = series.optJSONObject(j);
                     if (item != null && isFillingLine(item)) {
-                        ingest(item.optString("name", null), item.opt("latest"));
+                        ingest(normSignal(item.optString("name", null)), item.opt("latest"));
                     }
                 }
             } else if ("signal".equals(type)) {
@@ -327,8 +536,6 @@ public final class MainActivity extends Activity {
         return key != null && LINE_DEVICE.equals(key.optString("device"));
     }
 
-    /** Snapshot series carry the short display name; deltas carry `signal` as a channel PATH that
-     *  differs per adapter — modbus: bare name; OPC UA: full nodeId; OEE: gemba/oee/&lt;metric&gt;. */
     private static String normSignal(String s) {
         if (s == null) {
             return null;
@@ -351,29 +558,98 @@ public final class MainActivity extends Activity {
         if (name == null || value == null) {
             return;
         }
-        final TextView view = valueViews.get(name);
-        if (view == null) {
-            return;
-        }
-        final String out = format(name, value);
         lastDataAt = SystemClock.elapsedRealtime();
+        final TextView view = valueViews.get(name);
+        final String out = view != null ? format(name, value) : null;
+        final double d = toDouble(value);
+        final String raw = String.valueOf(value);
         post(() -> {
-            view.setText(out);
-            setStatus("Live", GOODC);
+            if (view != null && out != null) {
+                view.setText(out);
+            }
+            bindGraphic(name, raw, d);
+            setStatus("Live", GOOD);
         });
+    }
+
+    private void bindGraphic(String name, String raw, double d) {
+        switch (name) {
+            case "BowlLevelPct":
+                if (bowlGauge != null) bowlGauge.setLevel((float) d);
+                break;
+            case "FillPressureKpa":
+                if (pressureGauge != null) pressureGauge.setValue((float) d);
+                break;
+            case "FillVolumeMl":
+                if (volumeGauge != null) volumeGauge.setValue((float) d);
+                break;
+            case "LineSpeedBpm":
+                if (fillerRing != null) fillerRing.setRate((float) d);
+                break;
+            case "OverfillRejectCount":
+                overfill = (long) d;
+                updateRejectBar();
+                break;
+            case "UnderfillRejectCount":
+                underfill = (long) d;
+                updateRejectBar();
+                break;
+            case "FillerState":
+                updateFiller(raw);
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void updateRejectBar() {
+        if (rejectBar == null) return;
+        long o = Math.max(0, overfill), u = Math.max(0, underfill);
+        long t = o + u;
+        if (t <= 0) return;
+        rejectBar.set(new float[]{(float) o / t, (float) u / t},
+                new int[]{COPPER, Color.rgb(90, 150, 200)});
+    }
+
+    private void updateFiller(String state) {
+        if (fillerStep == null) return;
+        boolean running = "RUNNING".equalsIgnoreCase(state);
+        boolean stopped = state != null && (state.toUpperCase(Locale.US).contains("STOP")
+                || state.toUpperCase(Locale.US).contains("FAULT"));
+        int accent = running ? GOOD : (stopped ? DANGER : SAFETY);
+        fillerStep.setBackground(rounded(running ? PANEL : Color.rgb(253, 247, 233), accent,
+                running ? 1 : 2, 12));
+        TextView badge = (TextView) fillerStep.getChildAt(0);
+        badge.setBackground(rounded(accent, accent, 0, 8));
+        if (fillerStepState != null) {
+            fillerStepState.setText(pretty(state));
+        }
+        if (fillerRing != null) fillerRing.setRunning(!stopped);
+    }
+
+    private static String pretty(String s) {
+        if (s == null || s.isEmpty()) return "—";
+        String t = s.replace('_', ' ').toLowerCase(Locale.US);
+        return Character.toUpperCase(t.charAt(0)) + t.substring(1);
     }
 
     private static String format(String name, Object value) {
         switch (name) {
             case "GoodBottleCount":
             case "RejectCount":
+            case "OverfillRejectCount":
+            case "UnderfillRejectCount":
+            case "ValveTrackingCount":
                 return commas(value);
             case "LineSpeedBpm":
-            case "BowlLevelPct":
                 return String.format(Locale.US, "%.0f", toDouble(value));
+            case "CO2Volumes":
+                return String.format(Locale.US, "%.2f", toDouble(value));
+            case "InfeedStarved":
+                return Boolean.parseBoolean(String.valueOf(value)) ? "STARVED" : "OK";
             case "FillerState":
-                return String.valueOf(value);
-            default: // OEE, Availability, Performance, Quality, FillPressureKpa, FillVolumeMl, ProductTempC
+                return pretty(String.valueOf(value));
+            default: // OEE, Availability, Performance, Quality, ProductTempC
                 return String.format(Locale.US, "%.1f", toDouble(value));
         }
     }
@@ -442,7 +718,7 @@ public final class MainActivity extends Activity {
                 if ("welcome".equals(type)) {
                     reconnectAttempt = 0;
                     socket.send(subscribeFrame());
-                    post(() -> setStatus("Live · max 30/s", GOODC));
+                    post(() -> setStatus("Live · max 30/s", GOOD));
                 } else if ("updates".equals(type)) {
                     JSONArray frames = message.optJSONArray("frames");
                     post(() -> handleUpdates(frames));
@@ -547,7 +823,6 @@ public final class MainActivity extends Activity {
                 if (clockView != null) {
                     clockView.setText(clockFmt.format(new Date()));
                 }
-                // stalled-socket watchdog: if live but silent for 12s, force a reconnect
                 if (webSocket != null && lastDataAt != 0
                         && SystemClock.elapsedRealtime() - lastDataAt > 12000
                         && !lifecycleStopped && !manualDisconnect) {
@@ -608,7 +883,6 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    /** Full-width child that takes a weighted share of its parent's height (the vertical-fill seam). */
     private LinearLayout.LayoutParams rowWeight(int top, float w) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, w);
@@ -616,8 +890,6 @@ public final class MainActivity extends Activity {
         return lp;
     }
 
-    /** Full-width child that fills the remaining height of its (bounded) cell — gives an autosizing
-     *  value a concrete box to scale into, so the big numbers grow to fill without ever clipping. */
     private LinearLayout.LayoutParams fillCell(int top) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
@@ -625,16 +897,8 @@ public final class MainActivity extends Activity {
         return lp;
     }
 
-    /** Legible-but-bounded: one line, scaled uniformly to the largest size that fits the cell. */
-    private void autoSize(TextView v, int minSp, int maxSp) {
-        v.setMaxLines(1);
-        v.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, 2, TypedValue.COMPLEX_UNIT_SP);
-    }
-
     private LinearLayout.LayoutParams weight(float w) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, w);
-        return lp;
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, w);
     }
 
     private LinearLayout.LayoutParams weightMargins(float w, int l, int t, int r, int b) {
@@ -642,5 +906,13 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, w);
         lp.setMargins(l, t, r, b);
         return lp;
+    }
+
+    /** Legible-but-bounded: one line, scaled uniformly to the largest size that fits, with headroom. */
+    private void autoSize(TextView v, int minSp, int maxSp) {
+        v.setMaxLines(1);
+        int pv = dp(2);
+        v.setPadding(v.getPaddingLeft(), pv, v.getPaddingRight(), pv);
+        v.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, 2, TypedValue.COMPLEX_UNIT_SP);
     }
 }
