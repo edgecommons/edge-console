@@ -88,7 +88,7 @@ public final class MainActivity extends Activity {
     private LinearLayout fillerStep;
     private TextView fillerStepState;
 
-    private long overfill = -1, underfill = -1;
+    private long good = -1, overfill = -1, underfill = -1;
 
     private WebSocket webSocket;
     private Runnable reconnectRunnable;
@@ -165,7 +165,7 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(PAPER);
 
         root.addView(header(), mw());
-        root.addView(oeeBand(), rowWeight(dp(14), 1.3f));
+        root.addView(oeeBand(), rowWeight(dp(14), 1.42f));
         root.addView(content(), rowWeight(dp(14), 4.0f));
         root.addView(footer(), rowWeight(dp(12), 0.46f));
 
@@ -213,9 +213,9 @@ public final class MainActivity extends Activity {
         hero.setPadding(dp(16), dp(6), dp(16), dp(6));
         hero.setBackground(rounded(SAFETY, SAFETY, 0, 12));
         hero.addView(text("OEE", 22, Color.rgb(88, 68, 21), true), wc());
-        TextView oee = text("--", 46, INK, true);
+        TextView oee = text("--", 42, INK, true);
         oee.setGravity(Gravity.CENTER);
-        autoSize(oee, 28, 46);
+        autoSize(oee, 28, 42);
         valueViews.put("OEE", oee);
         hero.addView(oee, fillCell(0));
         band.addView(hero, weightMargins(1.1f, 0, 0, dp(12), 0));
@@ -254,11 +254,11 @@ public final class MainActivity extends Activity {
 
         LinearLayout s1 = section("01", "FILL LINE");
         s1.addView(processFlow(), rowWeight(dp(8), 1f));
-        ops.addView(s1, rowWeight(0, 0.85f));
+        ops.addView(s1, rowWeight(0, 1.4f));
 
         LinearLayout s2 = section("02", "FILL QUALITY");
         s2.addView(qualityRow(), rowWeight(dp(8), 1f));
-        ops.addView(s2, rowWeight(dp(12), 2.15f));
+        ops.addView(s2, rowWeight(dp(12), 1.55f));
 
         row.addView(ops, weightMargins(1.55f, 0, 0, dp(16), 0));
 
@@ -284,55 +284,67 @@ public final class MainActivity extends Activity {
         return s;
     }
 
-    // --- 01 flow: DEPAL › RINSER › FILLER › CAPPER › LABELER ---
+    // --- 01 flow: the line-stage schematic. Stages with live sim data show it (infeed at the
+    //     depalletizer, filler state, cap rejects at the capper); the rinser and labeler emit no
+    //     signals in this sim, so they read a static "Running". ---
     private View processFlow() {
         LinearLayout flow = new LinearLayout(this);
         flow.setOrientation(LinearLayout.HORIZONTAL);
         flow.setGravity(Gravity.CENTER_VERTICAL);
+        // {badge, name, initial metric, live signal or null}
         String[][] steps = {
-                {"A", "DEPAL", "Feeding"},
-                {"B", "RINSER", "Running"},
-                {"C", "FILLER", "—"},
-                {"D", "CAPPER", "Running"},
-                {"E", "LABELER", "Running"},
+                {"A", "DEPALLETIZER", "Feeding", "InfeedStarved"},
+                {"B", "RINSER", "Running", null},
+                {"C", "FILLER", "Running", "FillerState"},
+                {"D", "CAPPER", "0 rej", "CapRejectCount"},
+                {"E", "LABELER", "Running", null},
         };
         for (int i = 0; i < steps.length; i++) {
-            LinearLayout card = flowCard(steps[i][0], steps[i][1], steps[i][2]);
-            if ("FILLER".equals(steps[i][1])) {
-                fillerStep = card;
-            }
-            flow.addView(card, weight(1));
+            flow.addView(flowCard(steps[i][0], steps[i][1], steps[i][2], steps[i][3]), weight(1));
             if (i < steps.length - 1) {
-                TextView chev = text("›", 30, Color.rgb(150, 150, 150), true);
-                chev.setPadding(dp(5), 0, dp(5), 0);
+                TextView chev = text("›", 26, Color.rgb(160, 160, 160), true);
+                chev.setPadding(dp(3), 0, dp(3), 0);
                 flow.addView(chev, wc());
             }
         }
         return flow;
     }
 
-    private LinearLayout flowCard(String idx, String name, String state) {
+    /** A vertical stage card: badge, full-width name (fits any card width), and a live metric line. */
+    private LinearLayout flowCard(String idx, String name, String metricInit, String signal) {
         LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
         card.setBackground(rounded(PANEL, LINE, 1, 12));
 
-        TextView badge = text(idx, 16, PANEL, true);
+        TextView badge = text(idx, 15, PANEL, true);
         badge.setGravity(Gravity.CENTER);
-        badge.setBackground(rounded(GOOD, GOOD, 0, 8));
-        badge.setPadding(dp(9), dp(2), dp(9), dp(2));
+        badge.setBackground(rounded(GOOD, GOOD, 0, 7));
+        badge.setPadding(dp(10), dp(1), dp(10), dp(1));
         card.addView(badge, wc());
 
-        // status shows via the card's border/highlight (see updateFiller), so the card stays a clean
-        // badge + name — the label fits one line at any card width.
-        TextView nameV = text(name, 15, INK, true);
+        TextView nameV = text(name, 14, INK, true);
         nameV.setMaxLines(1);
-        nameV.setEllipsize(null);
-        autoSize(nameV, 8, 15);
-        LinearLayout.LayoutParams nlp = weight(1);
-        nlp.leftMargin = dp(8);
+        nameV.setGravity(Gravity.CENTER);
+        autoSize(nameV, 8, 14);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(4);
         card.addView(nameV, nlp);
+
+        TextView metricV = text(metricInit, 12, MUTED, false);
+        metricV.setMaxLines(1);
+        metricV.setGravity(Gravity.CENTER);
+        card.addView(metricV, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        if ("FillerState".equals(signal)) {
+            fillerStep = card;
+            fillerStepState = metricV;
+        } else if (signal != null) {
+            valueViews.put(signal, metricV);
+        }
         return card;
     }
 
@@ -378,46 +390,47 @@ public final class MainActivity extends Activity {
         LinearLayout ringCard = panel();
         ringCard.addView(fillerRing, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
-        aside.addView(ringCard, rowWeight(dp(8), 2.1f));
+        aside.addView(ringCard, rowWeight(dp(8), 1.9f));
 
-        // shift tally: good bottles | rejects side by side, so neither collapses in a short panel
+        // shift tally: good and rejects with their numbers aligned across the panel, over a single
+        // bar that spans both — green good · copper overfill · blue underfill — with a legend to match.
         LinearLayout shift = panel();
-        shift.setOrientation(LinearLayout.HORIZONTAL);
 
-        LinearLayout gcol = new LinearLayout(this);
-        gcol.setOrientation(LinearLayout.VERTICAL);
-        gcol.addView(text("GOOD BOTTLES", 15, MUTED, true), mw());
-        TextView goodV = text("--", 40, GOOD, true);
-        goodV.setGravity(Gravity.CENTER_VERTICAL);
-        autoSize(goodV, 22, 44);
+        LinearLayout hr = new LinearLayout(this);
+        hr.setOrientation(LinearLayout.HORIZONTAL);
+        hr.addView(text("GOOD BOTTLES", 15, MUTED, true), weight(1));
+        hr.addView(text("REJECTS", 15, MUTED, true), wc());
+        shift.addView(hr, mw());
+
+        LinearLayout nr = new LinearLayout(this);
+        nr.setOrientation(LinearLayout.HORIZONTAL);
+        nr.setGravity(Gravity.CENTER_VERTICAL);
+        TextView goodV = text("--", 34, GOOD, true);
+        goodV.setMaxLines(1);
+        autoSize(goodV, 20, 34);
         valueViews.put("GoodBottleCount", goodV);
-        gcol.addView(goodV, fillCell(dp(2)));
-        shift.addView(gcol, weightMargins(1, 0, 0, dp(16), 0));
-
-        LinearLayout rcol = new LinearLayout(this);
-        rcol.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout rh = new LinearLayout(this);
-        rh.setOrientation(LinearLayout.HORIZONTAL);
-        rh.setGravity(Gravity.CENTER_VERTICAL);
-        rh.addView(text("REJECTS", 15, MUTED, true), weight(1));
-        TextView rejTot = text("--", 26, INK, true);
+        nr.addView(goodV, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView rejTot = text("--", 34, INK, true);
+        rejTot.setMaxLines(1);
+        rejTot.setGravity(Gravity.END);
+        autoSize(rejTot, 20, 34);
         valueViews.put("RejectCount", rejTot);
-        rh.addView(rejTot, wc());
-        rcol.addView(rh, mw());
+        nr.addView(rejTot, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams nrp = mw();
+        nrp.topMargin = dp(2);
+        shift.addView(nr, nrp);
+
+        // one yield bar spanning both metrics: green good · copper overfill · blue underfill
         rejectBar = new BarMeterView(this);
-        LinearLayout.LayoutParams rb = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(14));
-        rb.topMargin = dp(10);
-        rcol.addView(rejectBar, rb);
-        LinearLayout leg = new LinearLayout(this);
-        leg.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams ll = mw();
-        ll.topMargin = dp(6);
-        leg.addView(legend("Over", COPPER, "OverfillRejectCount"), weight(1));
-        leg.addView(legend("Under", Color.rgb(90, 150, 200), "UnderfillRejectCount"), weight(1));
-        rcol.addView(leg, ll);
-        shift.addView(rcol, weightMargins(1.15f, 0, 0, 0, 0));
-        aside.addView(shift, rowWeight(dp(10), 1.15f));
+        LinearLayout.LayoutParams yb = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(16));
+        yb.topMargin = dp(12);
+        shift.addView(rejectBar, yb);
+        TextView cap = text("first-pass yield", 13, MUTED, false);
+        LinearLayout.LayoutParams cl = mw();
+        cl.topMargin = dp(6);
+        shift.addView(cap, cl);
+        aside.addView(shift, rowWeight(dp(10), 1.25f));
         return aside;
     }
 
@@ -435,7 +448,7 @@ public final class MainActivity extends Activity {
         foot.addView(readout("PRODUCT TEMP", "ProductTempC", "°C"), weight(1));
         foot.addView(readout("CO₂ VOLUMES", "CO2Volumes", "vol"), weight(1));
         foot.addView(readout("VALVE TRACKING", "ValveTrackingCount", ""), weight(1));
-        foot.addView(readout("INFEED", "InfeedStarved", ""), weight(1));
+        foot.addView(readout("CONVEYOR", "ConveyorSpeedPct", "%"), weight(1));
         return foot;
     }
 
@@ -459,22 +472,6 @@ public final class MainActivity extends Activity {
             cell.addView(u, up);
         }
         return cell;
-    }
-
-    private View legend(String label, int color, String signal) {
-        LinearLayout l = new LinearLayout(this);
-        l.setOrientation(LinearLayout.HORIZONTAL);
-        l.setGravity(Gravity.CENTER_VERTICAL);
-        View dot = new View(this);
-        dot.setBackground(rounded(color, color, 0, 4));
-        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(11), dp(11));
-        dl.rightMargin = dp(7);
-        l.addView(dot, dl);
-        l.addView(text(label + " ", 14, MUTED, false), wc());
-        TextView v = text("--", 18, INK, true);
-        valueViews.put(signal, v);
-        l.addView(v, wc());
-        return l;
     }
 
     /** Wrap a custom view in a light bordered card. */
@@ -586,13 +583,17 @@ public final class MainActivity extends Activity {
             case "LineSpeedBpm":
                 if (fillerRing != null) fillerRing.setRate((float) d);
                 break;
+            case "GoodBottleCount":
+                good = (long) d;
+                updateTally();
+                break;
             case "OverfillRejectCount":
                 overfill = (long) d;
-                updateRejectBar();
+                updateTally();
                 break;
             case "UnderfillRejectCount":
                 underfill = (long) d;
-                updateRejectBar();
+                updateTally();
                 break;
             case "FillerState":
                 updateFiller(raw);
@@ -602,13 +603,13 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void updateRejectBar() {
+    private void updateTally() {
         if (rejectBar == null) return;
-        long o = Math.max(0, overfill), u = Math.max(0, underfill);
-        long t = o + u;
+        long g = Math.max(0, good), o = Math.max(0, overfill), u = Math.max(0, underfill);
+        long t = g + o + u;
         if (t <= 0) return;
-        rejectBar.set(new float[]{(float) o / t, (float) u / t},
-                new int[]{COPPER, Color.rgb(90, 150, 200)});
+        rejectBar.set(new float[]{(float) g / t, (float) o / t, (float) u / t},
+                new int[]{GOOD, COPPER, Color.rgb(90, 150, 200)});
     }
 
     private void updateFiller(String state) {
@@ -641,12 +642,15 @@ public final class MainActivity extends Activity {
             case "UnderfillRejectCount":
             case "ValveTrackingCount":
                 return commas(value);
+            case "CapRejectCount":
+                return commas(value) + " rej";
             case "LineSpeedBpm":
+            case "ConveyorSpeedPct":
                 return String.format(Locale.US, "%.0f", toDouble(value));
             case "CO2Volumes":
                 return String.format(Locale.US, "%.2f", toDouble(value));
             case "InfeedStarved":
-                return Boolean.parseBoolean(String.valueOf(value)) ? "STARVED" : "OK";
+                return Boolean.parseBoolean(String.valueOf(value)) ? "Starved" : "Feeding";
             case "FillerState":
                 return pretty(String.valueOf(value));
             default: // OEE, Availability, Performance, Quality, ProductTempC

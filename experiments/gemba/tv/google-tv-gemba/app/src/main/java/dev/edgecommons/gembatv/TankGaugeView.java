@@ -94,7 +94,16 @@ public final class TankGaugeView extends View {
 
         value.setTextSize(dp(46));
         String txt = has ? Math.round(level) + "%" : "--";
-        cv.drawText(txt, (left + right) / 2f, (top + bottom) / 2f + dp(16), value);
+        float tx = (left + right) / 2f, ty = (top + bottom) / 2f + dp(16);
+        // Draw an outline then a white fill so the reading stays legible whether it sits over the
+        // blue liquid (high level) or the empty white tank (low level).
+        value.setStyle(Paint.Style.STROKE);
+        value.setStrokeWidth(dp(5));
+        value.setColor(Color.argb(190, 22, 40, 66));
+        cv.drawText(txt, tx, ty, value);
+        value.setStyle(Paint.Style.FILL);
+        value.setColor(Color.WHITE);
+        cv.drawText(txt, tx, ty, value);
     }
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }

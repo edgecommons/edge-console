@@ -92,7 +92,7 @@ public final class FillerRingView extends View {
         }
 
         // hub (white fill so the value reads cleanly over the rotating valves)
-        float hubR = radius * 0.66f;
+        float hubR = radius * 0.72f;
         hub.setStyle(Paint.Style.FILL);
         hub.setColor(Color.rgb(255, 253, 248));
         cv.drawCircle(cx, cy, hubR, hub);
@@ -101,9 +101,9 @@ public final class FillerRingView extends View {
         hub.setStrokeWidth(dp(2));
         cv.drawCircle(cx, cy, hubR, hub);
         big.setTextSize(dp(34));
-        cv.drawText(rate > 0 ? String.format(Locale.US, "%.0f", rate) : "--", cx, cy - dp(2), big);
+        cv.drawText(rate > 0 ? String.format(Locale.US, "%.0f", rate) : "--", cx, cy - dp(4), big);
         unitP.setTextSize(dp(11));
-        cv.drawText("BOTTLES / MIN", cx, cy + dp(20), unitP);
+        cv.drawText("BOTTLES / MIN", cx, cy + dp(16), unitP);
 
         // advance rotation; speed scales with line rate (≈132 BPM nominal)
         long now = System.nanoTime();
