@@ -101,20 +101,21 @@ button { appearance: none; border: 2px solid var(--ink); background: var(--paper
 .value-updated { animation: flash 0.6s ease-out; }
 @keyframes flash { 0% { color: var(--copper); } 100% { color: inherit; } }
 
-/* --- TV-at-distance legibility (55" suspended above a line): the mockup leans on 7-13px mono
-   labels that do not read at distance. Raise all small label/secondary text to a legible floor
-   and enlarge secondary values, without disturbing the hero numbers. --- */
+/* --- TV-at-distance legibility (55" suspended above a line): labels raised to a legible floor.
+   The process-flow cards are excluded from that bump — they are tiny (5 across), so their text is
+   sized to fit and the box made taller so the layer line stays inside. --- */
 .brand small, .header__meta small, .source-state, #source-detail,
 .status-band span, .status-band small, .status-band__rate b, .status-band__rate small,
-.section-heading small, .section-heading em, .machine small, .machine em,
-.throughput-main span, .plan-labels, .throughput-stats small, .current-reading > span,
-.current-reading small, .jam-state, .quality-row small, .quality-row em,
-.pallet-panel__top small, .pallet-progress span, .pallet-copy small, .pallet-key,
-.pallet-foot small, .material-watch small, .material-watch em, .source-note,
-.oee-band span, .oee-band__part span { font-size: 19px !important; letter-spacing: .04em; }
-.machine b { font-size: 28px !important; }
+.section-heading small, .section-heading em, .throughput-main span, .plan-labels,
+.throughput-stats small, .current-reading > span, .current-reading small, .jam-state,
+.quality-row small, .quality-row em, .pallet-panel__top small, .pallet-progress span,
+.pallet-copy small, .pallet-key, .pallet-foot small, .material-watch small, .material-watch em,
+.source-note, .oee-band span, .oee-band__part span { font-size: 19px !important; letter-spacing: .04em; }
 .throughput-stats b, .pallet-copy b, .pallet-foot b, .material-watch b { font-size: 27px !important; }
 .section-heading h1, .section-heading h2 { font-size: 30px !important; }
 .jam-state b { font-size: 22px !important; }
-.current-chart text { font-size: 13px !important; }
 .status-band__sku b { font-size: 30px !important; }
+/* process-flow cards: fit the small tiles, taller box keeps the layer line inside */
+.machine { min-height: 142px !important; }
+.machine small, .machine em { font-size: 16px !important; line-height: 1.35 !important; }
+.machine b { font-size: 22px !important; line-height: 1.35 !important; }
