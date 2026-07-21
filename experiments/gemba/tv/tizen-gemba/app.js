@@ -17,6 +17,8 @@
   var reconnectTimer = null;
   var history = [];
   var latest = {};
+  var lastData = 0;
+  function nowMs() { return new Date().getTime(); }
 
   function appIdFromPath() {
     var m = (location.pathname || "").match(/\/apps\/([^\/]+)\//);
@@ -128,7 +130,8 @@
   }
 
   function ingest(name, value) {
-    if (value === null || typeof value === "undefined") return;
+    if (value === null || typeof value === "undefined" || !name) return;
+    lastData = nowMs();
     latest[name] = value;
     applyTile(name, value);
 
@@ -148,17 +151,28 @@
     }
   }
 
+  // The snapshot frame (type "signals") carries {name, latest}; the live delta frame
+  // (type "signal") carries {signal, point:{value}} where `signal` is the name string
+  // (or a {name} object). Read all forms so DELTAS bind, not just the initial snapshot.
+  function signalName(x) {
+    if (!x) return undefined;
+    if (typeof x.signal === "string") return x.signal;
+    if (x.signal && x.signal.name) return x.signal.name;
+    return x.name || x.id;
+  }
+
   function handleFrame(frame) {
     if (!frame) return;
     if (frame.type === "signals") {
       var series = frame.series || [];
       for (var i = 0; i < series.length; i += 1) {
-        ingest(series[i].id || series[i].name, series[i].latest);
+        ingest(signalName(series[i]), series[i].latest);
       }
     } else if (frame.type === "signal") {
       var ups = frame.updates || [];
       for (var j = 0; j < ups.length; j += 1) {
-        ingest(ups[j].id || ups[j].name, ups[j].point ? ups[j].point.value : ups[j].value);
+        var u = ups[j];
+        ingest(signalName(u), u.point ? u.point.value : u.value);
       }
     }
   }
@@ -202,8 +216,19 @@
     text("clock", pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()));
   }
 
+  // Stalled-socket watchdog: a WebSocket can go silent without a clean onclose (e.g. the server
+  // bounced). If the socket looks open but no data has bound for 12s, force a reconnect so the UI
+  // reflects reality ("Reconnecting…") instead of a stale "Live".
+  function watchdog() {
+    if (socket && socket.readyState === 1 && lastData && (nowMs() - lastData) > 12000) {
+      setConnState("warn", "Stalled — reconnecting…");
+      try { socket.close(); } catch (e) { /* onclose triggers reconnect */ }
+    }
+  }
+
   buildPallet();
   tickClock();
   window.setInterval(tickClock, 1000);
+  window.setInterval(watchdog, 5000);
   connect();
 }());
