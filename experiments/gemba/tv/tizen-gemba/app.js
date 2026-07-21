@@ -154,11 +154,26 @@
   // The snapshot frame (type "signals") carries {name, latest}; the live delta frame
   // (type "signal") carries {signal, point:{value}} where `signal` is the name string
   // (or a {name} object). Read all forms so DELTAS bind, not just the initial snapshot.
+  // Snapshot series carry the short display name; delta updates carry `signal` as the CHANNEL PATH,
+  // which differs per adapter — modbus: bare name ("CartonMagazinePct"); OPC UA: full nodeId
+  // ("GGCommonsTest.Device1.Live.CaseWeightKg" / "Line1.LineSpeedBpm"); telemetry OEE: topic
+  // ("gemba/oee/availability"). Normalize all of these to the tile's data-signal name.
+  var OEE_TOPIC = { availability: "Availability", overall: "OEE", performance: "Performance", quality: "Quality" };
+  function normSignal(s) {
+    if (!s) return s;
+    if (s.indexOf("gemba/oee/") >= 0) {
+      var seg = s.split("/").pop();
+      return OEE_TOPIC[seg] || seg;
+    }
+    if (s.indexOf(".") >= 0) return s.split(".").pop();   // OPC UA nodeId -> last segment
+    return s;
+  }
   function signalName(x) {
     if (!x) return undefined;
-    if (typeof x.signal === "string") return x.signal;
-    if (x.signal && x.signal.name) return x.signal.name;
-    return x.name || x.id;
+    if (x.name) return x.name;                            // snapshot series: short display name
+    if (x.signal && typeof x.signal === "object" && x.signal.name) return x.signal.name;
+    if (typeof x.signal === "string") return normSignal(x.signal);  // delta: channel path
+    return x.id;
   }
 
   function handleFrame(frame) {
