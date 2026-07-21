@@ -148,8 +148,14 @@ button { appearance: none; border: 2px solid var(--ink); background: var(--paper
 .operation-grid { margin-top: 22px !important; grid-column-gap: 28px !important; column-gap: 28px !important; }
 .throughput-main strong, .current-reading strong { font-size: 48px !important; }
 .panel { min-height: 0 !important; padding-top: 10px !important; padding-bottom: 10px !important; }
-.current-chart { height: 84px !important; }
-.current-chart text { font-size: 16px !important; }
+/* 03 (jam) card: flow the content down the full card height — the big reading aligns with 02's,
+   the dotted 9.0 A warn line sits at 02's good/reject bar, the chart is taller, and the jam-switch/
+   palletizer row is pinned to the bottom. */
+.jam-panel { display: flex; flex-direction: column; }
+.current-reading { margin-top: 20px; }
+.current-chart { flex: 0 0 auto; height: 118px !important; margin-top: 6px !important; }
+.current-chart text { font-size: 12px !important; }
+.jam-state { margin-top: auto; }
 .quality-row { margin-top: 9px !important; }
 .quality-row article { min-height: 64px !important; }
 .footer { min-height: 70px !important; }
