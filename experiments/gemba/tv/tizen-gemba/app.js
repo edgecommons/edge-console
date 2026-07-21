@@ -90,7 +90,7 @@
     if (pm) pm.className = jammed ? "machine machine--alert" : "machine machine--good";
     text("status-text", jammed ? "BLOCKED · PACKER JAM" : "RUNNING CLEAN");
     text("status-detail", jammed ? "Robot cell discharge photoeye held" : "Case packer synchronized with palletizer");
-    text("packer-state", state || (jammed ? "Jammed" : "Running"));
+    text("packer-state", jammed ? "Jammed" : "Running");
     text("risk-chip", jammed ? "ACTION NOW" : "LOW RISK");
     text("jam-status", jammed ? "BLOCKED" : "CLEAR");
     text("attention-text", jammed
