@@ -10,23 +10,22 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Random;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -35,34 +34,43 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 
+/**
+ * Native Android TV (Sony / Google TV) OEE dashboard for the Dallas FILLING line (gw-fill-01).
+ * Consumes the edge-console app-WebSocket signal stream over OkHttp and binds it to large,
+ * at-a-distance-legible TV tiles. The gateway delivers all site signals; this board scopes to the
+ * filling device and normalizes the delta channel-path to the short signal name.
+ */
 public final class MainActivity extends Activity {
     private static final String PREFS = "gemba-tv";
     private static final String PREF_GATEWAY_URL = "gateway-url";
-    private static final String DEFAULT_GATEWAY_URL =
-            "ws://192.168.1.224:18445/apps/tv-board/ws";
+    private static final String DEFAULT_GATEWAY_URL = "ws://192.168.1.224:8080/apps/tv-board/ws";
     private static final String APP_ORIGIN = "https://google-tv.edgecommons.local";
     private static final int PROTOCOL_VERSION = 1;
-    private static final String[] CAPABILITIES = {
-            "fleet", "events", "signals", "attributes", "alarms"
-    };
+    private static final String[] CAPABILITIES = {"signals", "alarms"};
+    private static final String LINE_DEVICE = "gw-fill-01";
+
+    // Colours
+    private static final int BG = Color.rgb(20, 20, 34);
+    private static final int PANEL = Color.rgb(31, 33, 52);
+    private static final int INK_ON_DARK = Color.WHITE;
+    private static final int MUTED = Color.rgb(150, 156, 184);
+    private static final int SAFETY = Color.rgb(234, 181, 69);
+    private static final int GOODC = Color.rgb(116, 195, 152);
+    private static final int COPPER = Color.rgb(214, 122, 78);
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Random random = new Random();
     private final OkHttpClient client = new OkHttpClient.Builder()
             .pingInterval(15, TimeUnit.SECONDS)
             .connectTimeout(10, TimeUnit.SECONDS)
             .build();
 
     private SharedPreferences preferences;
-    private EditText gatewayInput;
+    private String gatewayUrl = DEFAULT_GATEWAY_URL;
+
     private TextView statusView;
-    private TextView envelopeCountView;
-    private TextView rateView;
-    private TextView frameCountView;
-    private TextView reconnectCountView;
-    private TextView lastMessageView;
-    private TextView lastErrorView;
-    private TextView latestUpdateView;
+    private TextView clockView;
+    private final Map<String, TextView> valueViews = new LinkedHashMap<>();
+    private final SimpleDateFormat clockFmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
 
     private WebSocket webSocket;
     private Runnable reconnectRunnable;
@@ -70,24 +78,20 @@ public final class MainActivity extends Activity {
     private boolean lifecycleStopped = true;
     private int generation;
     private int reconnectAttempt;
-    private long reconnects;
-    private long envelopes;
-    private long frames;
-    private long rateWindowStartedAt = SystemClock.elapsedRealtime();
-    private long rateWindowEnvelopes;
+    private long lastDataAt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-        buildUi();
+        gatewayUrl = preferences.getString(PREF_GATEWAY_URL, DEFAULT_GATEWAY_URL);
         applyBridgeUrlFromIntent(getIntent());
+        buildUi();
+        startClock();
     }
 
     @Override
@@ -129,223 +133,263 @@ public final class MainActivity extends Activity {
         if (supplied == null || !validGatewayUrl(supplied.trim())) {
             return false;
         }
-        String value = supplied.trim();
-        gatewayInput.setText(value);
-        preferences.edit().putString(PREF_GATEWAY_URL, value).apply();
+        gatewayUrl = supplied.trim();
+        preferences.edit().putString(PREF_GATEWAY_URL, gatewayUrl).apply();
         return true;
     }
 
-    private void buildUi() {
-        int background = Color.rgb(7, 25, 35);
-        int panel = Color.rgb(13, 38, 49);
-        int border = Color.rgb(36, 69, 83);
-        int primary = Color.rgb(54, 194, 180);
-        int muted = Color.rgb(158, 181, 194);
+    // ----------------------------------------------------------------- UI
 
+    private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(44), dp(32), dp(44), dp(24));
-        root.setBackgroundColor(background);
+        root.setPadding(dp(52), dp(36), dp(52), dp(36)); // TV overscan-safe
+        root.setBackgroundColor(BG);
 
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = text("Dallas Gemba Board", 36, Color.WHITE, true);
-        header.addView(title, weighted(1));
-        statusView = text("Starting", 20, Color.WHITE, true);
-        statusView.setGravity(Gravity.CENTER);
-        statusView.setPadding(dp(24), dp(12), dp(24), dp(12));
-        setStatus("Starting", false, false);
-        header.addView(statusView, wrap());
-        root.addView(header, matchWrap());
-
-        View accent = new View(this);
-        accent.setBackgroundColor(primary);
-        LinearLayout.LayoutParams accentParams = match(dp(5));
-        accentParams.setMargins(0, dp(16), 0, dp(20));
-        root.addView(accent, accentParams);
-
-        LinearLayout metricsRow = new LinearLayout(this);
-        metricsRow.setOrientation(LinearLayout.HORIZONTAL);
-        envelopeCountView = metricCard(metricsRow, "UPDATE ENVELOPES", panel, border);
-        rateView = metricCard(metricsRow, "CURRENT RATE", panel, border);
-        frameCountView = metricCard(metricsRow, "FRAMES OBSERVED", panel, border);
-        reconnectCountView = metricCard(metricsRow, "RECONNECTS", panel, border);
-        root.addView(metricsRow, matchWrap());
-
-        LinearLayout details = new LinearLayout(this);
-        details.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams detailsParams = match(0);
-        detailsParams.weight = 1;
-        detailsParams.setMargins(0, dp(20), 0, 0);
-        root.addView(details, detailsParams);
-
-        LinearLayout connectionPanel = panel(panel, border);
-        LinearLayout.LayoutParams connectionParams = weighted(42);
-        connectionParams.setMargins(0, 0, dp(12), 0);
-        details.addView(connectionPanel, connectionParams);
-        connectionPanel.addView(text("Connection", 24, Color.WHITE, true), matchWrap());
-
-        TextView gatewayLabel = text("Gateway WebSocket URL", 15, muted, false);
-        LinearLayout.LayoutParams labelParams = matchWrap();
-        labelParams.setMargins(0, dp(16), 0, dp(6));
-        connectionPanel.addView(gatewayLabel, labelParams);
-
-        gatewayInput = new EditText(this);
-        gatewayInput.setSingleLine(true);
-        gatewayInput.setTextColor(background);
-        gatewayInput.setTextSize(17);
-        gatewayInput.setSelectAllOnFocus(true);
-        gatewayInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        gatewayInput.setText(preferences.getString(PREF_GATEWAY_URL, DEFAULT_GATEWAY_URL));
-        gatewayInput.setBackground(rounded(Color.rgb(236, 245, 248), primary, 2, 8));
-        gatewayInput.setPadding(dp(12), dp(9), dp(12), dp(9));
-        connectionPanel.addView(gatewayInput, matchWrap());
-
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams buttonsParams = matchWrap();
-        buttonsParams.setMargins(0, dp(12), 0, dp(14));
-        connectionPanel.addView(buttons, buttonsParams);
-
-        Button connectButton = button("Save and connect", Color.rgb(22, 123, 114));
-        connectButton.setOnClickListener(view -> {
-            manualDisconnect = false;
-            connect();
-        });
-        LinearLayout.LayoutParams buttonParams = weighted(1);
-        buttonParams.setMargins(0, 0, dp(8), 0);
-        buttons.addView(connectButton, buttonParams);
-
-        Button disconnectButton = button("Disconnect", Color.rgb(77, 101, 112));
-        disconnectButton.setOnClickListener(view -> {
-            manualDisconnect = true;
-            cancelReconnect();
-            closeCurrentSocket(1000, "User disconnected");
-            setStatus("Disconnected", false, false);
-        });
-        buttons.addView(disconnectButton, weighted(1));
-
-        connectionPanel.addView(keyValue("Client", "Native Android / OkHttp", muted), matchWrap());
-        connectionPanel.addView(keyValue("Origin header", APP_ORIGIN, muted), matchWrap());
-        lastMessageView = keyValue("Last message", "None", muted);
-        connectionPanel.addView(lastMessageView, matchWrap());
-        lastErrorView = keyValue("Last error", "None", muted);
-        connectionPanel.addView(lastErrorView, matchWrap());
-
-        LinearLayout payloadPanel = panel(panel, border);
-        LinearLayout.LayoutParams payloadParams = weighted(58);
-        payloadParams.setMargins(dp(12), 0, 0, 0);
-        details.addView(payloadPanel, payloadParams);
-        payloadPanel.addView(text("Latest update", 24, Color.WHITE, true), matchWrap());
-
-        latestUpdateView = text("Waiting for the gateway...", 14, Color.rgb(213, 237, 242), false);
-        latestUpdateView.setTypeface(Typeface.MONOSPACE);
-        latestUpdateView.setTextIsSelectable(true);
-        ScrollView payloadScroll = new ScrollView(this);
-        payloadScroll.addView(latestUpdateView, matchWrap());
-        LinearLayout.LayoutParams scrollParams = match(0);
-        scrollParams.weight = 1;
-        scrollParams.setMargins(0, dp(12), 0, 0);
-        payloadPanel.addView(payloadScroll, scrollParams);
-
-        TextView footer = text(
-                "D-pad selects controls. Native ping every 15 seconds. Gateway delivery ceiling: 30 Hz.",
-                14,
-                muted,
-                false
-        );
-        footer.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams footerParams = matchWrap();
-        footerParams.setMargins(0, dp(14), 0, 0);
-        root.addView(footer, footerParams);
+        root.addView(header(), mw());
+        root.addView(oeeBand(), rowMargins(dp(22)));
+        root.addView(productionGrid(), rowMargins(dp(20)));
 
         setContentView(root);
-        envelopeCountView.setText("0");
-        rateView.setText("0.0 Hz");
-        frameCountView.setText("0");
-        reconnectCountView.setText("0");
+        setStatus("Connecting…", SAFETY);
     }
 
-    private TextView metricCard(LinearLayout row, String label, int background, int border) {
-        LinearLayout card = panel(background, border);
-        card.setPadding(dp(18), dp(14), dp(18), dp(14));
-        card.addView(text(label, 14, Color.rgb(158, 181, 194), false), matchWrap());
-        TextView value = text("0", 31, Color.WHITE, true);
-        LinearLayout.LayoutParams valueParams = matchWrap();
-        valueParams.setMargins(0, dp(8), 0, 0);
-        card.addView(value, valueParams);
-        LinearLayout.LayoutParams cardParams = weighted(1);
-        cardParams.setMargins(dp(5), 0, dp(5), 0);
-        row.addView(card, cardParams);
-        return value;
+    private View header() {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        brand.addView(text("BOTTLES R US", 34, INK_ON_DARK, true), wc());
+        brand.addView(text("DALLAS · FILLING HALL", 20, MUTED, true), wc());
+        header.addView(brand, weight(1));
+
+        TextView line = text("LINE 01", 40, SAFETY, true);
+        line.setPadding(dp(28), 0, dp(28), 0);
+        header.addView(line, wc());
+
+        LinearLayout right = new LinearLayout(this);
+        right.setOrientation(LinearLayout.VERTICAL);
+        right.setGravity(Gravity.END);
+        statusView = text("Connecting…", 26, SAFETY, true);
+        clockView = text("--:--:--", 30, INK_ON_DARK, true);
+        right.addView(clockView, wc());
+        right.addView(statusView, wc());
+        header.addView(right, wc());
+        return header;
     }
 
-    private LinearLayout panel(int background, int border) {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(22), dp(20), dp(22), dp(20));
-        panel.setBackground(rounded(background, border, 1, 12));
-        return panel;
+    private View oeeBand() {
+        LinearLayout band = new LinearLayout(this);
+        band.setOrientation(LinearLayout.HORIZONTAL);
+
+        // Hero OEE tile
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setGravity(Gravity.CENTER);
+        hero.setPadding(dp(24), dp(22), dp(24), dp(22));
+        hero.setBackground(rounded(SAFETY, SAFETY, 0, 16));
+        hero.addView(text("OEE", 30, Color.rgb(88, 68, 21), true), wc());
+        TextView oee = text("--", 118, Color.rgb(35, 35, 61), true);
+        valueViews.put("OEE", oee);
+        hero.addView(oee, wc());
+        band.addView(hero, weightMargins(34, 0, 0, dp(14), 0));
+
+        band.addView(oeePart("AVAILABILITY", "Availability"), weightMargins(22, dp(14), 0, dp(14), 0));
+        band.addView(oeePart("PERFORMANCE", "Performance"), weightMargins(22, dp(14), 0, dp(14), 0));
+        band.addView(oeePart("QUALITY", "Quality"), weightMargins(22, dp(14), 0, 0, 0));
+        return band;
     }
 
-    private TextView keyValue(String key, String value, int muted) {
-        TextView view = text(key + ":  " + value, 15, Color.WHITE, false);
-        view.setPadding(0, dp(5), 0, dp(5));
-        view.setContentDescription(key);
-        view.setTag(key);
-        return view;
+    private View oeePart(String label, String signal) {
+        LinearLayout p = panel();
+        p.setGravity(Gravity.CENTER_VERTICAL);
+        p.addView(text(label, 22, MUTED, true), wc());
+        TextView v = text("--", 64, INK_ON_DARK, true);
+        LinearLayout.LayoutParams lp = wc();
+        lp.topMargin = dp(6);
+        p.addView(v, lp);
+        valueViews.put(signal, v);
+        return p;
     }
 
-    private Button button(String label, int color) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setTextColor(Color.WHITE);
-        button.setTextSize(16);
-        button.setAllCaps(false);
-        button.setFocusable(true);
-        button.setBackground(rounded(color, Color.rgb(255, 207, 74), 0, 8));
-        return button;
+    private View productionGrid() {
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        grid.addView(tileRow(new String[][]{
+                {"LINE SPEED", "LineSpeedBpm", "BPM"},
+                {"GOOD BOTTLES", "GoodBottleCount", ""},
+                {"FILL PRESSURE", "FillPressureKpa", "kPa"},
+                {"FILL VOLUME", "FillVolumeMl", "mL"}
+        }), mw());
+        LinearLayout.LayoutParams r2 = mw();
+        r2.topMargin = dp(18);
+        grid.addView(tileRow(new String[][]{
+                {"BOWL LEVEL", "BowlLevelPct", "%"},
+                {"PRODUCT TEMP", "ProductTempC", "°C"},
+                {"FILLER STATE", "FillerState", ""},
+                {"REJECTS", "RejectCount", ""}
+        }), r2);
+        return grid;
     }
 
-    private TextView text(String value, int sizeSp, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(sizeSp);
-        view.setTextColor(color);
-        if (bold) {
-            view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    private View tileRow(String[][] specs) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < specs.length; i++) {
+            String[] s = specs[i];
+            LinearLayout tile = panel();
+            tile.addView(text(s[0], 24, MUTED, true), wc());
+            LinearLayout valRow = new LinearLayout(this);
+            valRow.setOrientation(LinearLayout.HORIZONTAL);
+            valRow.setGravity(Gravity.BOTTOM);
+            LinearLayout.LayoutParams valRowLp = wc();
+            valRowLp.topMargin = dp(10);
+            TextView v = text("--", 54, INK_ON_DARK, true);
+            valRow.addView(v, wc());
+            if (!s[2].isEmpty()) {
+                TextView unit = text("  " + s[2], 26, MUTED, false);
+                valRow.addView(unit, wc());
+            }
+            tile.addView(valRow, valRowLp);
+            valueViews.put(s[1], v);
+            int rm = (i == specs.length - 1) ? 0 : dp(16);
+            row.addView(tile, weightMargins(1, 0, 0, rm, 0));
         }
-        return view;
+        return row;
     }
 
-    private GradientDrawable rounded(int fill, int stroke, int strokeWidthDp, int radiusDp) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(fill);
-        drawable.setCornerRadius(dp(radiusDp));
-        if (strokeWidthDp > 0) {
-            drawable.setStroke(dp(strokeWidthDp), stroke);
-        }
-        return drawable;
+    private LinearLayout panel() {
+        LinearLayout p = new LinearLayout(this);
+        p.setOrientation(LinearLayout.VERTICAL);
+        p.setPadding(dp(26), dp(22), dp(26), dp(22));
+        p.setBackground(rounded(PANEL, Color.rgb(52, 54, 83), 1, 14));
+        return p;
     }
 
-    private void connect() {
-        String url = gatewayInput.getText().toString().trim();
-        if (!validGatewayUrl(url)) {
-            setLastError("Enter a ws:// or wss:// gateway URL.");
-            gatewayInput.requestFocus();
+    // ---------------------------------------------------------------- signals
+
+    private void handleUpdates(JSONArray frames) {
+        if (frames == null) {
             return;
         }
+        for (int i = 0; i < frames.length(); i++) {
+            JSONObject frame = frames.optJSONObject(i);
+            if (frame == null) {
+                continue;
+            }
+            String type = frame.optString("type");
+            if ("signals".equals(type)) {
+                JSONArray series = frame.optJSONArray("series");
+                for (int j = 0; series != null && j < series.length(); j++) {
+                    JSONObject item = series.optJSONObject(j);
+                    if (item != null && isFillingLine(item)) {
+                        ingest(item.optString("name", null), item.opt("latest"));
+                    }
+                }
+            } else if ("signal".equals(type)) {
+                JSONArray updates = frame.optJSONArray("updates");
+                for (int j = 0; updates != null && j < updates.length(); j++) {
+                    JSONObject item = updates.optJSONObject(j);
+                    if (item == null || !isFillingLine(item)) {
+                        continue;
+                    }
+                    Object value = null;
+                    JSONObject point = item.optJSONObject("point");
+                    if (point != null) {
+                        value = point.opt("value");
+                    }
+                    ingest(normSignal(item.optString("signal", null)), value);
+                }
+            }
+        }
+    }
 
-        preferences.edit().putString(PREF_GATEWAY_URL, url).apply();
+    private boolean isFillingLine(JSONObject item) {
+        JSONObject key = item.optJSONObject("key");
+        return key != null && LINE_DEVICE.equals(key.optString("device"));
+    }
+
+    /** Snapshot series carry the short display name; deltas carry `signal` as a channel PATH that
+     *  differs per adapter — modbus: bare name; OPC UA: full nodeId; OEE: gemba/oee/&lt;metric&gt;. */
+    private static String normSignal(String s) {
+        if (s == null) {
+            return null;
+        }
+        if (s.contains("gemba/oee/")) {
+            String seg = s.substring(s.lastIndexOf('/') + 1);
+            switch (seg) {
+                case "availability": return "Availability";
+                case "overall": return "OEE";
+                case "performance": return "Performance";
+                case "quality": return "Quality";
+                default: return seg;
+            }
+        }
+        int dot = s.lastIndexOf('.');
+        return dot >= 0 ? s.substring(dot + 1) : s;
+    }
+
+    private void ingest(String name, Object value) {
+        if (name == null || value == null) {
+            return;
+        }
+        final TextView view = valueViews.get(name);
+        if (view == null) {
+            return;
+        }
+        final String out = format(name, value);
+        lastDataAt = SystemClock.elapsedRealtime();
+        post(() -> {
+            view.setText(out);
+            setStatus("Live", GOODC);
+        });
+    }
+
+    private static String format(String name, Object value) {
+        switch (name) {
+            case "GoodBottleCount":
+            case "RejectCount":
+                return commas(value);
+            case "LineSpeedBpm":
+            case "BowlLevelPct":
+                return String.format(Locale.US, "%.0f", toDouble(value));
+            case "FillerState":
+                return String.valueOf(value);
+            default: // OEE, Availability, Performance, Quality, FillPressureKpa, FillVolumeMl, ProductTempC
+                return String.format(Locale.US, "%.1f", toDouble(value));
+        }
+    }
+
+    private static double toDouble(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException error) {
+            return 0.0;
+        }
+    }
+
+    private static String commas(Object value) {
+        return String.format(Locale.US, "%,d", (long) toDouble(value));
+    }
+
+    // ---------------------------------------------------------------- transport
+
+    private void connect() {
+        if (!validGatewayUrl(gatewayUrl)) {
+            return;
+        }
         cancelReconnect();
         closeCurrentSocket(1001, "Reconnecting");
         manualDisconnect = false;
         int connectionGeneration = ++generation;
-        setStatus("Connecting", false, true);
-        setLastError("None");
-
+        post(() -> setStatus("Connecting…", SAFETY));
         Request request = new Request.Builder()
-                .url(url)
+                .url(gatewayUrl)
                 .header("Origin", APP_ORIGIN)
                 .build();
         webSocket = client.newWebSocket(request, new GembaListener(connectionGeneration));
@@ -368,7 +412,6 @@ public final class MainActivity extends Activity {
                 socket.cancel();
                 return;
             }
-            post(() -> setStatus("Handshaking", false, true));
             socket.send(helloFrame());
         }
 
@@ -380,22 +423,16 @@ public final class MainActivity extends Activity {
             try {
                 JSONObject message = new JSONObject(text);
                 String type = message.optString("type", "unknown");
-                post(() -> setLastMessage(type));
                 if ("welcome".equals(type)) {
                     reconnectAttempt = 0;
-                    post(() -> setStatus("Live", true, false));
                     socket.send(subscribeFrame());
+                    post(() -> setStatus("Live · max 30/s", GOODC));
                 } else if ("updates".equals(type)) {
-                    JSONArray updateFrames = message.optJSONArray("frames");
-                    int frameDelta = updateFrames == null ? 0 : updateFrames.length();
-                    post(() -> recordUpdate(text, frameDelta));
-                } else if ("error".equals(type)) {
-                    String error = message.optString("code", "gateway-error") + ": "
-                            + message.optString("message", text);
-                    post(() -> setLastError(error));
+                    JSONArray frames = message.optJSONArray("frames");
+                    post(() -> handleUpdates(frames));
                 }
-            } catch (JSONException error) {
-                post(() -> setLastError("Invalid JSON: " + error.getMessage()));
+            } catch (JSONException ignored) {
+                // Skip malformed frames; the stream continues.
             }
         }
 
@@ -408,7 +445,7 @@ public final class MainActivity extends Activity {
         public void onClosed(WebSocket socket, int code, String reason) {
             if (active()) {
                 post(() -> {
-                    setLastError("Closed " + code + (reason.isEmpty() ? "" : ": " + reason));
+                    setStatus("Reconnecting…", SAFETY);
                     scheduleReconnect();
                 });
             }
@@ -417,11 +454,8 @@ public final class MainActivity extends Activity {
         @Override
         public void onFailure(WebSocket socket, Throwable error, Response response) {
             if (active()) {
-                String detail = response == null
-                        ? error.getClass().getSimpleName() + ": " + error.getMessage()
-                        : "HTTP " + response.code() + ": " + error.getMessage();
                 post(() -> {
-                    setLastError(detail);
+                    setStatus("Reconnecting…", SAFETY);
                     scheduleReconnect();
                 });
             }
@@ -455,38 +489,16 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void recordUpdate(String payload, int frameDelta) {
-        envelopes += 1;
-        frames += frameDelta;
-        rateWindowEnvelopes += 1;
-        long now = SystemClock.elapsedRealtime();
-        long elapsed = now - rateWindowStartedAt;
-        if (elapsed >= 1000) {
-            double rate = rateWindowEnvelopes * 1000.0 / elapsed;
-            rateView.setText(String.format(Locale.US, "%.1f Hz", rate));
-            rateWindowStartedAt = now;
-            rateWindowEnvelopes = 0;
-        }
-        envelopeCountView.setText(String.valueOf(envelopes));
-        frameCountView.setText(String.valueOf(frames));
-        latestUpdateView.setText(payload.length() <= 12000
-                ? payload
-                : payload.substring(0, 12000) + "\n... truncated for TV rendering ...");
-    }
-
     private void scheduleReconnect() {
-        if (manualDisconnect || lifecycleStopped || reconnectRunnable != null) {
+        if (reconnectRunnable != null || manualDisconnect || lifecycleStopped) {
             return;
         }
-        long base = Math.min(30000L, 1000L << Math.min(reconnectAttempt, 5));
-        long delay = base + random.nextInt(500);
-        reconnectAttempt += 1;
-        reconnects += 1;
-        reconnectCountView.setText(String.valueOf(reconnects));
-        setStatus("Retry in " + ((delay + 999) / 1000) + "s", false, true);
+        long delay = Math.min(15000, 2000L * (long) Math.pow(2, Math.min(reconnectAttempt++, 3)));
         reconnectRunnable = () -> {
             reconnectRunnable = null;
-            connect();
+            if (!manualDisconnect && !lifecycleStopped) {
+                connect();
+            }
         };
         mainHandler.postDelayed(reconnectRunnable, delay);
     }
@@ -499,61 +511,103 @@ public final class MainActivity extends Activity {
     }
 
     private void closeCurrentSocket(int code, String reason) {
-        generation += 1;
         WebSocket current = webSocket;
         webSocket = null;
-        if (current != null && !current.close(code, reason)) {
-            current.cancel();
+        if (current != null) {
+            current.close(code, reason);
         }
     }
 
-    private void setStatus(String text, boolean connected, boolean connecting) {
-        statusView.setText(text);
-        int fill = connected
-                ? Color.rgb(29, 131, 72)
-                : connecting ? Color.rgb(154, 103, 0) : Color.rgb(161, 43, 49);
-        statusView.setBackground(rounded(fill, Color.TRANSPARENT, 0, 28));
+    private boolean validGatewayUrl(String url) {
+        return url != null && (url.startsWith("ws://") || url.startsWith("wss://"));
     }
 
-    private void setLastMessage(String type) {
-        lastMessageView.setText("Last message:  " + type);
+    // ---------------------------------------------------------------- misc
+
+    private void startClock() {
+        Runnable tick = new Runnable() {
+            @Override
+            public void run() {
+                if (clockView != null) {
+                    clockView.setText(clockFmt.format(new Date()));
+                }
+                // stalled-socket watchdog: if live but silent for 12s, force a reconnect
+                if (webSocket != null && lastDataAt != 0
+                        && SystemClock.elapsedRealtime() - lastDataAt > 12000
+                        && !lifecycleStopped && !manualDisconnect) {
+                    setStatus("Reconnecting…", SAFETY);
+                    closeCurrentSocket(1001, "stalled");
+                    scheduleReconnect();
+                    lastDataAt = 0;
+                }
+                mainHandler.postDelayed(this, 1000);
+            }
+        };
+        mainHandler.post(tick);
     }
 
-    private void setLastError(String error) {
-        lastErrorView.setText("Last error:  " + (error == null ? "Unknown" : error));
+    private void setStatus(String label, int color) {
+        if (statusView != null) {
+            statusView.setText(label);
+            statusView.setTextColor(color);
+        }
     }
 
-    private void post(Runnable runnable) {
-        mainHandler.post(runnable);
+    private void post(Runnable action) {
+        mainHandler.post(action);
     }
 
-    private boolean validGatewayUrl(String value) {
-        return value.startsWith("ws://") || value.startsWith("wss://");
+    private TextView text(String value, int sizeSp, int color, boolean bold) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(sizeSp);
+        view.setTextColor(color);
+        if (bold) {
+            view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        }
+        return view;
+    }
+
+    private GradientDrawable rounded(int fill, int stroke, int strokeWidthDp, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fill);
+        drawable.setCornerRadius(dp(radiusDp));
+        if (strokeWidthDp > 0) {
+            drawable.setStroke(dp(strokeWidthDp), stroke);
+        }
+        return drawable;
     }
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private LinearLayout.LayoutParams matchWrap() {
+    private LinearLayout.LayoutParams mw() {
         return new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private LinearLayout.LayoutParams match(int height) {
-        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height);
-    }
-
-    private LinearLayout.LayoutParams wrap() {
+    private LinearLayout.LayoutParams wc() {
         return new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private LinearLayout.LayoutParams weighted(float weight) {
-        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight);
+    private LinearLayout.LayoutParams rowMargins(int top) {
+        LinearLayout.LayoutParams lp = mw();
+        lp.topMargin = top;
+        return lp;
+    }
+
+    private LinearLayout.LayoutParams weight(float w) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, w);
+        return lp;
+    }
+
+    private LinearLayout.LayoutParams weightMargins(float w, int l, int t, int r, int b) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.MATCH_PARENT, w);
+        lp.setMargins(l, t, r, b);
+        return lp;
     }
 }
