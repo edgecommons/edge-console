@@ -41,6 +41,42 @@ section/field falls back to its default rather than failing the component.
 > **TLS is not here.** The gateway is plain HTTP regardless of `webRoot`. Terminate TLS in front (reverse
 > proxy / Ingress).
 
+## `component.global.console.apps`
+
+Besides its own operator UI (served from `ws.webRoot`), the console can **host additional,
+independently-deployed browser or native applications** — a Gemba/Andon board, a purpose-built TV
+dashboard, a kiosk view. Each is served from its own static root and connects over its own **application
+WebSocket**, and each is scoped by its own origins, roles, and data capabilities. Every app still goes
+through the console — none of them touch the bus directly, so the [single-bridge](../explanation.md#the-one-architectural-fact-the-console-is-the-sole-browserbus-bridge)
+model is preserved. See [Explanation → Hosting additional applications](../explanation.md#hosting-additional-applications)
+and [How-to → Host an additional browser or native app](../how-to-guides.md#host-an-additional-browser-or-native-app).
+
+`apps` is an array; each entry registers one application. Absent or empty ⇒ no application routes exist.
+
+| Key | Type | Required | Definition |
+|-----|------|----------|-----------|
+| `id` | string | yes | The application id and its URL segment. Lowercase; `a–z`, `0–9`, `-`; must start with a letter and end alphanumeric; ≤64 bytes. Serves static assets at `/apps/{id}/…` and the application WebSocket at `/apps/{id}/ws`. |
+| `webRoot` | string | yes | Filesystem path to the app's built static bundle. Relative paths resolve against the process cwd; absolute paths are used as-is. Extension-less routes fall back to the app's `index.html` (SPA); path traversal is rejected. |
+| `allowedOrigins` | string[] | yes | The exact browser `Origin` strings permitted on this app's WebSocket upgrade. **Exact-match only** — unlike `/ws`, there is no same-origin shortcut and a missing `Origin` is rejected. A native (non-browser) client must send an `Origin` header that matches an entry here verbatim. May be `[]`, which makes the app's WebSocket unreachable. |
+| `allowedRoles` | string[] | yes (non-empty) | The roles allowed to open this app's WebSocket. The role is resolved by the same mechanism as `/ws` (the console resolves no principal, so this is the connection's `rbac.defaultRole`); `allowedRoles` filters that result. Must contain at least one role. |
+| `capabilities` | string[] | yes | The data families this app may subscribe to: any of `fleet`, `events`, `metrics`, `logs`, `signals`, `attributes`, `alarms`. `commands` is **not** available to hosted apps — the application WebSocket is a read/observe surface and never issues commands. May be `[]`. |
+
+**Fail-closed, per entry.** Each app entry is validated independently: an entry that is missing a required
+field, has an invalid `id`, a duplicate `id`, an unknown capability, or a malformed array is **dropped
+with a logged warning**, and the remaining valid entries are unaffected. There is no partial entry.
+
+**What the application WebSocket delivers.** After a versioned handshake, an app subscribes to the
+capabilities it was granted and receives a **rate-limited projection** of the fleet — coalesced to **at
+most 30 updates per second** per connection (the latest value per item wins between ticks; ordered
+families like events/logs preserve order; overflow is signalled, never silent). This ceiling is a fixed
+property of the gateway, not a per-app setting. The application wire protocol is versioned; its
+frame-level details are an internal contract that is still evolving and is not part of this reference.
+
+> **Security.** The application WebSocket carries the same trust properties as the rest of the console:
+> plain HTTP unless you terminate TLS in front, and no per-connection authentication (origin and role are
+> coarse gates, not user identity). Keep hosted apps on a trusted network and serve them over WSS in
+> production. See [explanation → security](../explanation.md#a-note-on-security).
+
 ## `component.global.console.staleness` — the miss-detection ladder
 
 | Key | Type | Default | Definition |
@@ -168,8 +204,10 @@ keep it out of the fleet it watches. The console's dynamic grouping renders **wh
 | Method + path | Response |
 |---------------|----------|
 | `GET /healthz` | `200 ok` (liveness/readiness probe). |
-| `GET /ws` (Upgrade) | The WebSocket gateway (see [data-types.md](data-types.md)). |
-| `GET <anything>` | With `webRoot` set: the static UI (SPA fallback for extension-less routes; `403` on traversal; `404` otherwise). Without `webRoot`: `404`. |
+| `GET /ws` (Upgrade) | The operator-UI WebSocket gateway (see [data-types.md](data-types.md)). |
+| `GET /apps/{id}/ws` (Upgrade) | A hosted application's WebSocket (registered only when `console.apps` is non-empty; `404` for an unknown id). |
+| `GET /apps/{id}/…` | A hosted application's static bundle (SPA fallback; `403` on traversal; `404` for an unknown id). |
+| `GET <anything else>` | With `webRoot` set: the operator UI (SPA fallback for extension-less routes; `403` on traversal; `404` otherwise). Without `webRoot`: `404`. |
 
 ## Complete example
 
@@ -192,6 +230,10 @@ keep it out of the fleet it watches. The console's dynamic grouping renders **wh
       "console": {
         "ws":        { "port": 8443, "bindAddress": "0.0.0.0", "allowedOrigins": [],
                        "heartbeatIntervalMs": 15000, "webRoot": "../ui/dist" },
+        "apps":      [{ "id": "line-1-tv", "webRoot": "../apps/line-1-tv",
+                        "allowedOrigins": ["https://line-1-tv.example.internal"],
+                        "allowedRoles": ["viewer"],
+                        "capabilities": ["fleet", "signals", "events", "alarms"] }],
         "staleness": { "warnMultiplier": 2, "staleMultiplier": 2.5, "offlineMultiplier": 5,
                        "defaultIntervalSecs": 5, "sweepIntervalMs": 1000 },
         "cache":     { "maxChannelsPerComponent": 1024 },

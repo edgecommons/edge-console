@@ -176,6 +176,40 @@ wire; a component's custom command surface, custom panels, and per-signal engine
 on descriptor data from the component. The Logs tab likewise depends on actual `log/{level}` records on
 the bus. The UI marks unavailable data honestly rather than inventing values.
 
+## Hosting additional applications
+
+The Carbon/React operator UI is the console's *own* front end, but it is not the only thing the console
+can serve. The console can also **host additional, independently-built applications** — a Gemba or Andon
+board, a purpose-built line dashboard, a television wall display — each with its own look, its own
+lifecycle, and its own audience, all fed from the same fleet model.
+
+This does not weaken the single-bridge fact; it depends on it. Every hosted app, browser or native, still
+reaches the fleet **only through the console** — none of them opens a bus connection. What the console
+adds is a way to run several such apps side by side without letting one become a way into another:
+
+- **Each app is a registered principal, not just a folder.** An app is declared in
+  [`console.apps`](reference/configuration.md#componentglobalconsoleapps) with an id, a static bundle, an
+  explicit set of allowed browser origins, the roles allowed to open it, and the data families it may see.
+  The console serves the bundle at `/apps/{id}/…` and exposes a dedicated **application WebSocket** at
+  `/apps/{id}/ws`.
+- **A path is a packaging namespace, not a security boundary.** Because several apps can sit under one
+  gateway origin, the application WebSocket is gated on an **exact-origin allowlist** per app — stricter
+  than the operator `/ws`, which permits same-origin and header-less clients. An app declared with the
+  origin `https://line-1-tv.example.internal` can be opened only by a client presenting exactly that
+  `Origin`; one app's page cannot select another app's socket. A **native** client (which is not a
+  browser and so supplies its own `Origin`) is admitted the same way: it sends the registered origin
+  string and is otherwise indistinguishable from a browser app to the gateway.
+- **Observe, never command.** A hosted app subscribes to the data families it was granted — any of
+  `fleet`, `events`, `metrics`, `logs`, `signals`, `attributes`, `alarms` — and receives them as a
+  **rate-limited projection**: the gateway coalesces updates to at most **30 per second** per connection
+  (latest-value-wins for state families; order preserved for events and logs; any drop under load is
+  signalled to the client, never hidden). Commands are deliberately out of reach: the application
+  WebSocket has no write path, so a wall display or a shared kiosk can render the fleet without being able
+  to act on it.
+
+The same fleet model that drives the operator UI thus drives every hosted board, at a cadence a passive
+television can sustain, with each app's reach bounded by config rather than by trust in the network.
+
 ## A note on security
 
 Two current boundaries:

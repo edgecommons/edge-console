@@ -89,6 +89,55 @@ target/release/edge-console-gateway --platform HOST --transport MQTT ./config.js
 
 ---
 
+## Host an additional browser or native app
+
+Serve a purpose-built dashboard — a line board, a television wall display, a native TV client — alongside
+the operator UI, fed from the same fleet model. Register it under
+[`console.apps`](reference/configuration.md#componentglobalconsoleapps): give it an id, its built static
+bundle, the exact origins allowed to open it, the roles allowed to open it, and the data families it may
+see.
+
+```jsonc
+"component": { "global": { "console": {
+  "apps": [
+    {
+      "id": "line-1-tv",
+      "webRoot": "../apps/line-1-tv",
+      "allowedOrigins": ["https://line-1-tv.example.internal"],
+      "allowedRoles": ["viewer"],
+      "capabilities": ["fleet", "signals", "events", "alarms"]
+    }
+  ]
+} } }
+```
+
+This serves the bundle at `/apps/line-1-tv/…` and its WebSocket at `/apps/line-1-tv/ws`. The app receives
+only the families in `capabilities`, at **≤30 updates/second**, and cannot issue commands.
+
+**Point a browser app at it.** The bundle is served on the console's own origin, so a page loaded from
+`/apps/line-1-tv/` opens `wss://<host>/apps/line-1-tv/ws` on that same origin — list that origin in
+`allowedOrigins`. (Serving a browser app from a *different* origin, e.g. a separate dev server, means
+listing *that* origin instead.)
+
+**Point a native client at it.** A native client (an Android TV / Tizen app, a kiosk shell — anything that
+is not a browser) sets the WebSocket URL to `ws(s)://<host>:<port>/apps/<id>/ws` and, because it is not a
+browser, must **send the `Origin` header itself**, matching one entry in `allowedOrigins` verbatim.
+After connecting it performs the application handshake and subscribes to its granted families, then
+filters client-side to the device(s) it renders (there is no server-side device filter — an app subscribes
+to a whole family and picks out the device it cares about). The application wire protocol is versioned and
+still evolving; coordinate the current frame contract with the console team rather than treating it as a
+frozen public interface.
+
+- **Each app is isolated by origin.** The application WebSocket requires an **exact** `Origin` match (no
+  same-origin shortcut, no header-less clients) so one hosted app's page cannot open another's socket.
+- **Roles gate the socket too.** `allowedRoles` filters the connection's resolved role (which is
+  `rbac.defaultRole` today, since the console resolves no principal). A read-only board should sit under a
+  `viewer`-style role.
+- **Put TLS in front in production** (see below) — the application WebSocket is plain HTTP otherwise, and
+  neither origin nor role establishes user identity. Keep hosted apps on a trusted network.
+
+---
+
 ## Deploy on a single device over Greengrass IPC
 
 For a **single edge device with no site broker and no `uns-bridge`**, deploy the console as a Greengrass

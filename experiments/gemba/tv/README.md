@@ -1,13 +1,21 @@
 # TV client feasibility experiment
 
-Status: Sony Google TV and Samsung Tizen physical deployment, live transport, concurrent delivery,
-and post-power-cycle data recovery validation passed. The Samsung returns to its default stream
-after power-on and requires explicit app relaunch on this consumer model; business-oriented
-Samsung/Tizen displays provide kiosk mode for unattended launch. All source and runtime
-configuration is isolated to `edge-console` on `feat/gemba`. The Dallas containers are message
-sources only and are not rebuilt, restarted, or modified.
+Two TV clients that render a live Dallas line board from the console's hosted-application WebSocket: a
+native Android TV app (`google-tv-gemba/`, the Line 01 filling board) and a packaged Samsung Tizen app
+(`tizen-gemba/`, the Line 02 packaging board). Both connect to `/apps/tv-board/ws` and consume the same
+`updates` envelopes. Sony Google TV and Samsung Tizen physical deployment, live transport, concurrent
+delivery, and post-power-cycle recovery are validated (the Samsung returns to its default stream after
+power-on and requires explicit app relaunch on this consumer model; business displays offer kiosk mode
+for unattended launch).
 
-See `RESULTS.md` for the evidence captured so far and the remaining physical-device checks.
+- **Build/run the native Android TV app:** see [`google-tv-gemba/README.md`](google-tv-gemba/README.md).
+- **Evidence and remaining physical-device checks:** see `RESULTS.md`.
+- **The operator-facing model** (how the console hosts apps, and how to point a client at one) is
+  documented publicly in the edge-console docs:
+  [Explanation → Hosting additional applications](../../../docs/explanation.md#hosting-additional-applications),
+  [Reference → `console.apps`](../../../docs/reference/configuration.md#componentglobalconsoleapps),
+  [How-to → Host an additional browser or native app](../../../docs/how-to-guides.md#host-an-additional-browser-or-native-app).
+  The internal wire-protocol reference is [`docs/design/APP-WEBSOCKET-PROTOCOL.md`](../../../docs/design/APP-WEBSOCKET-PROTOCOL.md).
 
 ## What this tests
 
