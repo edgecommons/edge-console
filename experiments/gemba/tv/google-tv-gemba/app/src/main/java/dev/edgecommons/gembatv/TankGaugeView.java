@@ -3,107 +3,91 @@ package dev.edgecommons.gembatv;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.RectF;
-import android.graphics.Shader;
 import android.view.View;
 
 /**
- * A liquid-tank gauge for the filler bowl: the tank fills from the bottom to a percentage with a
- * gently waved surface, turns amber below a low-level threshold, and prints the level large in the
- * centre. This is the board's graphical centrepiece — the operator reads bowl level at a glance.
+ * A flat filler-bowl tank: a square-cornered shell filled to a level from the bottom, with a single
+ * meniscus line, faint 25/50/75 ticks, and a dashed low-level threshold. No gradient, no wave, and
+ * no text — the numeric value lives beside the tank in the board's standard measure style, so the
+ * bowl reads like every other measure. The liquid is a declared material colour; it turns caution
+ * amber only when the level drops below the low threshold.
  */
 public final class TankGaugeView extends View {
+    private static final int SHELL = Color.rgb(185, 181, 170);
+    private static final int TICK = Color.rgb(217, 216, 209);
+    private static final int LIQUID = Color.rgb(74, 127, 181);
+    private static final int MENISCUS = Color.rgb(46, 95, 145);
+    private static final int SAFETY = Color.rgb(234, 181, 69);
+
     private final Paint shell = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint tick = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint liquid = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint grid = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint title = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint meniscus = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint lowLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint lowText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF body = new RectF();
-    private final Path wave = new Path();
-    private float level = 0f;         // 0..100
-    private float low = 35f;          // amber below this
-    private String label = "BOWL LEVEL";
-    private boolean has = false;
+
+    private float level = -1f;
+    private float low = 35f;
 
     public TankGaugeView(Context c) {
         super(c);
         shell.setStyle(Paint.Style.STROKE);
-        shell.setColor(Color.rgb(210, 208, 200));
-        grid.setStyle(Paint.Style.STROKE);
-        grid.setColor(Color.argb(50, 255, 255, 255));
-        title.setColor(Color.rgb(111, 112, 128));
-        title.setFakeBoldText(true);
-        value.setColor(Color.WHITE);
-        value.setFakeBoldText(true);
-        value.setTextAlign(Paint.Align.CENTER);
+        shell.setColor(SHELL);
+        tick.setStyle(Paint.Style.STROKE);
+        tick.setColor(TICK);
+        liquid.setStyle(Paint.Style.FILL);
+        meniscus.setStyle(Paint.Style.STROKE);
+        meniscus.setColor(MENISCUS);
+        lowLine.setStyle(Paint.Style.STROKE);
+        lowLine.setColor(SAFETY);
+        lowText.setColor(SAFETY);
+        lowText.setTextSize(dp(9));
     }
 
-    public void setLabel(String t) { label = t; invalidate(); }
+    public void setLevel(float pct) {
+        level = Math.max(0, Math.min(100, pct));
+        invalidate();
+    }
+
     public void setLowThreshold(float pct) { low = pct; }
-    public void setLevel(float pct) { level = Math.max(0, Math.min(100, pct)); has = true; invalidate(); }
 
     @Override
     protected void onDraw(Canvas cv) {
-        int w = getWidth(), h = getHeight();
-        float pad = dp(6);
-        float labelH = dp(28);
-        title.setTextSize(dp(15));
-        cv.drawText(label, pad, labelH - dp(9), title);
-
-        float top = labelH, bottom = h - pad, left = pad, right = w - pad, rad = dp(12);
+        float pad = dp(2);
+        float left = pad, right = getWidth() - pad, top = pad, bottom = getHeight() - pad;
         body.set(left, top, right, bottom);
 
-        boolean lowLvl = level < low;
-        int c1 = lowLvl ? Color.rgb(224, 138, 86) : Color.rgb(70, 158, 216);
-        int c2 = lowLvl ? Color.rgb(184, 96, 60) : Color.rgb(38, 104, 176);
-        float fillTop = has ? bottom - (level / 100f) * (bottom - top) : bottom;
+        // liquid
+        if (level >= 0) {
+            boolean lowLvl = level < low;
+            liquid.setColor(lowLvl ? SAFETY : LIQUID);
+            float fillTop = bottom - (level / 100f) * (bottom - top);
+            cv.drawRect(left, fillTop, right, bottom, liquid);
+            meniscus.setStrokeWidth(dp(2));
+            cv.drawLine(left, fillTop, right, fillTop, meniscus);
+        }
 
-        cv.save();
-        Path clip = new Path();
-        clip.addRoundRect(body, rad, rad, Path.Direction.CW);
-        cv.clipPath(clip);
-        // faint level gridlines at 25/50/75
-        grid.setStrokeWidth(dp(1));
+        // 25/50/75 ticks
+        tick.setStrokeWidth(dp(1));
         for (int i = 1; i < 4; i++) {
             float y = bottom - i / 4f * (bottom - top);
-            cv.drawLine(left, y, right, y, grid);
+            cv.drawLine(left, y, right, y, tick);
         }
-        if (has) {
-            liquid.setShader(new LinearGradient(0, fillTop, 0, bottom, c1, c2, Shader.TileMode.CLAMP));
-            wave.reset();
-            wave.moveTo(left, fillTop);
-            float amp = dp(6);
-            int steps = 28;
-            for (int i = 0; i <= steps; i++) {
-                float x = left + (right - left) * i / steps;
-                float y = fillTop + (float) Math.sin((double) i / steps * 3 * 2 * Math.PI) * amp;
-                wave.lineTo(x, y);
-            }
-            wave.lineTo(right, bottom);
-            wave.lineTo(left, bottom);
-            wave.close();
-            cv.drawPath(wave, liquid);
-        }
-        cv.restore();
 
-        shell.setStrokeWidth(dp(2));
-        cv.drawRoundRect(body, rad, rad, shell);
+        // low threshold
+        lowLine.setStrokeWidth(dp(1.5f));
+        lowLine.setPathEffect(new DashPathEffect(new float[]{dp(4), dp(3)}, 0));
+        float ly = bottom - (low / 100f) * (bottom - top);
+        cv.drawLine(left, ly, right, ly, lowLine);
+        cv.drawText("LOW", left + dp(3), ly - dp(4), lowText);
 
-        value.setTextSize(dp(46));
-        String txt = has ? Math.round(level) + "%" : "--";
-        float tx = (left + right) / 2f, ty = (top + bottom) / 2f + dp(16);
-        // Draw an outline then a white fill so the reading stays legible whether it sits over the
-        // blue liquid (high level) or the empty white tank (low level).
-        value.setStyle(Paint.Style.STROKE);
-        value.setStrokeWidth(dp(5));
-        value.setColor(Color.argb(190, 22, 40, 66));
-        cv.drawText(txt, tx, ty, value);
-        value.setStyle(Paint.Style.FILL);
-        value.setColor(Color.WHITE);
-        cv.drawText(txt, tx, ty, value);
+        // shell
+        shell.setStrokeWidth(dp(1.5f));
+        cv.drawRect(body, shell);
     }
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
