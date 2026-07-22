@@ -15,6 +15,13 @@ same way as everything else — HOST, Greengrass, or Kubernetes — and the libr
 messaging, logging, metrics, state keepalive and graceful shutdown. The console adds the fleet model,
 the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on top.
 
+Beyond its own operator UI, the console can **host additional applications** — purpose-built line
+dashboards, television wall boards, native TV clients — each served at `/apps/{id}/`, fed from the same
+fleet model over a rate-limited application WebSocket, and scoped by its own origins, roles, and data
+capabilities. See [Explanation → Hosting additional applications](explanation.md#hosting-additional-applications),
+[Reference → `console.apps`](reference/configuration.md#componentglobalconsoleapps), and
+[How-to → Host an additional browser or native app](how-to-guides.md#host-an-additional-browser-or-native-app).
+
 | Doc | Start here when you want to… |
 |-----|------------------------------|
 | **[Tutorial](tutorial.md)** | learn by doing — bring the console up against a live (or simulated) fleet and see it in a browser |
