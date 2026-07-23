@@ -67,7 +67,10 @@ time) — to be run as this repo's own baseline leg on a clean `main` once gemba
 - Gateway core dependency: git `rev=` pin + gitignored `.cargo/config.toml` `[patch]` sibling
   override, replacing the floating path dependency (issue P0-1).
 - Commit `package-lock.json` and switch CI to `npm ci` (P0-2).
-- `config.schema.json` modelling `component.global.console.*` (P0-3).
+- ~~`config.schema.json` modelling `component.global.console.*` (P0-3).~~ **Done** — the schema
+  ships at the repo root (`config.schema.json`), grounded in `ConsoleConfig::from_global` and
+  validated against both `test-configs/`. It declares no `#/$defs/instance`: the console runs one
+  per node and reads no `component.instances[]`.
 - Enforce the 90% coverage gate in CI for all three packages — `npm run coverage` (ui), a new
   vitest coverage config (`protocol`), and `cargo llvm-cov --fail-under-lines 90` (gateway) (P1-4).
 - Adopt the org reusable CI shape (`component-ci.yml`) alongside the bespoke dual-toolchain job, or
