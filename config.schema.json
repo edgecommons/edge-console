@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edgecommons.mbreissi.com/schemas/edge-console/config.schema.json",
+  "title": "edge-console component configuration",
+  "description": "The shape of `component.global` for edge-console. The canonical EdgeCommons config schema leaves `component.global` open, so this document is what validates the console's own configuration — in the component's tests, in `edgecommons component validate`, and in the deployment compatibility guard. edge-console runs one console per node and reads no `component.instances[]`, so this document declares no `#/$defs/instance`.\n\nEvery key is optional: the gateway falls back to a built-in default for anything absent or out of range (`ConsoleConfig::default`, `gateway/src/config.rs`). What this schema catches is a key that is misspelled, misplaced, or of the wrong type — which the gateway would otherwise silently ignore.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "console": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "All console configuration. The gateway reads nothing under `component.global` outside this object.",
+      "properties": {
+        "ws": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The HTTPS/WebSocket listener the browser connects to.",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8443
+            },
+            "bindAddress": {
+              "type": "string",
+              "minLength": 1,
+              "default": "127.0.0.1",
+              "description": "Secure by default: loopback only. Container and Kubernetes deployments must set `0.0.0.0` explicitly, because loopback is unreachable through a published port."
+            },
+            "heartbeatIntervalMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 15000
+            },
+            "webRoot": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Directory served as the console UI. Absent means the UI bundled with the gateway."
+            },
+            "allowedOrigins": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "default": [],
+              "description": "Browser origins permitted to connect. Empty means same-origin only."
+            }
+          }
+        },
+        "apps": {
+          "type": "array",
+          "default": [],
+          "description": "Additional single-purpose UIs served alongside the console, each scoped to the roles and capabilities it is granted.",
+          "items": { "$ref": "#/$defs/app" }
+        },
+        "staleness": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How long after a component's expected heartbeat interval the console calls it late, stale, then offline. Multipliers apply to each component's own interval, so a 1 s heartbeat and a 60 s heartbeat are judged on their own terms.",
+          "properties": {
+            "warnMultiplier": { "type": "number", "exclusiveMinimum": 0, "default": 2.0 },
+            "staleMultiplier": { "type": "number", "exclusiveMinimum": 0, "default": 2.5 },
+            "offlineMultiplier": { "type": "number", "exclusiveMinimum": 0, "default": 5.0 },
+            "defaultIntervalSecs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 5,
+              "description": "Assumed heartbeat interval for a component that has not declared one."
+            },
+            "sweepIntervalMs": { "type": "integer", "exclusiveMinimum": 0, "default": 1000 }
+          }
+        },
+        "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxChannelsPerComponent": { "type": "integer", "exclusiveMinimum": 0, "default": 1024 }
+          }
+        },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Bounds on the in-memory event ring. The console holds no database; these caps are what keep a chatty fleet from growing the gateway without limit.",
+          "properties": {
+            "maxEvents": { "type": "integer", "exclusiveMinimum": 0, "default": 1000 },
+            "maxPerComponent": { "type": "integer", "exclusiveMinimum": 0, "default": 100 }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxSeriesPoints": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 60,
+              "description": "Points retained per series — the width of the live chart window."
+            },
+            "maxSeries": { "type": "integer", "exclusiveMinimum": 0, "default": 2000 }
+          }
+        },
+        "logs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxRecords": { "type": "integer", "exclusiveMinimum": 0, "default": 5000 },
+            "maxPerComponent": { "type": "integer", "exclusiveMinimum": 0, "default": 1000 },
+            "defaultTail": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 500,
+              "description": "Records returned when a tail request names no count."
+            },
+            "maxTail": { "type": "integer", "exclusiveMinimum": 0, "default": 2000 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Process-level tuning for the gateway itself.",
+          "properties": {
+            "workerThreads": { "type": "integer", "exclusiveMinimum": 0, "default": 4 },
+            "mallocArenaMax": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 2,
+              "description": "Caps glibc's per-thread arenas, which otherwise inflate resident memory on a many-core edge box."
+            },
+            "eventBufferCapacity": { "type": "integer", "exclusiveMinimum": 0, "default": 512 }
+          }
+        },
+        "rbac": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Which roles may issue which command verbs.",
+          "properties": {
+            "defaultRole": {
+              "type": "string",
+              "minLength": 1,
+              "default": "operator",
+              "description": "The role assigned to a session that presents none. It must be one of `roles`."
+            },
+            "roles": {
+              "type": "object",
+              "description": "Role name to its verb policy.",
+              "additionalProperties": { "$ref": "#/$defs/rolePolicy" }
+            }
+          }
+        },
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Timeouts applied to commands the console issues onto the bus.",
+          "properties": {
+            "defaultTimeoutMs": { "type": "integer", "exclusiveMinimum": 0, "default": 30000 },
+            "maxTimeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 60000,
+              "description": "Upper bound for any single command. Clamped to the bridge's reply TTL (60000 ms) — a longer timeout could not be honoured, because the reply would already have expired."
+            },
+            "verbTimeouts": {
+              "type": "object",
+              "description": "Per-verb override, in milliseconds.",
+              "additionalProperties": { "type": "integer", "exclusiveMinimum": 0 }
+            }
+          }
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Detection of host clock steps, which would otherwise show up as impossible timestamps across the fleet.",
+          "properties": {
+            "stepAlarmThresholdMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "default": 250,
+              "description": "NTP slews stay under 128 ms, so a backward step at or beyond this is unambiguous clock trouble rather than normal correction."
+            },
+            "clearAfterQuietSecs": { "type": "integer", "exclusiveMinimum": 0, "default": 600 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "webRoot"],
+      "description": "One registered application. An entry the gateway cannot make sense of is skipped with a warning rather than failing startup, so a typo here costs you the app silently — which is the reason to validate it here instead.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$",
+          "description": "Lower-kebab, starting with a letter and ending alphanumeric. Unique across `apps`."
+        },
+        "webRoot": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory served for this app."
+        },
+        "allowedOrigins": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "allowedRoles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": [],
+          "description": "Roles permitted to open the app. Empty means every role."
+        },
+        "capabilities": {
+          "type": "array",
+          "default": [],
+          "description": "The console data the app may read. Anything not listed is not served to it.",
+          "items": {
+            "type": "string",
+            "enum": ["fleet", "events", "metrics", "logs", "signals", "attributes", "alarms"]
+          }
+        }
+      }
+    },
+    "rolePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Verb lists for one role. `deny` is evaluated after `allow`, so an explicit denial always wins.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Command verbs this role may issue. `*` permits all."
+        },
+        "deny": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
