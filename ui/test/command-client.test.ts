@@ -157,6 +157,25 @@ describe("FleetClient - invokeCommand", () => {
     client.stop();
   });
 
+  it("records args.instance at request time so replies settle under that instance's slot", () => {
+    const { client, sockets } = rig();
+    sockets[0]!.open();
+    const r1 = client.invokeCommand(KEY, "sb/browse", { instance: "filler1", ref: "root", depth: 1 });
+    const r2 = client.invokeCommand(KEY, "sb/browse", { ref: "root", depth: 1 }); // component-scoped
+    expect(client.getState().commands.byId[r1]?.instance).toBe("filler1");
+    expect(client.getState().commands.byId[r2]?.instance).toBeUndefined();
+
+    // The reply frame carries no instance — the request-time correlation places it.
+    sockets[0]!.frame(result(r1, { verb: "sb/browse", result: { id: "filler1" } }));
+    const commands = client.getState().commands;
+    expect(commands.latestByComponentVerb["gw-01/opcua-adapter::sb/browse::filler1"]).toMatchObject({
+      phase: "ok",
+      result: { id: "filler1" },
+    });
+    expect(commands.latestByComponentVerb["gw-01/opcua-adapter::sb/browse::"]?.phase).toBe("pending");
+    client.stop();
+  });
+
   it("a command-result clears the backstop timer (no late spurious failure)", () => {
     const { client, sockets } = rig();
     sockets[0]!.open();

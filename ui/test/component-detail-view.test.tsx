@@ -663,7 +663,9 @@ describe("ComponentDetailView — descriptor-driven panel + pending surfaces", (
     const grid = screen.getByTestId("panel-signal-grid");
     expect(within(grid).getByText("Instance")).toBeTruthy();
     expect(within(grid).getByText("filler1")).toBeTruthy();
-    expect(within(grid).getByText("1 subscribed signals")).toBeTruthy();
+    // The signal-inventory-neutral meta wording ("N signals", not "subscribed signals").
+    expect(within(grid).getByText("1 signal")).toBeTruthy();
+    expect(within(grid).queryByText(/subscribed/)).toBeNull();
     expect(within(grid).getByText("Signal")).toBeTruthy();
     expect(within(grid).getByText("ns=2;s=Line1.FillLevel")).toBeTruthy();
     expect(within(grid).getByText("ns=2")).toBeTruthy();
@@ -834,6 +836,258 @@ describe("ComponentDetailView — descriptor-driven panel + pending surfaces", (
     fireEvent.click(screen.getByTestId("tab-logs"));
     expect(screen.getByTestId("logs-unavailable")).toBeTruthy();
     expect(screen.getByText("the console log store is not configured")).toBeTruthy();
+  });
+});
+
+/** A manifest whose browse/signal views are instance-scoped (the §3.1 selector cases). */
+function scopedManifest(): ComponentDescribeManifest {
+  return {
+    schema: "edgecommons.component.describe.v1",
+    component: { component: "opcua-adapter", implementation: "Java", version: "0.1.0" },
+    digest: "sha256:test-scoped",
+    commands: [
+      { verb: "describe", builtIn: true },
+      { verb: "sb/browse", builtIn: false },
+      { verb: "sb/subscriptions", builtIn: false },
+    ],
+    panels: {
+      schema: "edgecommons.panels.v2",
+      provider: "opcua-adapter",
+      renderer: "descriptor",
+      defaultView: "address-space",
+      views: [
+        {
+          id: "overview",
+          title: "Overview",
+          order: 10,
+          widgets: [{ kind: "summary", id: "sum", title: "Summary", rows: [{ label: "Mode", value: "Discovery" }] }],
+        },
+        {
+          id: "address-space",
+          title: "Address Space",
+          order: 20,
+          scope: "instance",
+          widgets: [
+            {
+              kind: "treeBrowser",
+              id: "tree",
+              title: "Address space",
+              scope: "instance",
+              mode: "hierarchical",
+              rootRef: "root",
+              browseVerb: "sb/browse",
+            },
+          ],
+        },
+        {
+          id: "signals",
+          title: "Signals",
+          order: 30,
+          widgets: [
+            {
+              kind: "signalGrid",
+              id: "grid",
+              title: "Signals",
+              scope: "instance",
+              subscriptionsVerb: "sb/subscriptions",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function scopedDescriptorReady() {
+  return {
+    key: DKEY,
+    id: ID,
+    phase: "ready" as const,
+    manifest: scopedManifest(),
+    receivedAt: T0 - 1000,
+    refreshing: false,
+  };
+}
+
+/** A minimal hierarchical browse result attributable to one instance. */
+function browseResult(instance: string, rootName: string) {
+  return {
+    id: instance,
+    mode: "hierarchical",
+    refCount: 0,
+    depth: 1,
+    truncated: false,
+    root: { nodeId: `${instance}-root`, name: rootName, nodeClass: "Object", refs: [] },
+  };
+}
+
+function multiInstanceState(overrides = {}) {
+  return clientState(
+    fleetView([
+      deviceView("pack-gw-01", [
+        compView({
+          key: DKEY,
+          hier: hier(["site", "dallas"], ["device", "pack-gw-01"]),
+          instances: [
+            { instance: "filler1", connected: true },
+            { instance: "kep2", connected: true },
+          ],
+        }),
+      ]),
+    ]),
+    {
+      descriptions: { entriesById: { [ID]: scopedDescriptorReady() } },
+      ...overrides,
+    },
+  );
+}
+
+describe("ComponentDetailView — the Panel instance selector (§3.1)", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("renders ONE selector for instance-scoped views, defaults to the first configured instance, and sends it", () => {
+    const cbs = renderDetail({ state: multiInstanceState() });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    // defaultView = address-space, which is instance-scoped.
+    const select = screen.getByTestId("panel-instance-selector") as HTMLSelectElement;
+    expect(select.value).toBe("filler1");
+    expect(within(select).getByRole("option", { name: "filler1" })).toBeTruthy();
+    expect(within(select).getByRole("option", { name: "kep2" })).toBeTruthy();
+    expect(screen.getAllByTestId("panel-instance-selector")).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("panel-browse-load"));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "sb/browse", { instance: "filler1", ref: "root", depth: 1 });
+  });
+
+  it("changing the selection sends the newly selected instance and persists it in ?instance=", () => {
+    const cbs = renderDetail({ state: multiInstanceState() });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    const select = screen.getByTestId("panel-instance-selector") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "kep2" } });
+    expect(window.location.search).toContain("instance=kep2");
+    fireEvent.click(screen.getByTestId("panel-browse-load"));
+    expect(cbs.onInvoke).toHaveBeenLastCalledWith(DKEY, "sb/browse", { instance: "kep2", ref: "root", depth: 1 });
+  });
+
+  it("widgets read the SELECTED instance's result slot — two instances never cross-talk", () => {
+    renderDetail({
+      state: multiInstanceState({
+        commands: commandView([
+          commandEntry({
+            requestId: "b1",
+            seq: 1,
+            key: DKEY,
+            verb: "sb/browse",
+            instance: "filler1",
+            result: browseResult("filler1", "FillerRoot"),
+          }),
+          commandEntry({
+            requestId: "b2",
+            seq: 2,
+            key: DKEY,
+            verb: "sb/browse",
+            instance: "kep2",
+            result: browseResult("kep2", "KepRoot"),
+          }),
+        ]),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    // filler1 (the default) shows only its own result...
+    let tree = screen.getByTestId("panel-address-tree");
+    expect(within(tree).getByText("FillerRoot")).toBeTruthy();
+    expect(within(tree).queryByText("KepRoot")).toBeNull();
+    // ...and switching instances swaps to kep2's slot.
+    fireEvent.change(screen.getByTestId("panel-instance-selector"), { target: { value: "kep2" } });
+    tree = screen.getByTestId("panel-address-tree");
+    expect(within(tree).getByText("KepRoot")).toBeTruthy();
+    expect(within(tree).queryByText("FillerRoot")).toBeNull();
+  });
+
+  it("switching instances resets per-widget state — an instance without results starts empty", () => {
+    renderDetail({
+      state: multiInstanceState({
+        commands: commandView([
+          commandEntry({
+            requestId: "b1",
+            seq: 1,
+            key: DKEY,
+            verb: "sb/browse",
+            instance: "filler1",
+            result: browseResult("filler1", "FillerRoot"),
+          }),
+        ]),
+      }),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    expect(within(screen.getByTestId("panel-address-tree")).getByText("FillerRoot")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("panel-instance-selector"), { target: { value: "kep2" } });
+    // kep2 has no recorded result: the remounted widget shows the fresh empty prompt.
+    expect(screen.getByText("Load the address-space root to inspect hierarchical refs.")).toBeTruthy();
+    expect(screen.queryByText("FillerRoot")).toBeNull();
+  });
+
+  it("restores a deep-linked ?instance= selection on mount", () => {
+    window.history.replaceState(null, "", "/?instance=kep2");
+    const cbs = renderDetail({ state: multiInstanceState() });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    expect((screen.getByTestId("panel-instance-selector") as HTMLSelectElement).value).toBe("kep2");
+    fireEvent.click(screen.getByTestId("panel-browse-load"));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "sb/browse", { instance: "kep2", ref: "root", depth: 1 });
+  });
+
+  it("a selected instance that disappeared renders the explicit unavailable state — never a silent fallback", () => {
+    window.history.replaceState(null, "", "/?instance=gone");
+    const cbs = renderDetail({ state: multiInstanceState() });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    const select = screen.getByTestId("panel-instance-selector") as HTMLSelectElement;
+    expect(select.value).toBe("gone");
+    expect(within(select).getByRole("option", { name: "gone (unavailable)" })).toBeTruthy();
+    expect(screen.getByTestId("panel-instance-unavailable")).toBeTruthy();
+    const load = screen.getByTestId("panel-browse-load") as HTMLButtonElement;
+    expect(load.disabled).toBe(true);
+    fireEvent.click(load);
+    expect(cbs.onInvoke).not.toHaveBeenCalled();
+    // Picking a live instance recovers.
+    fireEvent.change(select, { target: { value: "filler1" } });
+    expect(screen.queryByTestId("panel-instance-unavailable")).toBeNull();
+  });
+
+  it("component-scoped views show no selector", () => {
+    renderDetail({ state: multiInstanceState() });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    fireEvent.click(within(screen.getByTestId("descriptor-panel")).getByRole("tab", { name: "Overview" }));
+    expect(screen.queryByTestId("panel-instance-selector")).toBeNull();
+  });
+
+  it("keeps the legacy no-instances behavior: no selector, no instance arg (firstInstanceArg fallback)", () => {
+    // The same scoped manifest on a component with no real instances (the `main` sentinel).
+    const cbs = renderDetail({
+      state: clientState(
+        fleetView([deviceView("pack-gw-01", [compView({ key: DKEY })])]),
+        { descriptions: { entriesById: { [ID]: scopedDescriptorReady() } } },
+      ),
+    });
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    expect(screen.queryByTestId("panel-instance-selector")).toBeNull();
+    fireEvent.click(screen.getByTestId("panel-browse-load"));
+    expect(cbs.onInvoke).toHaveBeenCalledWith(DKEY, "sb/browse", { ref: "root", depth: 1 });
+  });
+
+  it("clears the ?instance= param when the operator leaves the component", () => {
+    render(
+      <ComponentDetailView
+        state={multiInstanceState()}
+        now={T0}
+        detailKey={DKEY}
+        onInvoke={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("tab-panel"));
+    fireEvent.change(screen.getByTestId("panel-instance-selector"), { target: { value: "kep2" } });
+    expect(window.location.search).toContain("instance=kep2");
+    cleanup(); // unmount = leaving the component
+    expect(window.location.search).not.toContain("instance=");
   });
 });
 

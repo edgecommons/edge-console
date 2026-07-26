@@ -317,6 +317,59 @@ fn normalize_commands(value: Option<&Value>) -> Option<Value> {
     Some(Value::Array(commands))
 }
 
+/// Whether one `rendererRequirements` token matches the closed format
+/// `^[a-z][a-z0-9-]*\.v[1-9][0-9]*$` (edge-console-panels.md §4).
+fn is_renderer_requirement_token(token: &str) -> bool {
+    let Some((name, version)) = token.split_once('.') else {
+        return false;
+    };
+    let mut name_chars = name.chars();
+    let Some(first) = name_chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    if !name_chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return false;
+    }
+    let Some(digits) = version.strip_prefix('v') else {
+        return false;
+    };
+    let mut digit_chars = digits.chars();
+    let Some(first_digit) = digit_chars.next() else {
+        return false;
+    };
+    ('1'..='9').contains(&first_digit) && digit_chars.all(|c| c.is_ascii_digit())
+}
+
+/// Whether a view's `rendererRequirements` value satisfies the closed field shape: an array
+/// of at most 32 UNIQUE, ascending-SORTED strings, each a valid requirement token. Anything
+/// else (wrong type, unsorted, duplicates, malformed/oversized entries) fails wholesale —
+/// the caller then strips the field from the normalized view (never the whole view).
+fn valid_renderer_requirements(value: &Value) -> bool {
+    let Some(tokens) = value.as_array() else {
+        return false;
+    };
+    if tokens.len() > 32 {
+        return false;
+    }
+    let mut prev: Option<&str> = None;
+    for token in tokens {
+        let Some(token) = token.as_str() else {
+            return false;
+        };
+        if !is_renderer_requirement_token(token) {
+            return false;
+        }
+        if prev.is_some_and(|p| p >= token) {
+            return false; // unsorted or duplicate
+        }
+        prev = Some(token);
+    }
+    true
+}
+
 fn normalize_panels(value: Option<&Value>) -> Option<Value> {
     let obj = value?.as_object()?;
     let views: Vec<Value> = obj
@@ -325,19 +378,31 @@ fn normalize_panels(value: Option<&Value>) -> Option<Value> {
         .map(|views| {
             views
                 .iter()
-                .filter(|view| {
-                    view.as_object().is_some_and(|obj| {
-                        obj.get("id")
+                .filter_map(|view| {
+                    let obj = view.as_object()?;
+                    let renderable = obj
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| !id.is_empty())
+                        && obj
+                            .get("title")
+                            .or_else(|| obj.get("label"))
                             .and_then(Value::as_str)
-                            .is_some_and(|id| !id.is_empty())
-                            && obj
-                                .get("title")
-                                .or_else(|| obj.get("label"))
-                                .and_then(Value::as_str)
-                                .is_some_and(|title| !title.is_empty())
-                    })
+                            .is_some_and(|title| !title.is_empty());
+                    if !renderable {
+                        return None;
+                    }
+                    let mut view = obj.clone();
+                    // `rendererRequirements` is a closed-format field: keep it only when
+                    // valid, otherwise remove the field (never drop the whole view for it).
+                    if view
+                        .get("rendererRequirements")
+                        .is_some_and(|reqs| !valid_renderer_requirements(reqs))
+                    {
+                        view.remove("rendererRequirements");
+                    }
+                    Some(Value::Object(view))
                 })
-                .cloned()
                 .collect()
         })
         .unwrap_or_default();
@@ -388,5 +453,103 @@ mod tests {
         assert_eq!(manifest["schema"], "edgecommons.component.describe.v1");
         assert_eq!(manifest["panels"]["renderer"], "descriptor");
         assert_eq!(manifest["commands"][0]["verb"], "sb/browse");
+    }
+
+    fn normalized_view(view: Value) -> Value {
+        let panels = normalize_panels(Some(&json!({ "views": [view] }))).unwrap();
+        panels["views"][0].clone()
+    }
+
+    #[test]
+    fn keeps_valid_renderer_requirements() {
+        let view = normalized_view(json!({
+            "id": "overview",
+            "title": "Overview",
+            "rendererRequirements": ["action-bar.v1", "instance-selector.v1", "status-dashboard.v2"]
+        }));
+        assert_eq!(
+            view["rendererRequirements"],
+            json!(["action-bar.v1", "instance-selector.v1", "status-dashboard.v2"])
+        );
+    }
+
+    #[test]
+    fn keeps_an_empty_renderer_requirements_array() {
+        let view = normalized_view(json!({
+            "id": "overview",
+            "title": "Overview",
+            "rendererRequirements": []
+        }));
+        assert_eq!(view["rendererRequirements"], json!([]));
+    }
+
+    #[test]
+    fn strips_invalid_renderer_requirements_but_keeps_the_view() {
+        let invalid: [Value; 7] = [
+            // unsorted
+            json!(["status-dashboard.v1", "action-bar.v1"]),
+            // duplicate
+            json!(["action-bar.v1", "action-bar.v1"]),
+            // malformed tokens
+            json!(["Action-Bar.v1"]),
+            json!(["action-bar.v0"]),
+            json!(["action-bar"]),
+            // non-string entry
+            json!(["action-bar.v1", 7]),
+            // not an array at all
+            json!("action-bar.v1"),
+        ];
+        for reqs in invalid {
+            let view = normalized_view(json!({
+                "id": "overview",
+                "title": "Overview",
+                "rendererRequirements": reqs.clone()
+            }));
+            assert_eq!(view["id"], "overview", "view survives for {reqs}");
+            assert!(
+                view.get("rendererRequirements").is_none(),
+                "field removed for {reqs}"
+            );
+        }
+    }
+
+    #[test]
+    fn strips_oversized_renderer_requirements() {
+        // 33 valid, unique, sorted tokens — one over the 32-token ceiling.
+        let tokens: Vec<Value> = (10..43).map(|i| json!(format!("cap-{i}.v1"))).collect();
+        let view = normalized_view(json!({
+            "id": "overview",
+            "title": "Overview",
+            "rendererRequirements": tokens
+        }));
+        assert!(view.get("rendererRequirements").is_none());
+    }
+
+    #[test]
+    fn absent_renderer_requirements_stays_absent() {
+        let view = normalized_view(json!({ "id": "overview", "title": "Overview" }));
+        assert!(view.get("rendererRequirements").is_none());
+    }
+
+    /// `rendererRequirements` rides inside the view JSON, so the existing digest over the
+    /// normalized descriptor content covers it: changing the tokens changes the content.
+    #[test]
+    fn renderer_requirements_change_alters_normalized_descriptor_content() {
+        let manifest_for = |reqs: Value| {
+            normalize_describe_manifest(&json!({
+                "commands": [{ "verb": "sb/status" }],
+                "panels": { "views": [{
+                    "id": "overview",
+                    "title": "Overview",
+                    "rendererRequirements": reqs
+                }] }
+            }))
+            .unwrap()
+        };
+        let a = manifest_for(json!(["instance-selector.v1", "status-dashboard.v1"]));
+        let a_again = manifest_for(json!(["instance-selector.v1", "status-dashboard.v1"]));
+        let b = manifest_for(json!(["instance-selector.v1"]));
+        assert_eq!(a.to_string(), a_again.to_string());
+        assert_ne!(a.to_string(), b.to_string());
     }
 }

@@ -1039,6 +1039,17 @@ export interface PanelViewDescriptor {
   scope?: "component" | "instance";
   requires?: string[];
   optional?: string[];
+  /**
+   * The shared renderer capabilities this view needs (edge-console-panels.md §4). The field's
+   * CLOSED format: a unique, ascending-sorted array of at most 32 token strings, each matching
+   * `^[a-z][a-z0-9-]*\.v[1-9][0-9]*$` (e.g. `instance-selector.v1`, `status-dashboard.v1`).
+   * The gateway's descriptor normalization strips the field from a view when it does not
+   * satisfy that format (the view itself is kept); the UI mounts a view declaring it only when
+   * it knows every listed token, otherwise rendering one view-level "requires a newer
+   * edge-console" state instead of partially mounting widgets. The field rides inside the view
+   * JSON, so it participates in the existing descriptor digest.
+   */
+  rendererRequirements?: string[];
   widgets?: PanelWidgetDescriptor[];
   descriptor?: PanelWidgetDescriptor[];
 }

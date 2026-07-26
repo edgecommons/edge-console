@@ -28,7 +28,6 @@ import {
 import { SendAlt } from "@carbon/react/icons";
 import type { ComponentKey } from "@edgecommons/edge-console-protocol";
 import type { CommandEntry, CommandView } from "../fleet/command-store";
-import { commandSlot } from "../fleet/command-store";
 import type { ComponentView } from "../fleet/store";
 
 /** The universal built-in verbs, in the mockup's button order. */
@@ -119,8 +118,11 @@ export function CommandControls({ comp, commands, onInvoke }: CommandControlsPro
   const [argsText, setArgsText] = useState("{}");
   const [formError, setFormError] = useState<string | undefined>(undefined);
 
+  // The latest outcome per verb regardless of which instance slot it settled in (this
+  // compact control is component-level; `recent` is newest-first). Panel widgets, by
+  // contrast, look up `latestByComponentVerb` with their selected instance's slot.
   const latest = (v: string): CommandEntry | undefined =>
-    commands.latestByComponentVerb[commandSlot(id, v)];
+    commands.recent.find((e) => e.componentId === id && e.verb === v);
   const isPending = (v: string): boolean => latest(v)?.phase === "pending";
   const isForbidden = (v: string): boolean => {
     const e = latest(v);

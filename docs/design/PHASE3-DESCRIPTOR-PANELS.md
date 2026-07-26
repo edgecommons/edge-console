@@ -15,8 +15,14 @@ This design implements the descriptor path from the signed-off console design:
 - Component Detail has a single top-level **Panel** tab.
 - The Panel tab contains component-provided sub-tabs such as **Overview**, **Address Space**,
   **Signals**, and **Diagnostics**.
-- Descriptor panels use console-owned widgets such as `summary`, `commandSummary`, `treeBrowser`,
-  `keyValueList`, and `signalGrid`.
+- Descriptor panels use console-owned widgets: the static `summary`/`keyValueList`/`metricStrip`
+  and `commandSummary`, the command-bound `treeBrowser` and `signalGrid` (both with optional
+  descriptor-defined `columns`), and the renderer-v2 set from
+  `core/docs/adapters/edge-console-panels.md` §4 — `statusDashboard`, `actionBar`, `commandTable`
+  (with the schema-checked `controls[]` form), `metricSeries`, and `eventFeed`.
+- A view may declare `rendererRequirements[]` (the closed §4 token set); the console mounts the
+  view only when it knows every token, otherwise it renders one view-level "requires a newer
+  edge-console" state and mounts none of its widgets.
 - Rich southbound control binds to advertised `cmd/sb/*` verbs, especially `sb/browse`, `sb/read`,
   and `sb/write`.
 
@@ -156,7 +162,7 @@ The server may cache by `ComponentKey + digest`, but the UI must be able to forc
 
 RBAC defaults must allow read-only discovery:
 
-- `viewer`: `ping`, `describe`, `get-configuration`, `sb/status`, `sb/browse`, `sb/read`
+- `viewer`: `ping`, `describe`, `get-configuration`, `sb/status`, `sb/browse`, `sb/read`, `sb/signals`
 - `operator`: unchanged `*`
 
 ## Console Rendering
@@ -178,7 +184,7 @@ Panel tab behavior:
 - Unknown widget kinds render as unsupported, not blank.
 - A widget bound to a missing verb renders unavailable and disables its controls.
 
-### Initial Widget Set
+### Widget Set
 
 `summary`: compact key/value text from static descriptor rows.
 
@@ -188,11 +194,42 @@ Panel tab behavior:
 capability advertised by the descriptor: OPC UA currently uses `mode: "paged"` and the console
 invokes the first page with `{offset: 0, limit: 100}`. Future hierarchical descriptors may use
 `mode: "hierarchical"` with `{ref, depth}`. If `readVerb` is present it is shown as available; if
-`writeVerb` is present, Write remains guarded until the safety path lands.
+`writeVerb` is present, Write remains guarded until the safety path lands. Optional
+`columns:[{label,path,format?}]` replace the built-in OPC UA headings; node paths resolve into the
+node object (e.g. `protocol.slot`); hierarchical loading and treegrid behavior are unchanged.
 
-`signalGrid`: table-oriented view bound to `sb/subscriptions` and optional `sb/read`. It is useful
-for currently configured/subscribed OPC UA signals before the broader global Signals screen is
-scoped deeply enough.
+`signalGrid`: table-oriented view over the component's configured signal inventory. It PREFERS
+`signalsVerb` and keeps `subscriptionsVerb` only as the migration alias (the legacy
+`sb/subscriptions` default survives only on the alias path). Optional `columns` replace the
+built-in headings; the meta line is signal-inventory neutral ("N signals").
+
+Renderer-v2 widgets (contracts in `core/docs/adapters/edge-console-panels.md` §4; all values
+selected with closed dot-paths, the closed formats enum — `text`, `number`, `duration-ms`,
+`timestamp`, `boolean`, `quality`, `address`, `badge` — missing fields render an em dash, and
+unknown formats fall back to plain text):
+
+`statusDashboard`: `{verb, fields:[{label,path,format?,unit?,statusMap?}], refresh}` — invokes the
+read-only verb with the selected instance and renders a label/value grid. `refresh` is the closed
+`{onEnter?, manual?, intervalMs?}` object with `intervalMs` clamped to >= 2000; the interval ticks
+only while the widget is visible.
+
+`actionBar`: `{actions:[{verb,label,role?,danger?,confirm?,args?}]}` — buttons through the normal
+invoke path with the selected instance, per-action pending/success/error, a console-owned Carbon
+confirm modal (sanitized text), `role` as a display hint only, and the §4.1 optimistic lifecycle
+gates (pause/resume/repoll/reconnect) computed from the latest `sb/status` result when present.
+
+`commandTable`: `{verb, resultPath, columns, request?, controls?, refresh}` — a manual-refresh
+table over a bounded array in the command result; used for component-scoped discovery and never
+auto-runs. `controls[]` is the console-owned schema-checked form (`text`, `integer`,
+`integer-range` emitting a two-integer inclusive array, `boolean`, `duration-ms`, `select` with
+static options or an `optionsSource` read from the already-loaded Configuration tab data); nested
+field names assemble objects, prototype/unknown keys are rejected, and controls can only narrow.
+
+`metricSeries`: `{series:[{label,metric,measure,unit?,aggregation?}]}` — reads the component
+Metrics store the detail view already maintains; it never invokes a command.
+
+`eventFeed`: `{families, limit?, filters?}` — reads the component Events store, newest first,
+bounded (default 50, max 200); it never creates a second subscription.
 
 In this phase, writes are visible but guarded. The full host-owned type-to-confirm modal and audit
 mirror remain part of the write safety design and must not be weakened. If the console does not yet

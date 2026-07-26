@@ -456,10 +456,17 @@ export class FleetClient {
    *  - otherwise sends the frame and arms a backstop timer so a connection that drops
    *    mid-flight still settles the entry (the gateway itself always answers otherwise).
    * The result arrives as a `command-result` frame correlated by `requestId`.
+   *
+   * The `args.instance` string (when present) is recorded on the pending entry AT REQUEST
+   * TIME — the requestId → `{key, verb, instance}` correlation that lets the CommandStore
+   * partition results per instance (a reply settles under the instance it was sent for,
+   * even if the operator has since selected another one).
    */
   invokeCommand(key: ComponentKey, verb: string, args?: Record<string, unknown>): string {
     const requestId = `cmd-${++this.commandCounter}`;
-    this.commandStore.notePending(requestId, key, verb);
+    const instanceArg = args?.["instance"];
+    const instance = typeof instanceArg === "string" && instanceArg !== "" ? instanceArg : undefined;
+    this.commandStore.notePending(requestId, key, verb, instance);
     if (this.socket === undefined || this.status !== "connected") {
       this.commandStore.failClient(requestId, {
         code: "DISCONNECTED",

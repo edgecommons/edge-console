@@ -6,16 +6,21 @@
  *
  * One entry per outgoing command, keyed by the CLIENT-chosen `requestId`:
  *  - `notePending`      — an `invoke-command` went out; the entry is `pending` until the
- *    gateway's `command-result` (or a client-side failure) settles it.
+ *    gateway's `command-result` (or a client-side failure) settles it. The entry records
+ *    the `instance` the invoke args carried (if any) AT REQUEST TIME — the requestId →
+ *    `{key, verb, instance}` correlation that partitions multi-instance panel results.
  *  - `applyResult`      — the gateway's `command-result`: `ok` ⇒ phase `ok` with `result`;
  *    `!ok` ⇒ phase `error` with the {@link CommandError} (the component's own code OR a
- *    console-synthesized one — `FORBIDDEN`/`TIMEOUT`/…).
+ *    console-synthesized one — `FORBIDDEN`/`TIMEOUT`/…). The reply settles into the entry
+ *    it was sent for, so it lands under THAT instance's slot even if the operator has
+ *    since selected another instance (stale replies never cross-talk).
  *  - `failClient`       — a client-side settle (the connection dropped before a reply, or
  *    the backstop timer fired): phase `error` with a client code.
  *
  * Two derived surfaces the UI needs: `latestByComponentVerb` (the last command per
- * `${componentId}::${verb}` — drives a button's pending spinner / inline last-result /
- * FORBIDDEN-disable) and `recent` (newest-first, bounded — drives the toast feed).
+ * `${componentId}::${verb}::${instanceOrEmpty}` — drives a button's pending spinner /
+ * inline last-result / FORBIDDEN-disable, per instance; component-scoped invocations use
+ * the empty-instance slot) and `recent` (newest-first, bounded — drives the toast feed).
  */
 import type { CommandError, ComponentKey } from "@edgecommons/edge-console-protocol";
 import { componentKeyId } from "@edgecommons/edge-console-protocol";
@@ -32,6 +37,12 @@ export interface CommandEntry {
   /** Canonical `device/component/instance` id. */
   componentId: string;
   verb: string;
+  /**
+   * The component instance the invoke args named at request time (`args.instance`);
+   * absent for a component-scoped invocation. Fixes the entry's result slot — a reply
+   * records under the instance it was sent for.
+   */
+  instance?: string;
   phase: CommandPhase;
   /** The verb's result object (present iff `ok`). */
   result?: unknown;
@@ -45,7 +56,7 @@ export interface CommandEntry {
 export interface CommandView {
   /** Every entry by requestId. */
   byId: Record<string, CommandEntry>;
-  /** The latest entry per `${componentId}::${verb}` (per-button state). */
+  /** The latest entry per `${componentId}::${verb}::${instanceOrEmpty}` (per-button state). */
   latestByComponentVerb: Record<string, CommandEntry>;
   /** Newest-first, bounded (the toast feed). */
   recent: CommandEntry[];
@@ -56,9 +67,14 @@ export const DEFAULT_MAX_RECENT_COMMANDS = 50;
 
 const EMPTY_VIEW: CommandView = { byId: {}, latestByComponentVerb: {}, recent: [] };
 
-/** The `${componentId}::${verb}` key for the per-button latest lookup. */
-export function commandSlot(componentId: string, verb: string): string {
-  return `${componentId}::${verb}`;
+/**
+ * The `${componentId}::${verb}::${instanceOrEmpty}` key for the per-button latest lookup.
+ * A component-scoped command (no `instance` in the invoke args) lives in the empty-instance
+ * slot; an instance-scoped one in its own instance's slot — widgets look up with their
+ * currently-selected instance.
+ */
+export function commandSlot(componentId: string, verb: string, instance?: string): string {
+  return `${componentId}::${verb}::${instance ?? ""}`;
 }
 
 /** The pure client command store. */
@@ -75,21 +91,30 @@ export class CommandStore {
     this.maxRecent = Math.max(1, maxRecent);
   }
 
-  /** Record an outgoing `invoke-command` as pending. Re-using a requestId resets it. */
-  notePending(requestId: string, key: ComponentKey, verb: string): void {
+  /**
+   * Record an outgoing `invoke-command` as pending. `instance` is the instance the invoke
+   * args carried (absent for component-scoped commands) — it fixes the entry's result slot.
+   * Re-using a requestId resets it.
+   */
+  notePending(requestId: string, key: ComponentKey, verb: string, instance?: string): void {
     this.entries.set(requestId, {
       requestId,
       seq: ++this.seqCounter,
       key: { ...key },
       componentId: componentKeyId(key),
       verb,
+      ...(instance !== undefined ? { instance } : {}),
       phase: "pending",
     });
     this.trim();
     this.bump();
   }
 
-  /** Fold a `command-result` frame into its pending entry (creating one if unknown). */
+  /**
+   * Fold a `command-result` frame into its pending entry (creating one if unknown). The
+   * entry keeps the `instance` recorded at request time — the result frame itself carries
+   * none, and the correlation map is what partitions per-instance slots.
+   */
   applyResult(result: {
     requestId: string;
     key: ComponentKey;
@@ -151,7 +176,7 @@ export class CommandStore {
       const snap: CommandEntry = { ...entry, key: { ...entry.key } };
       byId[entry.requestId] = snap;
       all.push(snap);
-      const slot = commandSlot(entry.componentId, entry.verb);
+      const slot = commandSlot(entry.componentId, entry.verb, entry.instance);
       const prev = latestByComponentVerb[slot];
       if (prev === undefined || entry.seq > prev.seq) latestByComponentVerb[slot] = snap;
     }
@@ -166,6 +191,8 @@ export class CommandStore {
   private ensure(requestId: string, key: ComponentKey, verb: string): CommandEntry {
     let entry = this.entries.get(requestId);
     if (entry === undefined) {
+      // Defensive: a result whose pending record is gone — its request-time instance is
+      // unknowable, so it lands in the component-scoped (empty-instance) slot.
       entry = {
         requestId,
         seq: ++this.seqCounter,

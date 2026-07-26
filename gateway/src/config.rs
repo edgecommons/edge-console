@@ -654,7 +654,7 @@ fn default_roles() -> Map<String, Value> {
         (
             "viewer".to_string(),
             json!({
-                "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"],
+                "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read", "sb/signals"],
                 "deny": [],
             }),
         ),
@@ -827,6 +827,14 @@ mod tests {
         assert!(config.ws.allowed_origins.is_empty());
         assert!(rbac_can(&config.rbac, "operator", "sb/write"));
         assert!(rbac_can(&config.rbac, "viewer", "sb/read"));
+        // The panel rollout adds read-only sb/signals to the default viewer policy
+        // (edge-console-panels.md §4.1) — the signalGrid inventory load must not rely on
+        // the operator wildcard.
+        assert!(rbac_can(&config.rbac, "viewer", "sb/signals"));
+        assert_eq!(
+            config.rbac.roles["viewer"]["allow"],
+            json!(["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read", "sb/signals"])
+        );
         assert!(!rbac_can(&config.rbac, "viewer", "sb/write"));
         assert_eq!(config.runtime.worker_threads, 4);
         assert_eq!(config.runtime.malloc_arena_max, Some(2));
