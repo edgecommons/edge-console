@@ -226,7 +226,7 @@ export function consoleSettings(overrides: Partial<ConsoleSettings> = {}): Conso
         { name: "operator", allow: ["*"], deny: ["reboot"], isDefault: true },
         {
           name: "viewer",
-          allow: ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"],
+          allow: ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read", "sb/signals"],
           deny: [],
           isDefault: false,
         },
@@ -360,7 +360,8 @@ export function commandView(entries: CommandEntry[]): CommandView {
   const latestByComponentVerb: Record<string, CommandEntry> = {};
   for (const e of entries) {
     byId[e.requestId] = e;
-    const slot = `${e.componentId}::${e.verb}`;
+    // The composite per-instance result slot (component-scoped entries use the empty slot).
+    const slot = `${e.componentId}::${e.verb}::${e.instance ?? ""}`;
     const prev = latestByComponentVerb[slot];
     if (prev === undefined || e.seq > prev.seq) latestByComponentVerb[slot] = e;
   }

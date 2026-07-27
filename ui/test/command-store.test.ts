@@ -112,3 +112,58 @@ describe("CommandStore", () => {
     expect(s.pendingIds().sort()).toEqual(["r1", "r2"]);
   });
 });
+
+describe("CommandStore — per-instance result partitioning", () => {
+  it("keys results by componentId::verb::instance — interleaved instances never cross-talk", () => {
+    const s = new CommandStore();
+    s.notePending("r1", KEY, "sb/browse", "filler1");
+    s.notePending("r2", KEY, "sb/browse", "kep2");
+    // Replies arrive interleaved (kep2's first):
+    s.applyResult({ requestId: "r2", key: KEY, verb: "sb/browse", ok: true, result: { id: "kep2" }, elapsedMs: 2 });
+    s.applyResult({ requestId: "r1", key: KEY, verb: "sb/browse", ok: true, result: { id: "filler1" }, elapsedMs: 4 });
+    const v = s.view();
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/browse", "filler1")]).toMatchObject({
+      requestId: "r1",
+      phase: "ok",
+      result: { id: "filler1" },
+      instance: "filler1",
+    });
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/browse", "kep2")]).toMatchObject({
+      requestId: "r2",
+      phase: "ok",
+      result: { id: "kep2" },
+      instance: "kep2",
+    });
+    // Neither leaked into the component-scoped (empty-instance) slot.
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/browse")]).toBeUndefined();
+  });
+
+  it("a stale reply settles under the instance it was SENT for, not a later selection", () => {
+    const s = new CommandStore();
+    s.notePending("r1", KEY, "sb/browse", "filler1"); // sent while filler1 was selected
+    s.notePending("r2", KEY, "sb/browse", "kep2"); // the operator switched to kep2
+    // filler1's reply arrives late — it must not touch kep2's slot:
+    s.applyResult({ requestId: "r1", key: KEY, verb: "sb/browse", ok: true, result: { id: "filler1" }, elapsedMs: 900 });
+    const v = s.view();
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/browse", "kep2")]?.phase).toBe("pending");
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/browse", "filler1")]?.phase).toBe("ok");
+  });
+
+  it("component-scoped commands (no instance arg) live in the empty-instance slot", () => {
+    const s = new CommandStore();
+    s.notePending("r1", KEY, "ping");
+    expect(commandSlot(ID, "ping")).toBe(`${ID}::ping::`);
+    expect(s.view().latestByComponentVerb[commandSlot(ID, "ping")]?.requestId).toBe("r1");
+    expect(s.view().byId.r1?.instance).toBeUndefined();
+  });
+
+  it("latest-per-slot is per instance: a newer command for another instance leaves the slot alone", () => {
+    const s = new CommandStore();
+    s.notePending("r1", KEY, "sb/status", "filler1");
+    s.applyResult({ requestId: "r1", key: KEY, verb: "sb/status", ok: true, result: { state: "ONLINE" }, elapsedMs: 1 });
+    s.notePending("r2", KEY, "sb/status", "kep2"); // newer, different instance
+    const v = s.view();
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/status", "filler1")]?.requestId).toBe("r1");
+    expect(v.latestByComponentVerb[commandSlot(ID, "sb/status", "kep2")]?.requestId).toBe("r2");
+  });
+});

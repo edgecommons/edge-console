@@ -157,7 +157,7 @@ Default policy:
   "defaultRole": "operator",
   "roles": {
     "operator": { "allow": ["*"], "deny": [] },  // full control
-    "viewer":   { "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read"], "deny": [] }  // read-only verbs
+    "viewer":   { "allow": ["ping", "describe", "get-configuration", "sb/status", "sb/browse", "sb/read", "sb/signals"], "deny": [] }  // read-only verbs
   }
 }
 ```

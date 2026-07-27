@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   InlineLoading,
+  Modal,
   Tab,
   TabList,
   TabPanel,
@@ -39,6 +40,7 @@ import type {
   CommandError,
   ComponentDescribeManifest,
   ComponentKey,
+  ConsoleEvent,
   ConsoleLogRecord,
   InstanceStatus,
   LogLevel,
@@ -48,7 +50,39 @@ import type {
 } from "@edgecommons/edge-console-protocol";
 import { LOG_LEVELS, componentKeyId } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
+import { commandSlot } from "../fleet/command-store";
+import type { ConfigEntryView } from "../fleet/config-store";
 import type { DescriptorEntryView } from "../fleet/description-store";
+import type {
+  CommandAvailabilityState,
+  FormattedValue,
+  PanelAction,
+  PanelColumn,
+  PanelControl,
+  PanelControlValue,
+} from "./panel-descriptor";
+import {
+  EM_DASH,
+  LIFECYCLE_VERBS,
+  aggregateSeries,
+  assembleControlArgs,
+  clampEventLimit,
+  classifyCommandFailure,
+  commandAvailability,
+  eventFamilyMatch,
+  formatPanelValue,
+  lifecycleGateEnabled,
+  lifecycleStatus,
+  panelActions,
+  panelColumns,
+  panelEventFilters,
+  panelFields,
+  panelRefresh,
+  parseControls,
+  resolvePath,
+  sanitizeArgsObject,
+  unknownRequirementTokens,
+} from "./panel-descriptor";
 import type { ComponentView } from "../fleet/store";
 import { formatDurationMs, formatDurationSecs } from "../fleet/selectors";
 import { useFleetState, useNowTick } from "../fleet/useFleet";
@@ -162,25 +196,113 @@ function arrayProp(obj: PanelWidgetDescriptor, key: string): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/**
+ * The legacy no-selector fallback (kept ONLY for components with zero/`"main"` instances):
+ * such a component runs as the single `main` sentinel, gets no instance selector, and its
+ * instance-scoped widgets send no `instance` arg at all.
+ */
 function firstInstanceArg(comp: ComponentView, scoped: boolean): Record<string, unknown> {
   if (!scoped) return {};
   const first = comp.instances?.[0]?.instance;
   return first !== undefined && first !== "main" ? { instance: first } : {};
 }
 
+/** Whether the component has real (selector-worthy) instances — mirrors {@link firstInstanceArg}. */
+function hasRealInstances(comp: ComponentView): boolean {
+  const first = comp.instances?.[0]?.instance;
+  return first !== undefined && first !== "main";
+}
+
+/**
+ * The Panel tab's shared instance selection (§3.1): which instance every active
+ * instance-scoped widget binds to.
+ */
+interface PanelInstanceSelection {
+  /**
+   * The instance an instance-scoped invocation sends — the operator's selection, defaulting
+   * to the first configured instance. Undefined for the legacy zero/`main` sentinel case
+   * (no selector, no `instance` arg).
+   */
+  instance?: string;
+  /**
+   * True when the selected instance is no longer in `comp.instances[]` — instance widgets
+   * render an explicit unavailable state, never a silent fallback to the first instance.
+   */
+  missing: boolean;
+}
+
+/** Derive the panel's instance selection from the component + the operator's choice. */
+function panelInstanceSelection(comp: ComponentView, selected: string | undefined): PanelInstanceSelection {
+  if (!hasRealInstances(comp)) return { missing: false };
+  const instances = comp.instances ?? [];
+  const instance = selected ?? instances[0]!.instance;
+  return { instance, missing: !instances.some((i) => i.instance === instance) };
+}
+
+/**
+ * The `instance` arg an invocation sends: the SELECTED instance for instance-scoped
+ * widgets of a multi-instance component; the {@link firstInstanceArg} legacy fallback
+ * (i.e. no arg) for zero/`main`-instance components; nothing for component scope.
+ */
+function selectedInstanceArg(
+  comp: ComponentView,
+  selection: PanelInstanceSelection,
+  scoped: boolean,
+): Record<string, unknown> {
+  if (!scoped) return {};
+  if (selection.instance !== undefined) return { instance: selection.instance };
+  return firstInstanceArg(comp, scoped);
+}
+
 function latestCommand(
   commands: ClientState["commands"],
   key: ComponentKey,
   verb: string | undefined,
+  instance?: string,
 ) {
   if (verb === undefined) return undefined;
-  return commands.latestByComponentVerb[`${componentKeyId(key)}::${verb}`];
+  return commands.latestByComponentVerb[commandSlot(componentKeyId(key), verb, instance)];
+}
+
+/** The URL search param persisting the panel's instance selection (§3.1). */
+const INSTANCE_PARAM = "instance";
+
+function readInstanceParam(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const value = new URLSearchParams(window.location.search).get(INSTANCE_PARAM);
+  return value !== null && value !== "" ? value : undefined;
+}
+
+function writeInstanceParam(instance: string | undefined): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (instance === undefined) url.searchParams.delete(INSTANCE_PARAM);
+  else url.searchParams.set(INSTANCE_PARAM, instance);
+  window.history.replaceState(window.history.state, "", url);
 }
 
 type LatestCommandEntry = ReturnType<typeof latestCommand>;
 
-function errorText(error: CommandError | undefined): string {
-  return error !== undefined ? `${error.code}${error.message !== "" ? `: ${error.message}` : ""}` : "Command failed";
+/**
+ * The distinct visible error states (§4.1): FORBIDDEN, TIMEOUT, MALFORMED_REPLY, and
+ * everything else — with sanitized display text (never raw protocol payloads).
+ */
+function CommandErrorNotice({ error }: { error: CommandError | undefined }): React.JSX.Element {
+  const failure = classifyCommandFailure(error);
+  return (
+    <p className="ec-panel-error" data-testid={`panel-error-${failure.kind}`}>
+      {failure.label} <span className="ec-dim ec-mono">({failure.code})</span>
+    </p>
+  );
+}
+
+/** The explicit state for an ok reply whose shape does not match the descriptor contract. */
+function MalformedResultNotice({ detail }: { detail: string }): React.JSX.Element {
+  return (
+    <p className="ec-panel-error" data-testid="panel-malformed-result">
+      {detail}
+    </p>
+  );
 }
 
 function CapabilityUnavailable({ verb, reason }: { verb?: string; reason?: string }): React.JSX.Element {
@@ -197,6 +319,111 @@ function CapabilityUnavailable({ verb, reason }: { verb?: string; reason?: strin
   );
 }
 
+/**
+ * The §4.1 disabled/unsupported state: the bound widget/action is disabled and the
+ * component's SANITIZED optional reason is surfaced.
+ */
+function CapabilityDisabled({
+  verb,
+  state,
+  reason,
+}: {
+  verb: string;
+  state: "disabled" | "unsupported";
+  reason?: string;
+}): React.JSX.Element {
+  return (
+    <div className="ec-panel-unavailable" data-testid={`panel-capability-${state}`}>
+      <Tag size="sm" type="gray" className="ec-tag">
+        {state === "disabled" ? "Disabled" : "Unsupported"}
+      </Tag>
+      <span>
+        <span className="ec-mono">cmd/{verb}</span>{" "}
+        {reason ??
+          (state === "disabled"
+            ? "is currently disabled by the component."
+            : "is not supported here.")}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The §4.1 pre-content gate every command-bound widget applies: missing verb →
+ * unavailable; `disabled`/`unsupported` → the disabled notice with the sanitized
+ * reason; a missing selected instance → the explicit instance-unavailable state.
+ * `undefined` means the widget may render its bound content.
+ */
+function capabilityGate(
+  verb: string | undefined,
+  availability: CommandAvailabilityState,
+  instanceMissing: boolean,
+  instance: string | undefined,
+): React.JSX.Element | undefined {
+  if (availability.status === "unavailable") {
+    return <CapabilityUnavailable {...(verb !== undefined ? { verb } : {})} />;
+  }
+  if (availability.status === "disabled" || availability.status === "unsupported") {
+    return (
+      <CapabilityDisabled
+        verb={verb ?? ""}
+        state={availability.status}
+        {...(availability.reason !== undefined ? { reason: availability.reason } : {})}
+      />
+    );
+  }
+  if (instanceMissing) {
+    return <InstanceUnavailable {...(instance !== undefined ? { instance } : {})} />;
+  }
+  return undefined;
+}
+
+/** Render one {@link FormattedValue} with the shared em-dash / mono / status-tag treatment. */
+function FormattedCell({ value }: { value: FormattedValue }): React.JSX.Element {
+  if (value.missing) return <span className="ec-dim">{EM_DASH}</span>;
+  if (value.kind === "tag") {
+    const type =
+      value.tone === "ok"
+        ? ("green" as const)
+        : value.tone === "error"
+          ? ("red" as const)
+          : value.tone === "info"
+            ? ("blue" as const)
+            : value.tone === "warn"
+              ? undefined
+              : ("gray" as const);
+    return (
+      <Tag
+        size="sm"
+        {...(type !== undefined ? { type } : {})}
+        className={value.tone === "warn" ? "ec-tag ec-tag--warn" : "ec-tag"}
+      >
+        {value.text}
+      </Tag>
+    );
+  }
+  if (value.kind === "mono") return <span className="ec-mono">{value.text}</span>;
+  return <span>{value.text}</span>;
+}
+
+/**
+ * The explicit state for an instance-scoped widget whose selected instance disappeared
+ * from `comp.instances[]` (§3.1) — never a silent fallback to the first instance.
+ */
+function InstanceUnavailable({ instance }: { instance?: string }): React.JSX.Element {
+  return (
+    <div className="ec-panel-unavailable" data-testid="panel-instance-unavailable">
+      <Tag size="sm" type="gray" className="ec-tag">
+        Instance unavailable
+      </Tag>
+      <span>
+        {instance !== undefined ? <span className="ec-mono">{instance}</span> : "The selected instance"}{" "}
+        is no longer reported by this component — select another instance.
+      </span>
+    </div>
+  );
+}
+
 function CommandResultPreview({
   entry,
   empty,
@@ -206,7 +433,7 @@ function CommandResultPreview({
 }): React.JSX.Element {
   if (entry === undefined) return <p className="ec-dim">{empty}</p>;
   if (entry.phase === "pending") return <InlineLoading description="Waiting for reply..." />;
-  if (entry.phase === "error") return <p className="ec-panel-error">{errorText(entry.error)}</p>;
+  if (entry.phase === "error") return <CommandErrorNotice error={entry.error} />;
   return (
     <pre className="ec-panel-json" data-testid="panel-command-result">
       {JSON.stringify(entry.result ?? {}, null, 2)}
@@ -217,7 +444,7 @@ function CommandResultPreview({
 function commandResultGate(entry: LatestCommandEntry, empty: string): React.JSX.Element | undefined {
   if (entry === undefined) return <p className="ec-dim">{empty}</p>;
   if (entry.phase === "pending") return <InlineLoading description="Waiting for reply..." />;
-  if (entry.phase === "error") return <p className="ec-panel-error">{errorText(entry.error)}</p>;
+  if (entry.phase === "error") return <CommandErrorNotice error={entry.error} />;
   return undefined;
 }
 
@@ -457,13 +684,21 @@ function logLevelLabel(level: LogLevel): string {
   return level.toUpperCase();
 }
 
+/** The grid-template for a custom-column treegrid row (first column carries the twisty). */
+function treeGridTemplate(columnCount: number): string {
+  return `minmax(15rem, 1.4fr) repeat(${Math.max(0, columnCount - 1)}, minmax(8rem, 0.8fr))`;
+}
+
 function AddressSpaceResult({
   entry,
   empty,
+  columns,
   onBrowseNode,
 }: {
   entry: LatestCommandEntry;
   empty: string;
+  /** Descriptor-defined columns replacing the built-in OPC UA headings, when present. */
+  columns?: PanelColumn[];
   onBrowseNode: (ref: string) => void;
 }): React.JSX.Element {
   const [rootId, setRootId] = useState<string | undefined>(undefined);
@@ -595,18 +830,35 @@ function AddressSpaceResult({
         <p className="ec-dim">Browse returned no hierarchical address-space refs.</p>
       ) : (
         <div className="ec-panel-tree" role="treegrid" aria-label="Address space browse results">
-          <div className="ec-panel-tree__row ec-panel-tree__row--head" role="row">
-            <span role="columnheader">Node</span>
-            <span role="columnheader">Node ID</span>
-            <span role="columnheader">Namespace</span>
-            <span role="columnheader">Class</span>
-            <span role="columnheader">Reference</span>
-            <span role="columnheader">Data type</span>
+          <div
+            className="ec-panel-tree__row ec-panel-tree__row--head"
+            role="row"
+            {...(columns !== undefined
+              ? { style: { gridTemplateColumns: treeGridTemplate(columns.length) } }
+              : {})}
+          >
+            {columns !== undefined ? (
+              columns.map((c) => (
+                <span role="columnheader" key={c.label}>
+                  {c.label}
+                </span>
+              ))
+            ) : (
+              <>
+                <span role="columnheader">Node</span>
+                <span role="columnheader">Node ID</span>
+                <span role="columnheader">Namespace</span>
+                <span role="columnheader">Class</span>
+                <span role="columnheader">Reference</span>
+                <span role="columnheader">Data type</span>
+              </>
+            )}
           </div>
           {rows.map((row) => {
             const refs = nodeReferences(row.node);
             const expandable = addressNodeMightHaveChildren(row.node);
             const isExpanded = expanded.has(row.id);
+            const firstColumn = columns?.[0];
             return (
               <div className="ec-panel-tree__group" key={row.pathKey}>
                 <div
@@ -615,6 +867,9 @@ function AddressSpaceResult({
                   aria-level={row.depth + 1}
                   aria-expanded={expandable ? isExpanded : undefined}
                   data-testid="panel-address-node"
+                  {...(columns !== undefined
+                    ? { style: { gridTemplateColumns: treeGridTemplate(columns.length) } }
+                    : {})}
                 >
                   <span
                     className="ec-panel-tree__cell ec-panel-tree__name"
@@ -639,24 +894,40 @@ function AddressSpaceResult({
                         <span aria-hidden="true" />
                       )}
                     </button>
-                    <span>{nodeName(row.node)}</span>
+                    {firstColumn !== undefined ? (
+                      <FormattedCell
+                        value={formatPanelValue(resolvePath(row.node, firstColumn.path), firstColumn.format)}
+                      />
+                    ) : (
+                      <span>{nodeName(row.node)}</span>
+                    )}
                     {refs.length > 0 && <span className="ec-dim">{refs.length} refs</span>}
                   </span>
-                  <span className="ec-panel-tree__cell ec-mono" role="gridcell">
-                    {addressNodeId(row.node)}
-                  </span>
-                  <span className="ec-panel-tree__cell" role="gridcell">
-                    {nodeNamespace(row.node)}
-                  </span>
-                  <span className="ec-panel-tree__cell" role="gridcell">
-                    {displayValue(row.node["nodeClass"])}
-                  </span>
-                  <span className="ec-panel-tree__cell" role="gridcell">
-                    {addressReferenceLabel(row)}
-                  </span>
-                  <span className="ec-panel-tree__cell" role="gridcell">
-                    {displayValue(row.node["dataType"])}
-                  </span>
+                  {columns !== undefined ? (
+                    columns.slice(1).map((c) => (
+                      <span className="ec-panel-tree__cell" role="gridcell" key={c.label}>
+                        <FormattedCell value={formatPanelValue(resolvePath(row.node, c.path), c.format)} />
+                      </span>
+                    ))
+                  ) : (
+                    <>
+                      <span className="ec-panel-tree__cell ec-mono" role="gridcell">
+                        {addressNodeId(row.node)}
+                      </span>
+                      <span className="ec-panel-tree__cell" role="gridcell">
+                        {nodeNamespace(row.node)}
+                      </span>
+                      <span className="ec-panel-tree__cell" role="gridcell">
+                        {displayValue(row.node["nodeClass"])}
+                      </span>
+                      <span className="ec-panel-tree__cell" role="gridcell">
+                        {addressReferenceLabel(row)}
+                      </span>
+                      <span className="ec-panel-tree__cell" role="gridcell">
+                        {displayValue(row.node["dataType"])}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -670,9 +941,12 @@ function AddressSpaceResult({
 function SignalGridResult({
   entry,
   empty,
+  columns,
 }: {
   entry: LatestCommandEntry;
   empty: string;
+  /** Descriptor-defined columns replacing the built-in OPC UA headings, when present. */
+  columns?: PanelColumn[];
 }): React.JSX.Element {
   const gate = commandResultGate(entry, empty);
   if (gate !== undefined) return gate;
@@ -688,33 +962,55 @@ function SignalGridResult({
         <span>
           Instance <span className="ec-mono">{instance}</span>
         </span>
-        <span>{signals.length} subscribed signals</span>
+        <span>
+          {signals.length} signal{signals.length === 1 ? "" : "s"}
+        </span>
       </div>
       {signals.length === 0 ? (
-        <p className="ec-dim">No subscribed signals were reported.</p>
+        <p className="ec-dim">No signals were reported.</p>
       ) : (
         <div className="ec-panel-table-wrap">
           <table className="ec-panel-table">
             <thead>
               <tr>
-                <th scope="col">Signal</th>
-                <th scope="col">Namespace</th>
-                <th scope="col">ID type</th>
-                <th scope="col">Match</th>
+                {columns !== undefined ? (
+                  columns.map((c) => (
+                    <th scope="col" key={c.label}>
+                      {c.label}
+                    </th>
+                  ))
+                ) : (
+                  <>
+                    <th scope="col">Signal</th>
+                    <th scope="col">Namespace</th>
+                    <th scope="col">ID type</th>
+                    <th scope="col">Match</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {signals.map((signal, index) => (
                 <tr key={`${nodeId(signal)}-${index}`} data-testid="panel-signal-row">
-                  <td className="ec-mono">{nodeId(signal)}</td>
-                  <td>
-                    <div>{nodeNamespace(signal)}</div>
-                    {propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl") !== undefined && (
-                      <div className="ec-dim">{propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl")}</div>
-                    )}
-                  </td>
-                  <td>{displayValue(signal["idType"])}</td>
-                  <td>{displayValue(signal["match"])}</td>
+                  {columns !== undefined ? (
+                    columns.map((c) => (
+                      <td key={c.label}>
+                        <FormattedCell value={formatPanelValue(resolvePath(signal, c.path), c.format)} />
+                      </td>
+                    ))
+                  ) : (
+                    <>
+                      <td className="ec-mono">{nodeId(signal)}</td>
+                      <td>
+                        <div>{nodeNamespace(signal)}</div>
+                        {propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl") !== undefined && (
+                          <div className="ec-dim">{propString(signal, "namespaceUri", "namespaceURI", "namespaceUrl")}</div>
+                        )}
+                      </td>
+                      <td>{displayValue(signal["idType"])}</td>
+                      <td>{displayValue(signal["match"])}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -788,6 +1084,7 @@ function TreeBrowserWidget({
   manifest,
   comp,
   detailKey,
+  selection,
   commands,
   onInvoke,
 }: {
@@ -795,20 +1092,25 @@ function TreeBrowserWidget({
   manifest: ComponentDescribeManifest;
   comp: ComponentView;
   detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
   commands: ClientState["commands"];
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
   const browseVerb = stringProp(widget, "browseVerb") ?? stringProp(widget, "verb");
   const readVerb = stringProp(widget, "readVerb");
   const writeVerb = stringProp(widget, "writeVerb");
+  const columns = panelColumns(widget["columns"]);
   const scoped = widget.scope === "instance" || widget["scope"] === "instance";
-  const entry = latestCommand(commands, detailKey, browseVerb);
+  const instanceMissing = scoped && selection.missing;
+  const entry = latestCommand(commands, detailKey, browseVerb, scoped ? selection.instance : undefined);
   const rootRef = stringProp(widget, "rootRef") ?? "root";
   const depth = propNumber(widget, "depth", "defaultDepth") ?? 1;
   const maxRefs = propNumber(widget, "maxRefs");
-  const canBrowse = hasCommand(manifest, browseVerb);
+  const availability = commandAvailability(manifest, browseVerb);
+  const canBrowse = availability.status === "available" && !instanceMissing;
+  const gate = capabilityGate(browseVerb, availability, instanceMissing, selection.instance);
   const browseArgs = (ref: string): Record<string, unknown> => ({
-    ...firstInstanceArg(comp, scoped),
+    ...selectedInstanceArg(comp, selection, scoped),
     ref,
     depth,
     ...(maxRefs !== undefined ? { maxRefs } : {}),
@@ -829,7 +1131,7 @@ function TreeBrowserWidget({
           disabled={!canBrowse}
           data-testid="panel-browse-load"
           onClick={() => {
-            if (browseVerb !== undefined) {
+            if (canBrowse && browseVerb !== undefined) {
               onInvoke(detailKey, browseVerb, browseArgs(rootRef));
             }
           }}
@@ -837,13 +1139,16 @@ function TreeBrowserWidget({
           Load
         </Button>
       </div>
-      {!canBrowse ? (
-        <CapabilityUnavailable verb={browseVerb} />
+      {gate !== undefined ? (
+        gate
       ) : (
         <AddressSpaceResult
-          key={`${componentKeyId(detailKey)}::${browseVerb ?? "browse"}::${rootRef}`}
+          // The selected instance is part of the key: switching instances remounts the
+          // tree, resetting its per-widget local UI state (loaded nodes, expansion).
+          key={`${componentKeyId(detailKey)}::${browseVerb ?? "browse"}::${rootRef}::${(scoped ? selection.instance : undefined) ?? ""}`}
           entry={entry}
           empty="Load the address-space root to inspect hierarchical refs."
+          {...(columns !== undefined ? { columns } : {})}
           onBrowseNode={(ref) => {
             if (browseVerb !== undefined) onInvoke(detailKey, browseVerb, browseArgs(ref));
           }}
@@ -878,6 +1183,7 @@ function SignalGridWidget({
   manifest,
   comp,
   detailKey,
+  selection,
   commands,
   onInvoke,
 }: {
@@ -885,36 +1191,725 @@ function SignalGridWidget({
   manifest: ComponentDescribeManifest;
   comp: ComponentView;
   detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
   commands: ClientState["commands"];
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
-  const subscriptionsVerb = stringProp(widget, "subscriptionsVerb") ?? stringProp(widget, "verb") ?? "sb/subscriptions";
+  // PREFER the current `signalsVerb`; `subscriptionsVerb` stays only as the migration
+  // alias, and the removed-verb default survives only on that alias path.
+  const verb =
+    stringProp(widget, "signalsVerb") ??
+    stringProp(widget, "subscriptionsVerb") ??
+    stringProp(widget, "verb") ??
+    "sb/subscriptions";
+  const columns = panelColumns(widget["columns"]);
   const scoped = widget.scope === "instance" || widget["scope"] === "instance";
-  const entry = latestCommand(commands, detailKey, subscriptionsVerb);
-  const available = hasCommand(manifest, subscriptionsVerb);
+  const instanceMissing = scoped && selection.missing;
+  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const availability = commandAvailability(manifest, verb);
+  const canLoad = availability.status === "available" && !instanceMissing;
+  const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
   return (
     <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "signals"}`}>
       <div className="ec-panel-widget__head">
         <div>
           <h4>{widget.title ?? "Signals"}</h4>
           <p className="ec-dim">
-            Bound to <span className="ec-mono">cmd/{subscriptionsVerb}</span>
+            Bound to <span className="ec-mono">cmd/{verb}</span>
           </p>
         </div>
         <Button
           kind="tertiary"
           size="sm"
-          disabled={!available}
+          disabled={!canLoad}
           data-testid="panel-signals-load"
-          onClick={() => onInvoke(detailKey, subscriptionsVerb, firstInstanceArg(comp, scoped))}
+          onClick={() => {
+            if (canLoad) onInvoke(detailKey, verb, selectedInstanceArg(comp, selection, scoped));
+          }}
         >
           Load
         </Button>
       </div>
-      {!available ? (
-        <CapabilityUnavailable verb={subscriptionsVerb} />
+      {gate !== undefined ? (
+        gate
       ) : (
-        <SignalGridResult entry={entry} empty="Load subscriptions to inspect configured signals." />
+        <SignalGridResult
+          entry={entry}
+          empty="Load the signal inventory."
+          {...(columns !== undefined ? { columns } : {})}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A stable test-id token from a display label/verb (mirrors the health-check pattern). */
+function testIdToken(value: string): string {
+  return value.replace(/[^a-z0-9]/gi, "-");
+}
+
+/**
+ * `statusDashboard` (§4) — invokes its read-only verb with the selected instance and
+ * renders a label/value grid over closed result paths with the closed formats enum.
+ * Refreshes on entry, manually, and at a bounded interval (≥ 2 s) while visible;
+ * distinct visible states for unavailable, disabled/unsupported, forbidden, timeout,
+ * and malformed replies.
+ */
+function StatusDashboardWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  selection,
+  commands,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
+  commands: ClientState["commands"];
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const verb = stringProp(widget, "verb");
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const instanceMissing = scoped && selection.missing;
+  const availability = commandAvailability(manifest, verb);
+  const refresh = panelRefresh(widget["refresh"], { allowAuto: true });
+  const fields = panelFields(widget);
+  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const canInvoke = verb !== undefined && availability.status === "available" && !instanceMissing;
+  const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const instanceKey = scoped ? (selection.instance ?? "") : "";
+
+  const invoke = () => {
+    if (canInvoke && verb !== undefined) {
+      onInvoke(detailKey, verb, selectedInstanceArg(comp, selection, scoped));
+    }
+  };
+  const invokeRef = useRef(invoke);
+  invokeRef.current = invoke;
+
+  // Refresh on entry — once per (verb, selected instance); a no-op while gated.
+  useEffect(() => {
+    if (refresh.onEnter) invokeRef.current();
+  }, [refresh.onEnter, verb, instanceKey]);
+
+  // The bounded interval (already clamped ≥ 2 s) — skipped while the widget is hidden
+  // (an ancestor tab panel carries `hidden`), so an inactive tab never polls.
+  useEffect(() => {
+    if (refresh.intervalMs === undefined) return;
+    const timer = setInterval(() => {
+      const el = rootRef.current;
+      if (el !== null && el.closest("[hidden]") !== null) return;
+      invokeRef.current();
+    }, refresh.intervalMs);
+    return () => clearInterval(timer);
+  }, [refresh.intervalMs, verb, instanceKey]);
+
+  let body: React.JSX.Element;
+  if (gate !== undefined) {
+    body = gate;
+  } else if (entry === undefined) {
+    body = <p className="ec-dim">No status loaded yet.</p>;
+  } else if (entry.phase === "pending") {
+    body = <InlineLoading description="Reading status..." />;
+  } else if (entry.phase === "error") {
+    body = <CommandErrorNotice error={entry.error} />;
+  } else {
+    const result = objectRecord(entry.result);
+    if (result === undefined) {
+      body = <MalformedResultNotice detail="The status reply was not an object." />;
+    } else if (fields.length === 0) {
+      body = <p className="ec-dim">This dashboard declares no fields.</p>;
+    } else {
+      body = (
+        <div className="ec-slist ec-panel-kv" data-testid="panel-status-fields">
+          {fields.map((f) => (
+            <div className="ec-slist__r" key={f.label} data-testid={`panel-status-field-${testIdToken(f.label)}`}>
+              <span className="ec-slist__k">{f.label}</span>
+              <span className="ec-slist__v">
+                <FormattedCell value={formatPanelValue(resolvePath(result, f.path), f.format, f.unit, f.statusMap)} />
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "status"}`} ref={rootRef}>
+      <div className="ec-panel-widget__head">
+        <div>
+          <h4>{widget.title ?? "Status"}</h4>
+          <p className="ec-dim">
+            Bound to <span className="ec-mono">{verb !== undefined ? `cmd/${verb}` : "no verb"}</span>
+          </p>
+        </div>
+        {refresh.manual && (
+          <Button
+            kind="tertiary"
+            size="sm"
+            disabled={!canInvoke || entry?.phase === "pending"}
+            data-testid="panel-status-refresh"
+            onClick={invoke}
+          >
+            Refresh
+          </Button>
+        )}
+      </div>
+      {body}
+    </div>
+  );
+}
+
+/** One actionBar action's settled/pending outcome line (distinct §4.1 states). */
+function ActionOutcome({ entry }: { entry: LatestCommandEntry }): React.JSX.Element | null {
+  if (entry === undefined) return null;
+  if (entry.phase === "pending") {
+    return <InlineLoading description={`${entry.verb}…`} />;
+  }
+  if (entry.phase === "error") {
+    return <CommandErrorNotice error={entry.error} />;
+  }
+  const resultSummary =
+    entry.result !== null &&
+    typeof entry.result === "object" &&
+    Object.keys(entry.result as Record<string, unknown>).length > 0
+      ? summarizeBody(entry.result, 80)
+      : undefined;
+  return (
+    <span className="ec-panel-action__ok" data-testid={`panel-action-ok-${testIdToken(entry.verb)}`}>
+      <Tag size="sm" type="green" className="ec-tag">
+        Done
+      </Tag>
+      {entry.elapsedMs !== undefined && <span className="ec-dim ec-mono">{entry.elapsedMs}ms</span>}
+      {resultSummary !== undefined && <span className="ec-dim">{resultSummary}</span>}
+    </span>
+  );
+}
+
+/**
+ * `actionBar` (§4/§4.1) — command buttons through the normal invoke path with the
+ * selected instance. Per-action pending/success/error; `confirm` renders a
+ * console-owned Carbon modal with the SANITIZED confirm text; `role` is a display
+ * hint only; the lifecycle gates (pause/resume/repoll/reconnect) are OPTIMISTIC UI
+ * computed from the latest `sb/status` result when present, else enabled.
+ */
+function ActionBarWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  selection,
+  commands,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
+  commands: ClientState["commands"];
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const instanceMissing = scoped && selection.missing;
+  const actions = panelActions(widget);
+  const [confirming, setConfirming] = useState<PanelAction | undefined>(undefined);
+
+  const slotInstance = scoped ? selection.instance : undefined;
+  const statusEntry = latestCommand(commands, detailKey, "sb/status", slotInstance);
+  const status = statusEntry?.phase === "ok" ? lifecycleStatus(statusEntry.result) : undefined;
+  const lifecyclePending = LIFECYCLE_VERBS.some(
+    (v) => latestCommand(commands, detailKey, v, slotInstance)?.phase === "pending",
+  );
+
+  const fire = (action: PanelAction) => {
+    onInvoke(detailKey, action.verb, {
+      ...(action.args !== undefined ? sanitizeArgsObject(action.args) : {}),
+      ...selectedInstanceArg(comp, selection, scoped),
+    });
+  };
+
+  if (actions.length === 0) {
+    return (
+      <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "actions"}`}>
+        <h4>{widget.title ?? "Actions"}</h4>
+        <p className="ec-dim">This action bar declares no actions.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "actions"}`}>
+      <h4>{widget.title ?? "Actions"}</h4>
+      {instanceMissing ? (
+        <InstanceUnavailable {...(selection.instance !== undefined ? { instance: selection.instance } : {})} />
+      ) : (
+        <div className="ec-panel-actions" data-testid="panel-action-bar">
+          {actions.map((action, i) => {
+            const availability = commandAvailability(manifest, action.verb);
+            const entry = latestCommand(commands, detailKey, action.verb, slotInstance);
+            const pending = entry?.phase === "pending";
+            const gateEnabled = lifecycleGateEnabled(action.verb, status, lifecyclePending);
+            const disabled = availability.status !== "available" || pending || !gateEnabled;
+            const disabledReason =
+              availability.status === "unavailable"
+                ? "Not advertised by this component"
+                : availability.status === "disabled" || availability.status === "unsupported"
+                  ? (availability.reason ?? `Command ${availability.status}`)
+                  : !gateEnabled
+                    ? "Not applicable in the current instance state"
+                    : undefined;
+            return (
+              <div className="ec-panel-action" key={`${action.verb}-${i}`}>
+                <div className="ec-panel-action__btn">
+                  <Button
+                    size="sm"
+                    kind={action.danger ? "danger--tertiary" : "tertiary"}
+                    disabled={disabled}
+                    data-testid={`panel-action-${testIdToken(action.verb)}`}
+                    {...(disabledReason !== undefined ? { title: disabledReason } : {})}
+                    onClick={() => {
+                      if (action.confirm !== undefined) setConfirming(action);
+                      else fire(action);
+                    }}
+                  >
+                    {action.label}
+                  </Button>
+                  {action.role !== undefined && (
+                    <Tag size="sm" type="outline" className="ec-tag" title="Suggested role (display hint only)">
+                      {action.role}
+                    </Tag>
+                  )}
+                </div>
+                <div className="ec-panel-action__outcome" data-testid={`panel-action-outcome-${testIdToken(action.verb)}`}>
+                  {availability.status !== "available" && availability.status !== "unavailable" && (
+                    <span className="ec-dim" data-testid={`panel-action-reason-${testIdToken(action.verb)}`}>
+                      {availability.reason ?? `Command ${availability.status}`}
+                    </span>
+                  )}
+                  <ActionOutcome entry={entry} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <Modal
+        open={confirming !== undefined}
+        danger={confirming?.danger === true}
+        modalHeading={confirming?.label ?? ""}
+        modalLabel={detailKey.component}
+        primaryButtonText={confirming?.label ?? "Confirm"}
+        secondaryButtonText="Cancel"
+        data-testid="panel-action-confirm"
+        onRequestClose={() => setConfirming(undefined)}
+        onRequestSubmit={() => {
+          if (confirming !== undefined) fire(confirming);
+          setConfirming(undefined);
+        }}
+      >
+        <p data-testid="panel-action-confirm-text">{confirming?.confirm ?? ""}</p>
+      </Modal>
+    </div>
+  );
+}
+
+/**
+ * `commandTable` (§4) — a MANUAL-refresh table over a bounded array in a read-only
+ * command result (`resultPath` + `columns`), with the console-owned, schema-checked
+ * `controls[]` request form. Used for component-scoped discovery: it never auto-runs.
+ */
+function CommandTableWidget({
+  widget,
+  manifest,
+  comp,
+  detailKey,
+  selection,
+  commands,
+  configEntry,
+  onInvoke,
+}: {
+  widget: PanelWidgetDescriptor;
+  manifest: ComponentDescribeManifest;
+  comp: ComponentView;
+  detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
+  commands: ClientState["commands"];
+  configEntry: ConfigEntryView | undefined;
+  onInvoke: InvokeCommand;
+}): React.JSX.Element {
+  const verb = stringProp(widget, "verb");
+  const resultPath = stringProp(widget, "resultPath");
+  const columns = panelColumns(widget["columns"]) ?? [];
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const instanceMissing = scoped && selection.missing;
+  const availability = commandAvailability(manifest, verb);
+  const request = objectRecord(widget["request"]);
+  const { controls, rejected } = useMemo(
+    () => parseControls(widget["controls"], configEntry?.body),
+    [widget, configEntry?.body],
+  );
+  const [values, setValues] = useState<Record<string, PanelControlValue>>({});
+  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const canRun = verb !== undefined && availability.status === "available" && !instanceMissing;
+  const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
+  const widgetToken = widget.id ?? "table";
+
+  const setValue = (field: string, value: PanelControlValue) =>
+    setValues((prev) => ({ ...prev, [field]: value }));
+  const rangeValue = (field: string): { lo: string; hi: string } => {
+    const v = values[field];
+    return typeof v === "object" && v !== null ? (v as { lo: string; hi: string }) : { lo: "", hi: "" };
+  };
+
+  const run = () => {
+    if (!canRun || verb === undefined) return;
+    onInvoke(detailKey, verb, {
+      ...(request !== undefined ? sanitizeArgsObject(request) : {}),
+      ...assembleControlArgs(controls, values),
+      ...selectedInstanceArg(comp, selection, scoped),
+    });
+  };
+
+  const renderControl = (control: PanelControl): React.JSX.Element => {
+    const controlId = `panel-control-${testIdToken(widgetToken)}-${testIdToken(control.field)}`;
+    const testId = `panel-control-${testIdToken(control.field)}`;
+    const raw = values[control.field];
+    switch (control.type) {
+      case "boolean":
+        return (
+          <label className="ec-panel-control ec-panel-control--check" htmlFor={controlId} key={control.field}>
+            <input
+              id={controlId}
+              type="checkbox"
+              data-testid={testId}
+              checked={raw === true}
+              onChange={(e) => setValue(control.field, e.target.checked)}
+            />
+            <span>{control.label}</span>
+          </label>
+        );
+      case "integer-range": {
+        const range = rangeValue(control.field);
+        return (
+          <div className="ec-panel-control" key={control.field}>
+            <label htmlFor={`${controlId}-lo`}>{control.label}</label>
+            <span className="ec-panel-control__range">
+              <input
+                id={`${controlId}-lo`}
+                className="ec-log-filter"
+                type="number"
+                inputMode="numeric"
+                aria-label={`${control.label} from`}
+                data-testid={`${testId}-lo`}
+                value={range.lo}
+                onChange={(e) => setValue(control.field, { ...range, lo: e.target.value })}
+              />
+              <span aria-hidden="true">{EM_DASH}</span>
+              <input
+                id={`${controlId}-hi`}
+                className="ec-log-filter"
+                type="number"
+                inputMode="numeric"
+                aria-label={`${control.label} to`}
+                data-testid={`${testId}-hi`}
+                value={range.hi}
+                onChange={(e) => setValue(control.field, { ...range, hi: e.target.value })}
+              />
+            </span>
+          </div>
+        );
+      }
+      case "select":
+        return (
+          <div className="ec-panel-control" key={control.field}>
+            <label htmlFor={controlId}>{control.label}</label>
+            <select
+              id={controlId}
+              className="ec-log-control"
+              data-testid={testId}
+              value={typeof raw === "string" ? raw : ""}
+              onChange={(e) => setValue(control.field, e.target.value)}
+            >
+              <option value="">{EM_DASH}</option>
+              {(control.options ?? []).map((o) => (
+                <option key={String(o.value)} value={String(o.value)}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      default:
+        // text, integer, duration-ms — one bounded input; numeric types parse on assembly.
+        return (
+          <div className="ec-panel-control" key={control.field}>
+            <label htmlFor={controlId}>
+              {control.label}
+              {control.type === "duration-ms" ? " (ms)" : ""}
+            </label>
+            <input
+              id={controlId}
+              className="ec-log-filter"
+              type={control.type === "text" ? "text" : "number"}
+              {...(control.type !== "text" ? { inputMode: "numeric" as const } : {})}
+              data-testid={testId}
+              value={typeof raw === "string" ? raw : ""}
+              onChange={(e) => setValue(control.field, e.target.value)}
+            />
+          </div>
+        );
+    }
+  };
+
+  let body: React.JSX.Element;
+  if (gate !== undefined) {
+    body = gate;
+  } else if (entry === undefined) {
+    body = <p className="ec-dim">Run the command to load rows.</p>;
+  } else if (entry.phase === "pending") {
+    body = <InlineLoading description="Waiting for reply..." />;
+  } else if (entry.phase === "error") {
+    body = <CommandErrorNotice error={entry.error} />;
+  } else {
+    const rows = resultPath !== undefined ? resolvePath(entry.result, resultPath) : undefined;
+    if (!Array.isArray(rows)) {
+      body = <MalformedResultNotice detail={`The reply carried no array at ${resultPath ?? "(no resultPath)"}.`} />;
+    } else if (rows.length === 0) {
+      body = <p className="ec-dim">The command returned no rows.</p>;
+    } else {
+      const bounded = rows.slice(0, 500);
+      body = (
+        <div className="ec-panel-result" data-testid="panel-command-table">
+          <div className="ec-panel-result-meta">
+            <span>
+              {rows.length} row{rows.length === 1 ? "" : "s"}
+            </span>
+            {rows.length > bounded.length && <span>showing the first {bounded.length}</span>}
+          </div>
+          <div className="ec-panel-table-wrap">
+            <table className="ec-panel-table">
+              <thead>
+                <tr>
+                  {columns.map((c) => (
+                    <th scope="col" key={c.label}>
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bounded.map((row, i) => (
+                  <tr key={i} data-testid="panel-table-row">
+                    {columns.map((c) => (
+                      <td key={c.label}>
+                        <FormattedCell value={formatPanelValue(resolvePath(row, c.path), c.format)} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widgetToken}`}>
+      <div className="ec-panel-widget__head">
+        <div>
+          <h4>{widget.title ?? "Command table"}</h4>
+          <p className="ec-dim">
+            Bound to <span className="ec-mono">{verb !== undefined ? `cmd/${verb}` : "no verb"}</span>
+            {" · manual"}
+          </p>
+        </div>
+        <Button
+          kind="tertiary"
+          size="sm"
+          disabled={!canRun || entry?.phase === "pending"}
+          data-testid="panel-table-run"
+          onClick={run}
+        >
+          Run
+        </Button>
+      </div>
+      {(controls.length > 0 || rejected.length > 0) && gate === undefined && (
+        <div className="ec-panel-controls" data-testid="panel-table-controls">
+          {controls.map(renderControl)}
+          {rejected.map((name) => (
+            <span className="ec-panel-unavailable" key={name} data-testid="panel-control-rejected">
+              <Tag size="sm" type="gray" className="ec-tag">
+                Unsupported control
+              </Tag>
+              <span className="ec-mono">{name}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {body}
+    </div>
+  );
+}
+
+/**
+ * `metricSeries` (§4) — reads the component Metrics store the detail view already
+ * maintains; it NEVER invokes a command. Compact last-value + sparkline rows reusing
+ * the metrics-tab primitives.
+ */
+function MetricSeriesWidget({
+  widget,
+  metrics,
+  selection,
+  nowServerMs,
+}: {
+  widget: PanelWidgetDescriptor;
+  metrics: MetricSeriesSnapshot[];
+  selection: PanelInstanceSelection;
+  nowServerMs: number;
+}): React.JSX.Element {
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const instanceMissing = scoped && selection.missing;
+  const series = arrayProp(widget, "series")
+    .map((entry) => objectRecord(entry))
+    .filter((r): r is Record<string, unknown> => r !== undefined)
+    .map((r) => ({
+      label: propString(r, "label") ?? propString(r, "metric") ?? "(series)",
+      metric: propString(r, "metric"),
+      measure: propString(r, "measure"),
+      unit: propString(r, "unit"),
+      aggregation: propString(r, "aggregation"),
+    }))
+    .filter((s) => s.metric !== undefined && s.measure !== undefined);
+
+  const findSnapshot = (metric: string, measure: string): MetricSeriesSnapshot | undefined => {
+    const candidates = metrics.filter((m) => m.metric === metric && m.measure === measure);
+    if (scoped && selection.instance !== undefined) {
+      return candidates.find((m) => m.instance === selection.instance);
+    }
+    return candidates.find((m) => m.instance === "main") ?? candidates[0];
+  };
+
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "metrics"}`}>
+      <h4>{widget.title ?? "Metrics"}</h4>
+      {instanceMissing ? (
+        <InstanceUnavailable {...(selection.instance !== undefined ? { instance: selection.instance } : {})} />
+      ) : series.length === 0 ? (
+        <p className="ec-dim">This widget declares no metric series.</p>
+      ) : (
+        <div className="ec-slist ec-panel-kv" data-testid="panel-metric-series">
+          {series.map((s) => {
+            const snap = findSnapshot(s.metric!, s.measure!);
+            const value = aggregateSeries(snap?.points, s.aggregation) ?? snap?.latest;
+            return (
+              <div className="ec-slist__r" key={s.label} data-testid={`panel-metric-row-${testIdToken(s.label)}`}>
+                <span className="ec-slist__k">{s.label}</span>
+                <span className="ec-slist__v ec-panel-metric">
+                  {value !== undefined ? (
+                    <>
+                      <span className="ec-tnum">
+                        {metricValue(value)}
+                        {s.unit !== undefined ? ` ${s.unit}` : ""}
+                      </span>
+                      {snap !== undefined && snap.points.length > 1 && (
+                        <Sparkline
+                          points={snap.points}
+                          width={88}
+                          height={24}
+                          ariaLabel={`${s.label} trend`}
+                          formatValue={metricValue}
+                        />
+                      )}
+                      {snap !== undefined && (
+                        <span className="ec-dim ec-tnum">
+                          {formatDurationMs(Math.max(0, nowServerMs - snap.receivedAt))} ago
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="ec-dim">{EM_DASH} no data</span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * `eventFeed` (§4) — reads the component Events store, newest first, bounded limit
+ * (default 50, max 200), filtered by families and the optional scalar field filters.
+ * It never creates a second subscription.
+ */
+function EventFeedWidget({
+  widget,
+  events,
+  selection,
+  nowServerMs,
+}: {
+  widget: PanelWidgetDescriptor;
+  events: ConsoleEvent[];
+  selection: PanelInstanceSelection;
+  nowServerMs: number;
+}): React.JSX.Element {
+  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const instanceMissing = scoped && selection.missing;
+  const families = arrayProp(widget, "families").filter((f): f is string => typeof f === "string" && f !== "");
+  const limit = clampEventLimit(widget["limit"]);
+  const filters = panelEventFilters(widget["filters"]);
+
+  const mine = events
+    .filter((e) => (scoped && selection.instance !== undefined ? e.instance === selection.instance : true))
+    .filter((e) => eventFamilyMatch(e.type, families))
+    .filter((e) => filters.every(([path, expected]) => resolvePath(e.body, path) === expected))
+    .slice(0, limit);
+
+  return (
+    <div className="ec-panel-widget" data-testid={`panel-widget-${widget.id ?? "events"}`}>
+      <div className="ec-panel-widget__head">
+        <div>
+          <h4>{widget.title ?? "Events"}</h4>
+          <p className="ec-dim">
+            {families.length > 0 ? `${families.length} families · ` : ""}newest first · up to {limit}
+          </p>
+        </div>
+      </div>
+      {instanceMissing ? (
+        <InstanceUnavailable {...(selection.instance !== undefined ? { instance: selection.instance } : {})} />
+      ) : mine.length === 0 ? (
+        <p className="ec-dim" data-testid="panel-event-feed-empty">
+          No matching events have been received.
+        </p>
+      ) : (
+        <div className="ec-slist" data-testid="panel-event-feed">
+          {mine.map((e) => (
+            <div className="ec-slist__r ec-evt-embed-row" key={e.id} data-testid={`panel-event-row-${e.id}`}>
+              <span className="ec-evt-embed-row__lead">
+                <SeverityTag event={e} />
+                <span className="ec-mono ec-tnum ec-dim">{formatClockTime(e.receivedAt)}</span>
+              </span>
+              <span className="ec-evt-embed-row__body">
+                <span className="ec-pri">{e.type}</span>
+                <span className="ec-dim"> {summarizeBody(e.body)}</span>
+              </span>
+              <span className="ec-dim ec-tnum ec-evt-embed-row__age">
+                {formatDurationMs(Math.max(0, nowServerMs - e.receivedAt))} ago
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -925,14 +1920,24 @@ function DescriptorWidget({
   manifest,
   comp,
   detailKey,
+  selection,
   commands,
+  configEntry,
+  metrics,
+  events,
+  nowServerMs,
   onInvoke,
 }: {
   widget: PanelWidgetDescriptor;
   manifest: ComponentDescribeManifest;
   comp: ComponentView;
   detailKey: ComponentKey;
+  selection: PanelInstanceSelection;
   commands: ClientState["commands"];
+  configEntry: ConfigEntryView | undefined;
+  metrics: MetricSeriesSnapshot[];
+  events: ConsoleEvent[];
+  nowServerMs: number;
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
   switch (widget.kind) {
@@ -949,6 +1954,7 @@ function DescriptorWidget({
           manifest={manifest}
           comp={comp}
           detailKey={detailKey}
+          selection={selection}
           commands={commands}
           onInvoke={onInvoke}
         />
@@ -960,10 +1966,52 @@ function DescriptorWidget({
           manifest={manifest}
           comp={comp}
           detailKey={detailKey}
+          selection={selection}
           commands={commands}
           onInvoke={onInvoke}
         />
       );
+    case "statusDashboard":
+      return (
+        <StatusDashboardWidget
+          widget={widget}
+          manifest={manifest}
+          comp={comp}
+          detailKey={detailKey}
+          selection={selection}
+          commands={commands}
+          onInvoke={onInvoke}
+        />
+      );
+    case "actionBar":
+      return (
+        <ActionBarWidget
+          widget={widget}
+          manifest={manifest}
+          comp={comp}
+          detailKey={detailKey}
+          selection={selection}
+          commands={commands}
+          onInvoke={onInvoke}
+        />
+      );
+    case "commandTable":
+      return (
+        <CommandTableWidget
+          widget={widget}
+          manifest={manifest}
+          comp={comp}
+          detailKey={detailKey}
+          selection={selection}
+          commands={commands}
+          configEntry={configEntry}
+          onInvoke={onInvoke}
+        />
+      );
+    case "metricSeries":
+      return <MetricSeriesWidget widget={widget} metrics={metrics} selection={selection} nowServerMs={nowServerMs} />;
+    case "eventFeed":
+      return <EventFeedWidget widget={widget} events={events} selection={selection} nowServerMs={nowServerMs} />;
     default:
       return (
         <div className="ec-panel-widget ec-panel-widget--unsupported" data-testid="panel-widget-unsupported">
@@ -976,11 +2024,21 @@ function DescriptorWidget({
   }
 }
 
+/** Whether a view (or any of its widgets) is instance-scoped — the selector trigger (§3.1). */
+function viewNeedsInstance(view: PanelViewDescriptor): boolean {
+  if (view.scope === "instance") return true;
+  return viewWidgets(view).some((w) => w.scope === "instance" || w["scope"] === "instance");
+}
+
 function DescriptorPanel({
   entry,
   detailKey,
   comp,
   commands,
+  configEntry,
+  metrics,
+  events,
+  nowServerMs,
   onRefreshDescriptor,
   onInvoke,
 }: {
@@ -988,9 +2046,14 @@ function DescriptorPanel({
   detailKey: ComponentKey;
   comp: ComponentView;
   commands: ClientState["commands"];
+  configEntry: ConfigEntryView | undefined;
+  metrics: MetricSeriesSnapshot[];
+  events: ConsoleEvent[];
+  nowServerMs: number;
   onRefreshDescriptor?: (key: ComponentKey) => void;
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
+  const id = componentKeyId(detailKey);
   const manifest = entry?.manifest;
   const orderedViews = useMemo(() => {
     const views = manifest?.panels?.views ?? [];
@@ -998,6 +2061,29 @@ function DescriptorPanel({
   }, [manifest]);
   const defaultView = manifest?.panels?.defaultView;
   const [selectedView, setSelectedView] = useState<string | undefined>(undefined);
+  // The one instance selection shared by every active instance-scoped widget (§3.1). It is
+  // recorded WITH the component id it was made for, so a selection (or a deep-linked
+  // `?instance=` URL param) never leaks onto another component.
+  const [instanceChoice, setInstanceChoice] = useState<{ id: string; instance: string } | undefined>(() => {
+    const fromUrl = readInstanceParam();
+    return fromUrl !== undefined ? { id, instance: fromUrl } : undefined;
+  });
+  useEffect(() => {
+    // Moving to another component drops the previous component's selection + URL param.
+    if (instanceChoice !== undefined && instanceChoice.id !== id) {
+      setInstanceChoice(undefined);
+      writeInstanceParam(undefined);
+    }
+  }, [id, instanceChoice]);
+  // Leaving the component clears the persisted param (it only lives while the operator
+  // stays on the component).
+  useEffect(() => () => writeInstanceParam(undefined), []);
+  const selected = instanceChoice !== undefined && instanceChoice.id === id ? instanceChoice.instance : undefined;
+  const selection = panelInstanceSelection(comp, selected);
+  const selectInstance = (instance: string) => {
+    setInstanceChoice({ id, instance });
+    writeInstanceParam(instance);
+  };
   const active =
     orderedViews.find((v) => v.id === selectedView) ??
     orderedViews.find((v) => v.id === defaultView) ??
@@ -1047,6 +2133,11 @@ function DescriptorPanel({
 
   const provider = manifest.panels?.provider ?? manifest.component?.component ?? manifest.component?.name ?? comp.key.component;
   const widgets = viewWidgets(active);
+  // The view-level rendererRequirements gate (§4): EVERY declared token must be in the
+  // console's known set, else ONE view-level state renders and NO widget mounts (no
+  // partial mount, no silent fallback). Views without the field render as before.
+  const unknownTokens = unknownRequirementTokens(active);
+  const requirementsGated = unknownTokens !== undefined && unknownTokens.length > 0;
   return (
     <div className="ec-panel" data-testid="descriptor-panel">
       <div className="ec-panel-cap">
@@ -1078,23 +2169,69 @@ function DescriptorPanel({
           </button>
         ))}
       </div>
-      <div className="ec-panel-body" data-testid={`panel-view-${active.id}`}>
-        {widgets.length === 0 ? (
-          <p className="ec-dim">This descriptor view has no console-owned widgets.</p>
-        ) : (
-          widgets.map((widget, i) => (
-            <DescriptorWidget
-              key={widget.id ?? `${widget.kind}-${i}`}
-              widget={widget}
-              manifest={manifest}
-              comp={comp}
-              detailKey={detailKey}
-              commands={commands}
-              onInvoke={onInvoke}
-            />
-          ))
-        )}
-      </div>
+      {requirementsGated ? (
+        // ONE view-level state; none of the view's widgets (or its selector) mount.
+        <div className="ec-pending" data-testid="panel-requirements-gate">
+          <div className="ec-pending__badge">Newer console required</div>
+          <h3 className="ec-pending__title">{viewTitle(active)}</h3>
+          <p className="ec-dim">This view requires a newer edge-console.</p>
+          <p className="ec-dim">
+            Unknown renderer requirement{unknownTokens.length === 1 ? "" : "s"}:{" "}
+            <span className="ec-mono">{unknownTokens.join(", ")}</span>
+          </p>
+        </div>
+      ) : (
+        <>
+          {viewNeedsInstance(active) && selection.instance !== undefined && (
+            // The ONE instance selector shared by every active instance-scoped widget (§3.1).
+            // Component-scoped views never render it; the legacy zero/`main`-instance case has
+            // no selector at all (selection.instance is undefined there).
+            <div className="ec-panel-instance" data-testid="panel-instance-row">
+              <label className="ec-dim" htmlFor="panel-instance-selector">
+                Instance
+              </label>
+              <select
+                id="panel-instance-selector"
+                className="ec-log-control"
+                data-testid="panel-instance-selector"
+                value={selection.instance}
+                onChange={(e) => selectInstance(e.target.value)}
+              >
+                {selection.missing && (
+                  <option value={selection.instance}>{selection.instance} (unavailable)</option>
+                )}
+                {(comp.instances ?? []).map((inst) => (
+                  <option key={inst.instance} value={inst.instance}>
+                    {inst.instance}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="ec-panel-body" data-testid={`panel-view-${active.id}`}>
+            {widgets.length === 0 ? (
+              <p className="ec-dim">This descriptor view has no console-owned widgets.</p>
+            ) : (
+              widgets.map((widget, i) => (
+                <DescriptorWidget
+                  key={widget.id ?? `${widget.kind}-${i}`}
+                  widget={widget}
+                  manifest={manifest}
+                  comp={comp}
+                  detailKey={detailKey}
+                  selection={selection}
+                  commands={commands}
+                  configEntry={configEntry}
+                  metrics={metrics}
+                  events={events}
+                  nowServerMs={nowServerMs}
+                  onInvoke={onInvoke}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1766,6 +2903,11 @@ export function ComponentDetailView({
   const panelViewCount = descriptorManifest?.panels?.views.length ?? 0;
   const canSetLogLevel = hasCommand(descriptorManifest, "set-log-level");
   const metricSeries = customMetricsForComponent(state.metrics.series, detailKey);
+  // The Panel widgets read the SAME stores the tabs maintain (metricSeries widgets may
+  // also bind system series, so this is the unfiltered component slice) — never a
+  // second subscription, never a second fetch.
+  const panelMetrics = state.metrics.series.filter((s) => componentKeyId(s.key) === id);
+  const panelEvents = state.events.entries.filter((e) => componentKeyId(e.key) === id);
   const logEntry = state.logs.byId[id];
   const logCount = logEntry?.records.length ?? 0;
   const implementationParts = [
@@ -1841,6 +2983,10 @@ export function ComponentDetailView({
               detailKey={detailKey}
               comp={comp}
               commands={state.commands}
+              configEntry={configEntry}
+              metrics={panelMetrics}
+              events={panelEvents}
+              nowServerMs={nowServerMs}
               onRefreshDescriptor={onRefreshDescriptor}
               onInvoke={onInvoke}
             />
