@@ -116,15 +116,29 @@ Receipt times (`receivedAt` everywhere, and the point `at` in metric/signal seri
 the gateway's own monotonic timeline — non-decreasing per gateway, even when the host wall clock
 steps backward.
 
-### `InstanceStatus` (per-connection reachability)
+### `InstanceStatus` (per-connection status)
 
 ```ts
-interface InstanceStatus { instance: string; connected: boolean; detail?: string; }
+interface InstanceStatus { instance: string; connected: boolean; state?: string; detail?: string; }
 ```
 
 A multi-connection component (OPC UA servers, Modbus slaves, file-replicator source dirs) reports each
-configured instance's reachability in its `state.instances[]`, rather than minting a UNS instance per
+configured instance's status in its `state.instances[]`, rather than minting a UNS instance per
 connection.
+
+`state` carries the instance's condition in the shared vocabulary, from the same state model that
+answers the component's `sb/status`:
+
+| `state` | Meaning | Console rendering |
+|---------|---------|-------------------|
+| `CONNECTING` | Establishing the southbound session. | `connecting` badge, blue. |
+| `ONLINE` | Connected and polling/subscribed. | `online` badge, green. |
+| `BACKOFF` | Down, retrying on the reconnect backoff. | `backoff` badge, red. |
+| `PAUSED` | Deliberately stopped by an operator. | `paused` badge, gray, marked **expected quiet**. |
+
+`PAUSED` is expected quiet: the console excludes a paused instance from the Health tab's connection
+ratio and reports it separately, so a deliberate pause never reads as a connection fault. A component
+that reports no `state`, or a token outside the table, is rendered from `connected` alone.
 
 ## Snapshot shapes
 
@@ -143,7 +157,7 @@ interface DeviceSnapshot { device: string; unreachable: boolean; unreachableSinc
 | `liveness` | `Liveness` | Effective (device UNREACHABLE overlays the ladder). |
 | `status` | string? | Last reported `state.status` (`RUNNING`/`STOPPED`). |
 | `uptimeSecs` | number? | Last reported uptime (restart = a decrease). |
-| `instances` | `InstanceStatus[]`? | Per-instance connectivity, when the state carried it. |
+| `instances` | `InstanceStatus[]`? | Per-instance status, when the state carried it. |
 | `lastStateAt` | number? | Receipt time of the last `state` keepalive. |
 | `expectedIntervalSecs` | number | The interval driving miss-detection. |
 | `cadenceSource` | `CadenceSource` | `default` or `cfg`. |
@@ -159,7 +173,7 @@ Every delta carries a monotonic `seq` and a model-clock `at`. The variants:
 |--------|-------------|---------|
 | `device-discovered` | `device` | First sight of a device. |
 | `component-discovered` | `key`, `path`, `hier` | First sight of a component (carries `hier` for dynamic grouping without a snapshot). |
-| `instances-changed` | `key`, `instances` | The full new per-instance connectivity set (replace wholesale). |
+| `instances-changed` | `key`, `instances` | The full new per-instance status set (replace wholesale). |
 | `value-updated` | `key`, `instance`, `cls`, `channel?` | A cached value changed (notification only — no body). |
 | `liveness-changed` | `key`, `from`, `to` | A ladder transition. |
 | `component-restarted` | `key`, `previousUptimeSecs`, `uptimeSecs` | An uptime reset. |
@@ -323,9 +337,33 @@ console-synthesized `ConsoleCommandErrorCode`:
 | `MALFORMED_REPLY` | A reply arrived whose body was not the `{ok, result\|error}` shape. |
 | `UNAVAILABLE` | The gateway has no command seam wired. |
 
-The three universal built-in verbs every component answers: **`BUILTIN_COMMAND_VERBS`** =
-`["ping", "reload-config", "get-configuration"]`. The console does not discover a component's custom
-verbs.
+The universal built-in verbs every component answers: **`BUILTIN_COMMAND_VERBS`** =
+`["ping", "describe", "reload-config", "get-configuration"]`. A component's custom verbs are
+discovered through `describe`.
+
+### Command capabilities (`describe.commands[]`)
+
+Each entry advertises one verb the console may invoke:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `verb` | string | The exact cmd verb remainder (`sb/browse`). The console never invents aliases. |
+| `title` | string? | Display label. |
+| `scope` | `"component"` \| `"instance"` \| `"both"`? | The verb's addressing (below). |
+| `kind` | `"read"` \| `"write"` \| `"diagnostic"` \| `"control"`? | What the verb does. |
+| `builtIn` | boolean? | Whether the library, not the component, answers it. |
+| `danger` | `"none"` \| `"physical-write"`? | Drives the confirmation affordance. |
+| `availability` | `{state, reason?}`? | `disabled`/`unsupported` disables every bound widget and shows the reason. |
+
+`scope` drives the Panel tab's addressing UI:
+
+- **`instance`** — the instance selector mounts, and every invocation of the verb names the selected
+  instance.
+- **`component`** — no selector involvement, and no invocation ever carries `instance`. The component
+  rejects an instance-addressed delivery of a component-scoped verb.
+- **`both`** — the selector mounts and offers an explicit **Whole component** choice, which sends no
+  `instance` at all. It is offered when every instance-addressable widget in the view declares `both`.
+- **absent** — the console falls back to the panel widgets' own `scope` markers.
 
 ## Wire error codes
 

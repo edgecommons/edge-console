@@ -112,6 +112,22 @@ announced it — the fastest way to confirm what a component is actually running
 device.
 :::
 
+### Instances
+
+The **Instances** tab lists every connection the component is configured with — one OPC UA server, one
+Modbus slave, one replication source directory each — with its current state: **online**,
+**connecting**, **backoff** (down, retrying), or **paused**. A paused instance is marked *expected
+quiet*: an operator stopped it on purpose, so its silence is not a fault and it is left out of the
+Health tab's connected-instance count. A component that reports no state per instance shows
+**connected** / **disconnected** instead.
+
+### Panel
+
+The **Panel** tab renders the views the component itself advertises. Where those views act on one
+connection, an **Instance** selector sits above them and every command you run there targets the
+instance you picked. Views whose commands act on the whole component show no selector, and a view
+whose commands accept either addressing adds a **Whole component** choice to the selector.
+
 ## Signals — the live data plane
 
 Every telemetry and business signal flowing on the site bus, live. This is where you watch actual

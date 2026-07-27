@@ -174,8 +174,54 @@ export interface InstanceStatus {
   instance: string;
   /** Whether that instance's southbound/source is currently reachable. */
   connected: boolean;
+  /**
+   * The instance's condition in the shared keepalive vocabulary, when the component reports one:
+   * `CONNECTING` / `ONLINE` / `BACKOFF` / `PAUSED` (see {@link InstanceState}). It comes from the
+   * same single instance state model that answers `sb/status`, so push and pull agree. The field
+   * is optional and open — a component may report a token this console does not know, and a
+   * consumer must ignore anything it does not recognize and fall back to `connected` alone.
+   */
+  state?: string;
   /** Optional human detail (endpoint, or the down reason). */
   detail?: string;
+}
+
+/**
+ * The shared instance-state vocabulary carried by {@link InstanceStatus.state}:
+ *
+ *  - `CONNECTING` — establishing the southbound session (not yet usable);
+ *  - `ONLINE` — connected and polling/subscribed;
+ *  - `BACKOFF` — down and retrying on the reconnect backoff;
+ *  - `PAUSED` — deliberately stopped by an operator (`sb/pause`) — **expected quiet**, not a fault.
+ *
+ * `PAUSED` is what separates a silence an operator asked for from one that means something is
+ * wrong: a paused instance publishes nothing, and the console must not read that silence as a
+ * fault.
+ */
+export type InstanceState = "CONNECTING" | "ONLINE" | "BACKOFF" | "PAUSED";
+
+const INSTANCE_STATES: ReadonlySet<string> = new Set<InstanceState>([
+  "CONNECTING",
+  "ONLINE",
+  "BACKOFF",
+  "PAUSED",
+]);
+
+/**
+ * The known {@link InstanceState} an instance reports, or `undefined` when it reports none or
+ * reports a token this console does not know (the caller then renders connectivity only).
+ * Matching is case-insensitive and whitespace-tolerant — the token is component-supplied text.
+ */
+export function instanceState(inst: Pick<InstanceStatus, "state">): InstanceState | undefined {
+  const raw = inst.state;
+  if (typeof raw !== "string") return undefined;
+  const normalized = raw.trim().toUpperCase();
+  return INSTANCE_STATES.has(normalized) ? (normalized as InstanceState) : undefined;
+}
+
+/** Whether an instance is deliberately paused — expected quiet, never a staleness fault. */
+export function isPausedInstance(inst: Pick<InstanceStatus, "state">): boolean {
+  return instanceState(inst) === "PAUSED";
 }
 
 /** A component's slice of a {@link FleetSnapshot}. */
@@ -1008,12 +1054,28 @@ export type BuiltinCommandVerb = (typeof BUILTIN_COMMAND_VERBS)[number];
  * M10 / Phase 3 — descriptor-driven component panels.
  * --------------------------------------------------------------------------- */
 
+/**
+ * The addressing a command verb declares (DESIGN-scoped-commands §2.2/§2.3):
+ *
+ *  - `component` — the verb acts on the whole component; an instance-addressed invocation is
+ *    rejected by the library with `BAD_ARGS`, so the console never sends an `instance`;
+ *  - `instance` — the verb acts on one instance; every invocation names the selected instance;
+ *  - `both` — either addressing is meaningful; no instance means "the whole component".
+ */
+export type CommandScope = "component" | "instance" | "both";
+
 /** A command capability advertised by a component's `describe` response. */
 export interface CommandCapability {
   /** Exact cmd verb remainder, e.g. `sb/browse`; UI must not invent aliases. */
   verb: string;
   title?: string;
-  scope?: "component" | "instance";
+  /**
+   * The verb's declared addressing ({@link CommandScope}). The Panel tab derives its addressing
+   * UI from it: an instance selector for `instance`, no selector involvement for `component`, and
+   * a selector plus an explicit "Whole component" choice for `both`. A verb that declares no
+   * scope (an older component) falls back to the widget-level `scope` markers.
+   */
+  scope?: CommandScope;
   kind?: "read" | "write" | "diagnostic" | "control";
   builtIn?: boolean;
   requestSchema?: unknown;

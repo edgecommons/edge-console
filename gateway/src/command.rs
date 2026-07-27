@@ -455,6 +455,41 @@ mod tests {
         assert_eq!(manifest["commands"][0]["verb"], "sb/browse");
     }
 
+    /// Each `describe.commands[]` entry declares its addressing scope
+    /// (DESIGN-scoped-commands §2.3) — `component` / `instance` / `both`. Normalization keeps
+    /// entries verbatim, so the field (and every other member of the entry, known or not)
+    /// reaches the browser untouched; the console derives its addressing UI from it.
+    #[test]
+    fn command_entries_keep_their_declared_scope() {
+        let manifest = normalize_describe_manifest(&json!({
+            "commands": [
+                { "verb": "sb/browse", "scope": "instance" },
+                { "verb": "sb/discover", "scope": "component" },
+                { "verb": "sb/status", "scope": "both", "kind": "read" },
+                { "verb": "legacy/verb" }
+            ]
+        }))
+        .unwrap();
+        let commands = manifest["commands"].as_array().unwrap();
+        assert_eq!(commands.len(), 4);
+        assert_eq!(commands[0]["scope"], "instance");
+        assert_eq!(commands[1]["scope"], "component");
+        assert_eq!(commands[2]["scope"], "both");
+        assert_eq!(commands[2]["kind"], "read");
+        // A verb that declares no scope keeps none — the console falls back to widget scope.
+        assert!(commands[3].get("scope").is_none());
+    }
+
+    /// The same, through the `{"verbs": [...]}` wrapper form of the `commands` member.
+    #[test]
+    fn wrapped_command_entries_keep_their_declared_scope() {
+        let manifest = normalize_describe_manifest(&json!({
+            "commands": { "verbs": [{ "verb": "sb/pause", "scope": "both" }] }
+        }))
+        .unwrap();
+        assert_eq!(manifest["commands"][0]["scope"], "both");
+    }
+
     fn normalized_view(view: Value) -> Value {
         let panels = normalize_panels(Some(&json!({ "views": [view] }))).unwrap();
         panels["views"][0].clone()

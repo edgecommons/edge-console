@@ -50,11 +50,12 @@ Add a built-in `describe` command to every `CommandInbox`.
     },
     "digest": "sha256:...",
     "commands": [
-      { "verb": "ping", "builtIn": true },
-      { "verb": "describe", "builtIn": true },
-      { "verb": "get-configuration", "builtIn": true },
+      { "verb": "ping", "builtIn": true, "scope": "both" },
+      { "verb": "describe", "builtIn": true, "scope": "both" },
+      { "verb": "get-configuration", "builtIn": true, "scope": "both" },
       { "verb": "reload-config", "builtIn": true },
-      { "verb": "sb/browse", "builtIn": false }
+      { "verb": "sb/browse", "builtIn": false, "scope": "instance" },
+      { "verb": "sb/discover", "builtIn": false, "scope": "component" }
     ],
     "panels": {
       "schemaVersion": "edgecommons.panels.v2",
@@ -71,6 +72,12 @@ The `commands` list is computed at request time from the registered command hand
 lexicographically for deterministic discovery. The verb list is the source of capability truth for
 the console. If a verb is absent, UI bound to that verb must render unavailable and must not invoke
 it.
+
+Each entry carries the verb's declared `scope` — `component`, `instance`, or `both` (core
+`DESIGN-scoped-commands.md` §2.2/§2.3) — and the Panel tab derives its addressing UI from it: the
+instance selector mounts for `instance`, is never involved for `component`, and gains an explicit
+"Whole component" choice for `both`. A verb that declares no scope (a pre-0.5.0 component) falls back
+to the widget-level `scope` markers below.
 
 The `digest` is computed over the command capability list and panel descriptor payload. It is not
 security-critical in this slice; it exists so the console can cache and refresh manifests without

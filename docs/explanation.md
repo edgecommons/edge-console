@@ -97,6 +97,11 @@ keepalive backbone. It lives in the console because a consumer is the only party
   counter ticks) — distinct from a silence gap.
 - **STOPPED is an explicit truth**, not staleness — so it doesn't decay. It holds until a RUNNING state
   returns.
+- **A paused instance is expected quiet.** The ladder measures the component's `state` keepalive, which
+  keeps ticking while one of its connections is deliberately paused — so a pause never trips staleness.
+  The console reads the instance's own `PAUSED` state out of that keepalive's `instances[]` and keeps it
+  out of the component's connected-instance count, so an intentional pause reads as intentional
+  everywhere rather than as a connection fault.
 - **Whole-device UNREACHABLE.** When the bridge dies, the broker publishes its LWT and the console freezes
   that device's subtree: every component under it reports UNREACHABLE **by containment** ("the road is
   down, not the houses" — you get one containment note, not N offline alarms). It is terminal until the
