@@ -13,10 +13,11 @@
 import type {
   ComponentKey,
   ConsoleAlarm,
+  InstanceStatus,
   Liveness,
   RuntimeAttributes,
 } from "@edgecommons/edge-console-protocol";
-import { componentKeyId } from "@edgecommons/edge-console-protocol";
+import { componentKeyId, instanceState, isPausedInstance } from "@edgecommons/edge-console-protocol";
 import type { ComponentView } from "../fleet/store";
 import { connLevel } from "../fleet/grouping";
 import type { ConnLevel } from "../fleet/grouping";
@@ -144,16 +145,74 @@ function humanConnectionState(state: string): string {
     .join(" ");
 }
 
-/** Aggregate connection state from per-instance state, falling back to runtime attributes. */
+/**
+ * How one instance's keepalive `state` renders — the badge text and tone shared by the
+ * Instances view and the panel instance selector (D-SC-8).
+ *
+ *  - `ONLINE` → connected (green);
+ *  - `CONNECTING` → establishing (blue), a transient, not a fault;
+ *  - `BACKOFF` → down and retrying (red);
+ *  - `PAUSED` → deliberately stopped (gray) — {@link InstanceStatePresentation.expectedQuiet};
+ *  - absent/unknown state → today's connectivity-only rendering from `connected`.
+ */
+export interface InstanceStatePresentation {
+  /** The badge text. */
+  label: string;
+  /** The Carbon tag type the badge uses. */
+  tone: "green" | "blue" | "red" | "gray";
+  /**
+   * Whether this instance's silence is EXPECTED (a deliberate pause) rather than a fault —
+   * pause-aware surfaces exclude it from their fault counts instead of alarming on it.
+   */
+  expectedQuiet: boolean;
+}
+
+/** The badge text + tone for one instance (see {@link InstanceStatePresentation}). */
+export function instanceStatePresentation(inst: InstanceStatus): InstanceStatePresentation {
+  switch (instanceState(inst)) {
+    case "ONLINE":
+      return { label: "online", tone: "green", expectedQuiet: false };
+    case "CONNECTING":
+      return { label: "connecting", tone: "blue", expectedQuiet: false };
+    case "BACKOFF":
+      return { label: "backoff", tone: "red", expectedQuiet: false };
+    case "PAUSED":
+      return { label: "paused", tone: "gray", expectedQuiet: true };
+    default:
+      // No state reported (or a token this console does not know): connectivity only.
+      return inst.connected
+        ? { label: "connected", tone: "green", expectedQuiet: false }
+        : { label: "disconnected", tone: "red", expectedQuiet: false };
+  }
+}
+
+/**
+ * Aggregate connection state from per-instance state, falling back to runtime attributes.
+ *
+ * PAUSED instances are **expected quiet** (D-SC-8): a deliberately paused instance is not a
+ * connection fault, so it is excluded from the connected/total ratio and reported separately.
+ * A component whose every instance is paused reads as paused, not as disconnected.
+ */
 export function connectionStateCheck(
   comp: ComponentView,
   attrs: RuntimeAttributes | undefined,
 ): HealthCheck {
   const instances = comp.instances ?? [];
   if (instances.length > 0) {
-    const connected = instances.filter((inst) => inst.connected).length;
-    const detail = `${connected} of ${pluralInstance(instances.length)} connected`;
-    if (connected === instances.length) {
+    const paused = instances.filter(isPausedInstance);
+    const pausedNote = paused.length > 0 ? `, ${paused.length} paused` : "";
+    const expected = instances.filter((inst) => !isPausedInstance(inst));
+    if (expected.length === 0) {
+      return {
+        label: "Connection state",
+        value: "Paused",
+        detail: `${pluralInstance(paused.length)} deliberately paused`,
+        tone: "unknown",
+      };
+    }
+    const connected = expected.filter((inst) => inst.connected).length;
+    const detail = `${connected} of ${pluralInstance(expected.length)} connected${pausedNote}`;
+    if (connected === expected.length) {
       return { label: "Connection state", value: "Connected", detail, tone: "ok" };
     }
     if (connected > 0) {

@@ -21,7 +21,7 @@ needs no per-component topic templates.
 
 | Class | Wildcards (component + instance scope) | What the console does with it |
 |-------|----------------------------------------|-------------------------------|
-| `state` | `ecv1/+/+/state` · `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]`; the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge protobuf LWT (below). |
+| `state` | `ecv1/+/+/state` · `ecv1/+/+/+/state` | Liveness backbone (miss-detection); `status`/`uptimeSecs`/`instances[]` (per-instance status incl. its `state` token); the **only** signal that clears a device's UNREACHABLE. Also delivers the bridge protobuf LWT (below). |
 | `cfg` | `ecv1/+/+/cfg` · `ecv1/+/+/+/cfg` | Effective, source-redacted config → the Configuration screen; the cadence source (`config.heartbeat.intervalSecs`). |
 | `evt` | `ecv1/+/+/evt/#` · `ecv1/+/+/+/evt/#` | Rolling event history + the console-side alarm tracker (raise/clear). |
 | `metric` | `ecv1/+/+/metric/#` · `ecv1/+/+/+/metric/#` | Metric latest/series + the runtime-attributes projection (`sys.*`, `southbound_health`). |
@@ -143,8 +143,11 @@ sequenceDiagram
 ```
 
 - **Topic**: `ecv1/{device}/{component}/cmd/{verb}`, built with `uns().topicFor(target, Cmd, verb)`.
-  The console targets the component scope (verbs register on the component's `cmd/#` inbox; per-instance
-  dispatch is by a body selector, not the topic).
+  The console targets the component scope (verbs register on the component's `cmd/#` inbox, which
+  receives both the component- and instance-addressed forms). When an invocation addresses one
+  instance, the instance rides in the request body as `args.instance`, chosen from the verb's declared
+  scope — see [data-types.md → Command capabilities](data-types.md#command-capabilities-describecommands).
+  A component-scoped verb is never sent an `instance`.
 - **Request**: `header.name` **must equal** the verb; the body is the `args` object (`{}` when omitted).
 - **`reply_to`** is rewritten transparently by the `uns-bridge`, so a site→device request/reply just
   works on the console's single connection.

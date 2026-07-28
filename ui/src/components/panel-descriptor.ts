@@ -22,6 +22,7 @@
  * on their own; the widgets in `ComponentDetailView` render on top of these.
  */
 import type {
+  CommandScope,
   ComponentDescribeManifest,
   CommandError,
   MetricPoint,
@@ -302,6 +303,139 @@ export function commandAvailability(
     return { status: state, ...(reason !== undefined ? { reason } : {}) };
   }
   return { status: "available" };
+}
+
+/* -----------------------------------------------------------------------------
+ * Declared command scope (DESIGN-scoped-commands §2.3) — the addressing a verb
+ * advertises, and the Panel-tab addressing UI derived from it.
+ * --------------------------------------------------------------------------- */
+
+const COMMAND_SCOPES: ReadonlySet<string> = new Set<CommandScope>([
+  "component",
+  "instance",
+  "both",
+]);
+
+/**
+ * The scope a verb DECLARES in the describe manifest's `commands[]`, or `undefined` when the
+ * verb is unknown, declares none, or declares a token this console does not know (an older or
+ * newer component — the caller then falls back to the widget-level `scope` markers).
+ */
+export function declaredCommandScope(
+  manifest: ComponentDescribeManifest | undefined,
+  verb: string | undefined,
+): CommandScope | undefined {
+  if (verb === undefined || verb === "") return undefined;
+  const commands = Array.isArray(manifest?.commands) ? manifest.commands : [];
+  const declared = commands.find((c) => c.verb === verb)?.scope;
+  return typeof declared === "string" && COMMAND_SCOPES.has(declared)
+    ? (declared as CommandScope)
+    : undefined;
+}
+
+/**
+ * Combine the declared scopes of the verbs one widget binds. The strictest addressing wins —
+ * any `instance` verb makes the widget instance-addressed, `both` only survives when nothing
+ * requires an instance. `undefined` when NO bound verb declares a scope.
+ */
+export function combinedCommandScope(
+  manifest: ComponentDescribeManifest | undefined,
+  verbs: readonly (string | undefined)[],
+): CommandScope | undefined {
+  const declared = verbs
+    .map((verb) => declaredCommandScope(manifest, verb))
+    .filter((scope): scope is CommandScope => scope !== undefined);
+  if (declared.length === 0) return undefined;
+  if (declared.includes("instance")) return "instance";
+  if (declared.includes("both")) return "both";
+  return "component";
+}
+
+/** The widget descriptor keys that name a bound command verb. */
+const WIDGET_VERB_KEYS = [
+  "verb",
+  "browseVerb",
+  "readVerb",
+  "writeVerb",
+  "signalsVerb",
+  "subscriptionsVerb",
+] as const;
+
+/** Every command verb one widget binds — its own verb keys plus each `actions[]` verb. */
+export function widgetVerbs(widget: PanelWidgetDescriptor): string[] {
+  const verbs: string[] = [];
+  for (const key of WIDGET_VERB_KEYS) {
+    const value = widget[key];
+    if (typeof value === "string" && value !== "") verbs.push(value);
+  }
+  for (const action of Array.isArray(widget["actions"]) ? widget["actions"] : []) {
+    const record = entryRecord(action);
+    const verb = record !== undefined ? record["verb"] : undefined;
+    if (typeof verb === "string" && verb !== "") verbs.push(verb);
+  }
+  return verbs;
+}
+
+/**
+ * One widget's effective addressing: the scope its bound verbs DECLARE when any of them does,
+ * otherwise today's widget-level heuristic (`scope:"instance"` ⇒ instance, anything else ⇒
+ * component). The declared scope is authoritative — a `component` verb never sends an instance
+ * even under a view marked `scope:"instance"`, because the library rejects that addressing.
+ */
+export function effectiveWidgetScope(
+  manifest: ComponentDescribeManifest | undefined,
+  widget: PanelWidgetDescriptor,
+  verbs?: readonly (string | undefined)[],
+): CommandScope {
+  const declared = combinedCommandScope(manifest, verbs ?? widgetVerbs(widget));
+  if (declared !== undefined) return declared;
+  return widget["scope"] === "instance" ? "instance" : "component";
+}
+
+/**
+ * Whether an invocation at this scope carries the selected instance. `component` never does;
+ * `instance` always does; `both` does unless the operator explicitly chose "Whole component"
+ * (the `null` addressing that means "act on the whole component").
+ */
+export function scopeSendsInstance(scope: CommandScope, wholeComponent: boolean): boolean {
+  if (scope === "component") return false;
+  if (scope === "instance") return true;
+  return !wholeComponent;
+}
+
+/** The widgets one view declares (`widgets`, or the legacy `descriptor` alias). */
+export function panelViewWidgets(view: PanelViewDescriptor): PanelWidgetDescriptor[] {
+  if (Array.isArray(view.widgets)) return view.widgets;
+  return Array.isArray(view.descriptor) ? view.descriptor : [];
+}
+
+/** The addressing affordances one panel view needs. */
+export interface PanelViewAddressing {
+  /** Whether the shared instance selector mounts for this view. */
+  needsInstance: boolean;
+  /** Whether the selector offers the explicit "Whole component" choice (a `both`-only view). */
+  allowWholeComponent: boolean;
+}
+
+/**
+ * The addressing UI one view derives from its widgets' scopes (§2.3): a selector as soon as any
+ * widget is instance-addressable, and the explicit "Whole component" option only when every
+ * instance-addressable widget declares `both` — offering it while some widget REQUIRES an
+ * instance would let the operator put that widget into an addressing its verb rejects.
+ */
+export function panelViewAddressing(
+  manifest: ComponentDescribeManifest | undefined,
+  view: PanelViewDescriptor,
+): PanelViewAddressing {
+  const viewLevelInstance = view.scope === "instance";
+  const scopes = panelViewWidgets(view).map((widget) => effectiveWidgetScope(manifest, widget));
+  return {
+    needsInstance: viewLevelInstance || scopes.some((scope) => scope !== "component"),
+    allowWholeComponent:
+      !viewLevelInstance &&
+      scopes.includes("both") &&
+      !scopes.includes("instance"),
+  };
 }
 
 /* -----------------------------------------------------------------------------

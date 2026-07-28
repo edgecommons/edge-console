@@ -48,7 +48,7 @@ import type {
   PanelViewDescriptor,
   PanelWidgetDescriptor,
 } from "@edgecommons/edge-console-protocol";
-import { LOG_LEVELS, componentKeyId } from "@edgecommons/edge-console-protocol";
+import { LOG_LEVELS, componentKeyId, instanceState } from "@edgecommons/edge-console-protocol";
 import type { ClientState, FleetClient } from "../fleet/client";
 import { commandSlot } from "../fleet/command-store";
 import type { ConfigEntryView } from "../fleet/config-store";
@@ -69,6 +69,7 @@ import {
   clampEventLimit,
   classifyCommandFailure,
   commandAvailability,
+  effectiveWidgetScope,
   eventFamilyMatch,
   formatPanelValue,
   lifecycleGateEnabled,
@@ -78,9 +79,11 @@ import {
   panelEventFilters,
   panelFields,
   panelRefresh,
+  panelViewAddressing,
   parseControls,
   resolvePath,
   sanitizeArgsObject,
+  scopeSendsInstance,
   unknownRequirementTokens,
 } from "./panel-descriptor";
 import type { ComponentView } from "../fleet/store";
@@ -102,6 +105,7 @@ import {
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
+  instanceStatePresentation,
 } from "./detail-selectors";
 import { findComponent } from "./components-tree";
 
@@ -214,6 +218,12 @@ function hasRealInstances(comp: ComponentView): boolean {
 }
 
 /**
+ * The `<option>` value standing for the explicit "Whole component" choice a `both`-scoped view
+ * offers — the `null` addressing that means "act on the whole component" (D-SC-3).
+ */
+const WHOLE_COMPONENT_OPTION = "__component__";
+
+/**
  * The Panel tab's shared instance selection (§3.1): which instance every active
  * instance-scoped widget binds to.
  */
@@ -221,7 +231,7 @@ interface PanelInstanceSelection {
   /**
    * The instance an instance-scoped invocation sends — the operator's selection, defaulting
    * to the first configured instance. Undefined for the legacy zero/`main` sentinel case
-   * (no selector, no `instance` arg).
+   * (no selector, no `instance` arg) and while "Whole component" is chosen.
    */
   instance?: string;
   /**
@@ -229,29 +239,62 @@ interface PanelInstanceSelection {
    * render an explicit unavailable state, never a silent fallback to the first instance.
    */
   missing: boolean;
+  /**
+   * True when the operator explicitly chose "Whole component" on a `both`-scoped view: every
+   * invocation then omits `instance` entirely, including the legacy first-instance fallback.
+   */
+  wholeComponent: boolean;
 }
 
 /** Derive the panel's instance selection from the component + the operator's choice. */
 function panelInstanceSelection(comp: ComponentView, selected: string | undefined): PanelInstanceSelection {
-  if (!hasRealInstances(comp)) return { missing: false };
+  if (selected === WHOLE_COMPONENT_OPTION) return { missing: false, wholeComponent: true };
+  if (!hasRealInstances(comp)) return { missing: false, wholeComponent: false };
   const instances = comp.instances ?? [];
   const instance = selected ?? instances[0]!.instance;
-  return { instance, missing: !instances.some((i) => i.instance === instance) };
+  return {
+    instance,
+    missing: !instances.some((i) => i.instance === instance),
+    wholeComponent: false,
+  };
 }
 
 /**
- * The `instance` arg an invocation sends: the SELECTED instance for instance-scoped
+ * The `instance` arg an invocation sends: the SELECTED instance for instance-addressed
  * widgets of a multi-instance component; the {@link firstInstanceArg} legacy fallback
- * (i.e. no arg) for zero/`main`-instance components; nothing for component scope.
+ * (i.e. no arg) for zero/`main`-instance components; nothing for component scope, and
+ * nothing while "Whole component" is chosen.
  */
 function selectedInstanceArg(
   comp: ComponentView,
   selection: PanelInstanceSelection,
   scoped: boolean,
 ): Record<string, unknown> {
-  if (!scoped) return {};
+  if (!scoped || selection.wholeComponent) return {};
   if (selection.instance !== undefined) return { instance: selection.instance };
   return firstInstanceArg(comp, scoped);
+}
+
+/**
+ * The instance a widget's command results are partitioned by — the selected instance for an
+ * instance-addressed invocation, nothing for a component-addressed one (so a whole-component
+ * result never overwrites a per-instance one).
+ */
+function slotInstanceFor(selection: PanelInstanceSelection, scoped: boolean): string | undefined {
+  return scoped && !selection.wholeComponent ? selection.instance : undefined;
+}
+
+/**
+ * Whether one widget's invocations carry an instance (DESIGN-scoped-commands §2.3): the scope
+ * its bound verbs DECLARE when any of them does, otherwise today's widget-level heuristic.
+ */
+function widgetSendsInstance(
+  manifest: ComponentDescribeManifest | undefined,
+  widget: PanelWidgetDescriptor,
+  selection: PanelInstanceSelection,
+  verbs?: readonly (string | undefined)[],
+): boolean {
+  return scopeSendsInstance(effectiveWidgetScope(manifest, widget, verbs), selection.wholeComponent);
 }
 
 function latestCommand(
@@ -1100,9 +1143,9 @@ function TreeBrowserWidget({
   const readVerb = stringProp(widget, "readVerb");
   const writeVerb = stringProp(widget, "writeVerb");
   const columns = panelColumns(widget["columns"]);
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const scoped = widgetSendsInstance(manifest, widget, selection, [browseVerb, readVerb, writeVerb]);
   const instanceMissing = scoped && selection.missing;
-  const entry = latestCommand(commands, detailKey, browseVerb, scoped ? selection.instance : undefined);
+  const entry = latestCommand(commands, detailKey, browseVerb, slotInstanceFor(selection, scoped));
   const rootRef = stringProp(widget, "rootRef") ?? "root";
   const depth = propNumber(widget, "depth", "defaultDepth") ?? 1;
   const maxRefs = propNumber(widget, "maxRefs");
@@ -1145,7 +1188,7 @@ function TreeBrowserWidget({
         <AddressSpaceResult
           // The selected instance is part of the key: switching instances remounts the
           // tree, resetting its per-widget local UI state (loaded nodes, expansion).
-          key={`${componentKeyId(detailKey)}::${browseVerb ?? "browse"}::${rootRef}::${(scoped ? selection.instance : undefined) ?? ""}`}
+          key={`${componentKeyId(detailKey)}::${browseVerb ?? "browse"}::${rootRef}::${slotInstanceFor(selection, scoped) ?? ""}`}
           entry={entry}
           empty="Load the address-space root to inspect hierarchical refs."
           {...(columns !== undefined ? { columns } : {})}
@@ -1203,9 +1246,9 @@ function SignalGridWidget({
     stringProp(widget, "verb") ??
     "sb/subscriptions";
   const columns = panelColumns(widget["columns"]);
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const scoped = widgetSendsInstance(manifest, widget, selection, [verb]);
   const instanceMissing = scoped && selection.missing;
-  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const entry = latestCommand(commands, detailKey, verb, slotInstanceFor(selection, scoped));
   const availability = commandAvailability(manifest, verb);
   const canLoad = availability.status === "available" && !instanceMissing;
   const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
@@ -1273,16 +1316,16 @@ function StatusDashboardWidget({
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
   const verb = stringProp(widget, "verb");
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const scoped = widgetSendsInstance(manifest, widget, selection, [verb]);
   const instanceMissing = scoped && selection.missing;
   const availability = commandAvailability(manifest, verb);
   const refresh = panelRefresh(widget["refresh"], { allowAuto: true });
   const fields = panelFields(widget);
-  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const entry = latestCommand(commands, detailKey, verb, slotInstanceFor(selection, scoped));
   const canInvoke = verb !== undefined && availability.status === "available" && !instanceMissing;
   const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const instanceKey = scoped ? (selection.instance ?? "") : "";
+  const instanceKey = slotInstanceFor(selection, scoped) ?? "";
 
   const invoke = () => {
     if (canInvoke && verb !== undefined) {
@@ -1416,12 +1459,12 @@ function ActionBarWidget({
   commands: ClientState["commands"];
   onInvoke: InvokeCommand;
 }): React.JSX.Element {
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const scoped = widgetSendsInstance(manifest, widget, selection);
   const instanceMissing = scoped && selection.missing;
   const actions = panelActions(widget);
   const [confirming, setConfirming] = useState<PanelAction | undefined>(undefined);
 
-  const slotInstance = scoped ? selection.instance : undefined;
+  const slotInstance = slotInstanceFor(selection, scoped);
   const statusEntry = latestCommand(commands, detailKey, "sb/status", slotInstance);
   const status = statusEntry?.phase === "ok" ? lifecycleStatus(statusEntry.result) : undefined;
   const lifecyclePending = LIFECYCLE_VERBS.some(
@@ -1547,7 +1590,7 @@ function CommandTableWidget({
   const verb = stringProp(widget, "verb");
   const resultPath = stringProp(widget, "resultPath");
   const columns = panelColumns(widget["columns"]) ?? [];
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  const scoped = widgetSendsInstance(manifest, widget, selection, [verb]);
   const instanceMissing = scoped && selection.missing;
   const availability = commandAvailability(manifest, verb);
   const request = objectRecord(widget["request"]);
@@ -1556,7 +1599,7 @@ function CommandTableWidget({
     [widget, configEntry?.body],
   );
   const [values, setValues] = useState<Record<string, PanelControlValue>>({});
-  const entry = latestCommand(commands, detailKey, verb, scoped ? selection.instance : undefined);
+  const entry = latestCommand(commands, detailKey, verb, slotInstanceFor(selection, scoped));
   const canRun = verb !== undefined && availability.status === "available" && !instanceMissing;
   const gate = capabilityGate(verb, availability, instanceMissing, selection.instance);
   const widgetToken = widget.id ?? "table";
@@ -1776,7 +1819,9 @@ function MetricSeriesWidget({
   selection: PanelInstanceSelection;
   nowServerMs: number;
 }): React.JSX.Element {
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  // No command binding, so no verb declares a scope: the widget-level marker decides, and an
+  // explicit "Whole component" choice widens the filter back to the component-level series.
+  const scoped = widgetSendsInstance(undefined, widget, selection);
   const instanceMissing = scoped && selection.missing;
   const series = arrayProp(widget, "series")
     .map((entry) => objectRecord(entry))
@@ -1864,7 +1909,8 @@ function EventFeedWidget({
   selection: PanelInstanceSelection;
   nowServerMs: number;
 }): React.JSX.Element {
-  const scoped = widget.scope === "instance" || widget["scope"] === "instance";
+  // No command binding (see metricSeries): the widget-level marker decides the instance filter.
+  const scoped = widgetSendsInstance(undefined, widget, selection);
   const instanceMissing = scoped && selection.missing;
   const families = arrayProp(widget, "families").filter((f): f is string => typeof f === "string" && f !== "");
   const limit = clampEventLimit(widget["limit"]);
@@ -2024,12 +2070,6 @@ function DescriptorWidget({
   }
 }
 
-/** Whether a view (or any of its widgets) is instance-scoped — the selector trigger (§3.1). */
-function viewNeedsInstance(view: PanelViewDescriptor): boolean {
-  if (view.scope === "instance") return true;
-  return viewWidgets(view).some((w) => w.scope === "instance" || w["scope"] === "instance");
-}
-
 function DescriptorPanel({
   entry,
   detailKey,
@@ -2079,7 +2119,6 @@ function DescriptorPanel({
   // stays on the component).
   useEffect(() => () => writeInstanceParam(undefined), []);
   const selected = instanceChoice !== undefined && instanceChoice.id === id ? instanceChoice.instance : undefined;
-  const selection = panelInstanceSelection(comp, selected);
   const selectInstance = (instance: string) => {
     setInstanceChoice({ id, instance });
     writeInstanceParam(instance);
@@ -2088,6 +2127,18 @@ function DescriptorPanel({
     orderedViews.find((v) => v.id === selectedView) ??
     orderedViews.find((v) => v.id === defaultView) ??
     orderedViews[0];
+  // The addressing affordances the ACTIVE view needs, derived from its widgets' declared verb
+  // scopes (DESIGN-scoped-commands §2.3) — the selector, and whether it offers "Whole component".
+  const addressing =
+    active !== undefined
+      ? panelViewAddressing(manifest, active)
+      : { needsInstance: false, allowWholeComponent: false };
+  // A "Whole component" choice only survives on a view that offers it; switching to a view whose
+  // verbs require an instance falls back to the per-instance default rather than sending an
+  // addressing that view's verbs reject.
+  const effectiveSelected =
+    selected === WHOLE_COMPONENT_OPTION && !addressing.allowWholeComponent ? undefined : selected;
+  const selection = panelInstanceSelection(comp, effectiveSelected);
 
   if (entry === undefined || (entry.phase === "loading" && manifest === undefined)) {
     return (
@@ -2182,10 +2233,11 @@ function DescriptorPanel({
         </div>
       ) : (
         <>
-          {viewNeedsInstance(active) && selection.instance !== undefined && (
-            // The ONE instance selector shared by every active instance-scoped widget (§3.1).
-            // Component-scoped views never render it; the legacy zero/`main`-instance case has
-            // no selector at all (selection.instance is undefined there).
+          {addressing.needsInstance && (selection.instance !== undefined || selection.wholeComponent) && (
+            // The ONE instance selector shared by every instance-addressed widget in the view
+            // (§3.1). A view whose verbs are all component-scoped never renders it; a `both`
+            // view adds the explicit "Whole component" choice; the legacy zero/`main`-instance
+            // case has no selector at all (selection.instance is undefined there).
             <div className="ec-panel-instance" data-testid="panel-instance-row">
               <label className="ec-dim" htmlFor="panel-instance-selector">
                 Instance
@@ -2194,15 +2246,19 @@ function DescriptorPanel({
                 id="panel-instance-selector"
                 className="ec-log-control"
                 data-testid="panel-instance-selector"
-                value={selection.instance}
+                value={selection.wholeComponent ? WHOLE_COMPONENT_OPTION : selection.instance}
                 onChange={(e) => selectInstance(e.target.value)}
               >
-                {selection.missing && (
+                {addressing.allowWholeComponent && (
+                  <option value={WHOLE_COMPONENT_OPTION}>Whole component</option>
+                )}
+                {selection.missing && selection.instance !== undefined && (
                   <option value={selection.instance}>{selection.instance} (unavailable)</option>
                 )}
                 {(comp.instances ?? []).map((inst) => (
                   <option key={inst.instance} value={inst.instance}>
                     {inst.instance}
+                    {instanceState(inst) !== undefined ? ` · ${instanceStatePresentation(inst).label}` : ""}
                   </option>
                 ))}
               </select>
@@ -2397,10 +2453,13 @@ function HealthTab({
 }
 
 /**
- * The Instances tab — per-instance connectivity from the component's `state.instances[]` (#1c):
- * every configured instance (an OPC UA server, a Modbus slave, a file-replicator source directory)
- * with its connected/disconnected status. The list is config-complete — the library provider
- * reports every configured instance — so it is driven by config + state, never by bus traffic.
+ * The Instances tab — per-instance status from the component's `state.instances[]` (#1c): every
+ * configured instance (an OPC UA server, a Modbus slave, a file-replicator source directory) with
+ * its state. A component that reports the shared keepalive vocabulary (CONNECTING / ONLINE /
+ * BACKOFF / PAUSED, D-SC-7) is rendered in it, and a PAUSED instance is marked expected quiet
+ * rather than a fault; one that reports no state keeps the connected/disconnected badge. The list
+ * is config-complete — the library provider reports every configured instance — so it is driven by
+ * config + state, never by bus traffic.
  */
 function InstancesTab({ instances }: { instances: InstanceStatus[] }): React.JSX.Element {
   if (instances.length === 0) {
@@ -2419,24 +2478,29 @@ function InstancesTab({ instances }: { instances: InstanceStatus[] }): React.JSX
         <span className="ec-slist__k">Instance</span>
         <span className="ec-slist__v ec-dim">status · detail</span>
       </div>
-      {instances.map((inst) => (
-        <div className="ec-slist__r" key={inst.instance} data-testid={`instance-${inst.instance}`}>
-          <span className="ec-slist__k ec-mono">{inst.instance}</span>
-          <span className="ec-slist__v ec-instance-status">
-            <Tag
-              size="sm"
-              type={inst.connected ? "green" : "red"}
-              className="ec-tag"
-              renderIcon={CircleFilled}
-            >
-              {inst.connected ? "connected" : "disconnected"}
-            </Tag>
-            {inst.detail !== undefined && inst.detail !== "" && (
-              <span className="ec-dim ec-mono">{inst.detail}</span>
-            )}
-          </span>
-        </div>
-      ))}
+      {instances.map((inst) => {
+        // The keepalive's own state token when the component reports one (CONNECTING / ONLINE /
+        // BACKOFF / PAUSED), else today's connectivity-only badge.
+        const state = instanceStatePresentation(inst);
+        return (
+          <div className="ec-slist__r" key={inst.instance} data-testid={`instance-${inst.instance}`}>
+            <span className="ec-slist__k ec-mono">{inst.instance}</span>
+            <span className="ec-slist__v ec-instance-status">
+              <Tag size="sm" type={state.tone} className="ec-tag" renderIcon={CircleFilled}>
+                {state.label}
+              </Tag>
+              {state.expectedQuiet && (
+                <span className="ec-dim" data-testid={`instance-quiet-${inst.instance}`}>
+                  expected quiet — paused by an operator
+                </span>
+              )}
+              {inst.detail !== undefined && inst.detail !== "" && (
+                <span className="ec-dim ec-mono">{inst.detail}</span>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

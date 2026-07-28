@@ -9,7 +9,9 @@ import {
   PROTOCOL_VERSION,
   classifyEventSeverity,
   extractSignalSample,
+  instanceState,
   isAlarmingSeverity,
+  isPausedInstance,
   parseClientMessage,
   parseComponentKey,
   splitEventChannel,
@@ -474,5 +476,27 @@ describe("parseComponentKey", () => {
     ["missing component", { device: "d", instance: "i" }],
   ])("returns undefined for %s", (_label, value) => {
     expect(parseComponentKey(value)).toBeUndefined();
+  });
+});
+
+describe("instanceState / isPausedInstance", () => {
+  it("recognizes the shared keepalive vocabulary, case- and whitespace-tolerantly", () => {
+    expect(instanceState({ state: "ONLINE" })).toBe("ONLINE");
+    expect(instanceState({ state: "connecting" })).toBe("CONNECTING");
+    expect(instanceState({ state: " backoff " })).toBe("BACKOFF");
+    expect(instanceState({ state: "Paused" })).toBe("PAUSED");
+  });
+
+  it("ignores an absent or unknown token — consumers fall back to `connected`", () => {
+    expect(instanceState({})).toBeUndefined();
+    expect(instanceState({ state: "" })).toBeUndefined();
+    expect(instanceState({ state: "HIBERNATING" })).toBeUndefined();
+    expect(instanceState({ state: 7 as unknown as string })).toBeUndefined();
+  });
+
+  it("isPausedInstance is true only for PAUSED", () => {
+    expect(isPausedInstance({ state: "PAUSED" })).toBe(true);
+    expect(isPausedInstance({ state: "BACKOFF" })).toBe(false);
+    expect(isPausedInstance({})).toBe(false);
   });
 });

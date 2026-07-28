@@ -339,6 +339,58 @@ describe("ComponentDetailView — the real (data-backed) tabs", () => {
     expect(within(connection).getByText("1 of 2 instances connected")).toBeTruthy();
   });
 
+  it("Health: a paused instance is not counted as a connection fault", () => {
+    const state = clientState(
+      fleetView([
+        deviceView("pack-gw-01", [
+          compView({
+            key: DKEY,
+            instances: [
+              { instance: "filler1", connected: true, state: "ONLINE" },
+              { instance: "kep2", connected: false, state: "PAUSED" },
+            ],
+          }),
+        ]),
+      ]),
+    );
+    renderDetail({ state });
+    const connection = screen.getByTestId("health-connection-state");
+    expect(within(connection).getByText("Connected")).toBeTruthy();
+    expect(within(connection).getByText("1 of 1 instance connected, 1 paused")).toBeTruthy();
+  });
+
+  it("Instances: renders the keepalive state vocabulary, marking PAUSED as expected quiet", () => {
+    const state = clientState(
+      fleetView([
+        deviceView("pack-gw-01", [
+          compView({
+            key: DKEY,
+            instances: [
+              { instance: "filler1", connected: true, state: "ONLINE" },
+              { instance: "kep2", connected: false, state: "CONNECTING" },
+              { instance: "kep3", connected: false, state: "BACKOFF", detail: "retry in 4s" },
+              { instance: "kep4", connected: false, state: "PAUSED" },
+              // Unknown token ⇒ today's connectivity-only rendering, never a crash.
+              { instance: "kep5", connected: true, state: "HIBERNATING" },
+            ],
+          }),
+        ]),
+      ]),
+    );
+    renderDetail({ state });
+    fireEvent.click(screen.getByTestId("tab-instances"));
+    const list = screen.getByTestId("instances-list");
+    expect(within(within(list).getByTestId("instance-filler1")).getByText("online")).toBeTruthy();
+    expect(within(within(list).getByTestId("instance-kep2")).getByText("connecting")).toBeTruthy();
+    expect(within(within(list).getByTestId("instance-kep3")).getByText("backoff")).toBeTruthy();
+    expect(within(within(list).getByTestId("instance-kep3")).getByText("retry in 4s")).toBeTruthy();
+    expect(within(within(list).getByTestId("instance-kep4")).getByText("paused")).toBeTruthy();
+    expect(within(list).getByTestId("instance-quiet-kep4")).toBeTruthy();
+    expect(within(within(list).getByTestId("instance-kep5")).getByText("connected")).toBeTruthy();
+    // Only the paused instance carries the expected-quiet note.
+    expect(within(list).queryByTestId("instance-quiet-kep3")).toBeNull();
+  });
+
   it("Instances: a single-instance (main-only) component shows the no-per-instance-connectivity note", () => {
     renderDetail();
     fireEvent.click(screen.getByTestId("tab-instances"));

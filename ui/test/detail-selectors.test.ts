@@ -9,6 +9,7 @@ import {
   detailSubtitleParts,
   detailUptimeSecs,
   healthChecks,
+  instanceStatePresentation,
 } from "../src/components/detail-selectors";
 import { compView, consoleAlarm, hier, key, runtimeAttrs, T0 } from "./_fixtures";
 
@@ -171,6 +172,64 @@ describe("healthChecks", () => {
     ).toMatchObject({ value: "Disconnected", tone: "err", detail: "0 of 2 instances connected" });
   });
 
+  it("treats PAUSED instances as expected quiet, not a connection fault", () => {
+    const base = { key: key("gw-01", "opcua-adapter") };
+    // A paused instance leaves the ratio, and is reported separately — no fault tone.
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: true, state: "ONLINE" },
+            { instance: "b", connected: false, state: "PAUSED" },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Connected", tone: "ok", detail: "1 of 1 instance connected, 1 paused" });
+    // A component whose every instance is paused reads paused, never disconnected.
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: false, state: "PAUSED" },
+            { instance: "b", connected: false, state: "paused" },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Paused", tone: "unknown", detail: "2 instances deliberately paused" });
+    // A genuinely down instance still faults, even alongside a paused one.
+    expect(
+      connectionStateCheck(
+        compView({
+          ...base,
+          instances: [
+            { instance: "a", connected: false, state: "BACKOFF" },
+            { instance: "b", connected: false, state: "PAUSED" },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Disconnected", tone: "err", detail: "0 of 1 instance connected, 1 paused" });
+  });
+
+  it("keeps connectivity-only aggregation when no instance reports a state", () => {
+    expect(
+      connectionStateCheck(
+        compView({
+          key: key("gw-01", "opcua-adapter"),
+          instances: [
+            { instance: "a", connected: true, state: "SNOOZING" },
+            { instance: "b", connected: false },
+          ],
+        }),
+        undefined,
+      ),
+    ).toMatchObject({ value: "Partially connected", tone: "warn", detail: "1 of 2 instances connected" });
+  });
+
   it("marks connection state / read errors pending for a non-adapter with no attributes", () => {
     const comp = compView({ key: key("gw-01", "batch-runner"), liveness: "FRESH" });
     const checks = healthChecks(comp, undefined, 0);
@@ -221,5 +280,48 @@ describe("attributesFresh (the Health tiles' Live-chit semantics — fresh, not 
 
   it("never fresh with no attribute record at all", () => {
     expect(attributesFresh(undefined, 5, T0)).toBe(false);
+  });
+});
+
+describe("instance state badges (D-SC-8)", () => {
+  it("maps the shared keepalive vocabulary onto a badge + tone", () => {
+    expect(instanceStatePresentation({ instance: "a", connected: true, state: "ONLINE" })).toEqual({
+      label: "online",
+      tone: "green",
+      expectedQuiet: false,
+    });
+    expect(instanceStatePresentation({ instance: "a", connected: false, state: "CONNECTING" })).toEqual({
+      label: "connecting",
+      tone: "blue",
+      expectedQuiet: false,
+    });
+    expect(instanceStatePresentation({ instance: "a", connected: false, state: "BACKOFF" })).toEqual({
+      label: "backoff",
+      tone: "red",
+      expectedQuiet: false,
+    });
+    expect(instanceStatePresentation({ instance: "a", connected: false, state: " paused " })).toEqual({
+      label: "paused",
+      tone: "gray",
+      expectedQuiet: true,
+    });
+  });
+
+  it("falls back to connectivity-only rendering for an absent or unknown state", () => {
+    expect(instanceStatePresentation({ instance: "a", connected: true })).toEqual({
+      label: "connected",
+      tone: "green",
+      expectedQuiet: false,
+    });
+    expect(instanceStatePresentation({ instance: "a", connected: false })).toEqual({
+      label: "disconnected",
+      tone: "red",
+      expectedQuiet: false,
+    });
+    expect(instanceStatePresentation({ instance: "a", connected: true, state: "HIBERNATING" })).toEqual({
+      label: "connected",
+      tone: "green",
+      expectedQuiet: false,
+    });
   });
 });

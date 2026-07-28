@@ -2221,6 +2221,17 @@ fn normalize_instance_status(value: &Value) -> Option<Value> {
     let mut out = Map::new();
     out.insert("instance".to_string(), Value::String(instance.to_string()));
     out.insert("connected".to_string(), Value::Bool(connected));
+    // The instance's own condition token (CONNECTING / ONLINE / BACKOFF / PAUSED, or a
+    // component-specific token) rides through verbatim: it is what lets the console tell a
+    // deliberate pause from a fault. Blank tokens are dropped, matching the library's element.
+    if let Some(state) = obj
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        out.insert("state".to_string(), Value::String(state.to_string()));
+    }
     if let Some(detail) = obj.get("detail").and_then(Value::as_str) {
         out.insert("detail".to_string(), Value::String(detail.to_string()));
     }
@@ -2441,6 +2452,72 @@ mod tests {
             device: "gw-1".to_string(),
             component: "component-a".to_string(),
         }
+    }
+
+    /// The keepalive's per-instance `state` token (D-SC-7) rides through normalization: it is
+    /// what lets the console tell a deliberately PAUSED instance from a fault. Blank tokens and
+    /// unknown types are dropped; `connected`/`detail` keep their existing behavior.
+    #[test]
+    fn instance_status_keeps_the_keepalive_state_token() {
+        let normalized = normalize_instance_status(&json!({
+            "instance": "kep1",
+            "connected": false,
+            "state": "PAUSED",
+            "detail": "paused by operator"
+        }))
+        .unwrap();
+        assert_eq!(
+            normalized,
+            json!({
+                "instance": "kep1",
+                "connected": false,
+                "state": "PAUSED",
+                "detail": "paused by operator"
+            })
+        );
+
+        // A component that reports no state (or a blank/non-string one) keeps the
+        // connectivity-only element — the field is additive on the existing shape.
+        for absent in [json!({ "instance": "kep1", "connected": true }), json!({
+            "instance": "kep1",
+            "connected": true,
+            "state": "   "
+        }), json!({ "instance": "kep1", "connected": true, "state": 7 })] {
+            let normalized = normalize_instance_status(&absent).unwrap();
+            assert_eq!(normalized, json!({ "instance": "kep1", "connected": true }));
+        }
+    }
+
+    /// The state keepalive's `instances[]` reaches the fleet delta with the state token intact.
+    #[test]
+    fn instances_changed_delta_carries_the_state_token() {
+        let mut model = Model::new(ConsoleConfig::default());
+        let outcome = model.ingest(IngressEvent {
+            cls: "state".to_string(),
+            channel: None,
+            identity: identity(),
+            body: json!({
+                "status": "RUNNING",
+                "uptimeSecs": 12,
+                "instances": [
+                    { "instance": "kep1", "connected": true, "state": "ONLINE" },
+                    { "instance": "kep2", "connected": false, "state": "PAUSED" }
+                ]
+            }),
+            tags: None,
+            received_at: 1_000,
+            source_timestamp: None,
+        });
+        let deltas = deltas_of(&outcome);
+        let changed = deltas["deltas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["type"] == "instances-changed")
+            .expect("expected an instances-changed delta");
+        assert_eq!(changed["instances"][0]["state"], "ONLINE");
+        assert_eq!(changed["instances"][1]["state"], "PAUSED");
+        assert_eq!(changed["instances"][1]["connected"], false);
     }
 
     #[test]
