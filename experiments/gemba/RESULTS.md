@@ -1,5 +1,9 @@
 # Gemba feasibility experiment results
 
+**Historical evidence:** the sessions below were run in July 2026. The hosted-app implementation
+has since landed on main, but this record is not a fresh run or a productization sign-off. The
+original branch/date and measured results are retained for traceability.
+
 Date: 2026-07-13  
 Branch: `feat/gemba`  
 Verdict: feasible for separately originated web apps, with protocol, identity, and packaging work

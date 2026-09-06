@@ -1,5 +1,10 @@
 # Gemba feasibility experiments
 
+The hosted-app gateway code is on main, while these applications and their API remain
+experimental. [RESULTS.md](RESULTS.md) records the July 2026 browser/native-TV sessions; those
+results were not rerun during the 2026-09-06 documentation review. Stable app compatibility,
+production identity and TLS/certificate lifecycle remain productization work.
+
 These files exercise the design in `DESIGN.md` without changing or replacing the running Dallas
 edge-console deployment.
 

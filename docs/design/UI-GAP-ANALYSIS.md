@@ -1,7 +1,14 @@
 # Edge Console — UI Gap / Delta Analysis
 
+**Historical review.** This records the earlier TypeScript-server build and its R0–R6 corrective
+slices. The current runtime is `gateway/src/` (Rust). Main now implements Signals, runtime
+attributes, alarms, topology, Settings and component-detail tabs; the broad missing-screen claims
+below are not the current backlog. See the [current documentation](../README.md) and
+`ui/src/App.tsx` for the implemented routes. This record preserves the agreed mock fidelity
+requirements and historical findings; no new browser validation was performed on 2026-09-06.
+
 **Contract:** `docs/mockups-hifi.html` (the signed-off High-Fidelity Carbon prototype).
-**Current build:** `ui/src/**`, `protocol/src/index.ts`, `server/src/**`.
+**Build reviewed at the time:** `ui/src/**`, `protocol/src/index.ts`, `server/src/**`.
 **Purpose:** an honest, exhaustive map of where the implementation drifted from the approved
 mockup, so we can realign deliberately. **Analysis only — no app code changed.**
 

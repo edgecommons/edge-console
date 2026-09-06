@@ -2,6 +2,15 @@
 
 **Version 0.3** · Status: **DESIGN (low-fidelity)** · 2026-07-02
 
+**Implementation status, reviewed 2026-09-06:** this is the original design authority, with its
+dated assumptions preserved below. Main now contains the Rust gateway, live fleet model, six-view
+UI, component-detail config/metrics/logs, descriptor-driven commands/panels, and experimental hosted
+apps. Current API and limitations are in the [documentation index](../README.md). Production
+authentication, command auditing and hosted-app productization remain open. The current bus uses
+protobuf envelopes and optional instance scope (D-U28); use the
+[messaging reference](../reference/messaging-interface.md) for current topics rather than the
+historical examples below. Implementation does not close every accepted design requirement.
+
 > This is a design document, not an implementation. It is deliberately opinionated: because EdgeCommons has
 > **no production installed base yet**, this revision treats the core `edgecommons` libraries as **in scope to change**,
 > and mandates the changes needed to make a single, reliable, site-wide console possible. Every mandated change is

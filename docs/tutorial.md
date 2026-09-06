@@ -5,7 +5,7 @@ watched components go **FRESH → WARN → STALE → OFFLINE**, reviewed a compo
 sent a `ping` command through the bus.
 
 The console is one Rust binary — `edge-console-gateway` — that connects to a **site broker**, subscribes
-the six UNS wildcards, and serves the browser UI over HTTP + WebSocket. To follow along you need a broker
+12 filters covering six UNS classes at both scopes, and serves the browser UI over HTTP + WebSocket. To follow along you need a broker
 with at least one component publishing into it.
 
 ---
@@ -62,7 +62,7 @@ target/release/edge-console-gateway \
   -t site-console
 ```
 
-It logs the six subscribed UNS wildcards, then reports the gateway listening on `0.0.0.0:8443`. (That
+It logs the 12 subscribed UNS filters, then reports the gateway listening on `0.0.0.0:8443`. (That
 config sets `console.ws.bindAddress` to `0.0.0.0`; the default is loopback `127.0.0.1`.)
 
 ---
@@ -103,7 +103,7 @@ The console — not the components — decides when a component is late:
 
 ## 6. Review a config
 
-Go to **Configuration**, pick a component. You see its effective running config with secrets rendered
+Go to **Components**, pick a component and open its **Configuration** tab. You see its effective running config with secrets rendered
 **as redaction** (`"***"` masks, `$secret` refs labelled as vault pointers — never real values) and a
 live "received *N*s ago" stamp. Click **Refresh** to fire a per-device `republish-cfg` broadcast; a
 component whose device-side edgecommons runtime handles the broadcast re-pushes its config and the stamp
@@ -123,7 +123,7 @@ answer in time returns **TIMEOUT**.
 ## 8. Explore the rest
 
 - **Events & Alarms** — the live, newest-first feed; alarms carry an Active/Ack lifecycle (try **Ack**).
-- **Metrics** — schema-free component metrics with latest values and trends.
+- **Component detail → Metrics** — schema-free component metrics with latest values and trends.
 - **Signals** — the data-plane browser, grouped by signal path. Each row is name-led (the canonical
   signal name, with the channel as a mono fallback) and carries the latest value, its data quality (the
   native status code on hover), a trend sparkline, and its receipt freshness over a publish-lag line

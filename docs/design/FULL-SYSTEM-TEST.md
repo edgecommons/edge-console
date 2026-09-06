@@ -1,6 +1,13 @@
 # C7 — Full-system UNS e2e (HOST) runbook
 
-Reusable command sequence for the whole-stack UNS test: device bus + site broker + uns-bridge
+**Retired historical runbook.** This preserves the July 2026 C7 command sequence and evidence
+context. Its checkout paths, Python scaffolding CLI, TypeScript gateway build and topic examples
+precede the current implementation; do not use it as the active validation procedure. Use the
+[Dallas bottling-company harness](https://github.com/edgecommons/bottling-company-test) and
+[current console build guide](../how-to-guides.md#build-the-workspace). No commands below were
+rerun during the 2026-09-06 documentation review.
+
+Historical command sequence for the whole-stack UNS test: device bus + site broker + uns-bridge
 + 2 scaffolded skeletons (TS + Python) + edge-console, verified in a headed browser.
 
 Paths:

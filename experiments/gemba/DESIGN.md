@@ -1,7 +1,9 @@
 # Gemba feasibility experiment specification
 
-Status: experimental; branch `feat/gemba` only. None of the APIs or configuration in this
-directory are a compatibility commitment.
+Status: experimental; the hosted-app implementation is now on main. None of the APIs or
+configuration in this directory are a compatibility commitment. The original `feat/gemba`
+experiment constraints below describe that experiment, not a current merge blocker. See
+[`APP-WEBSOCKET-PROTOCOL.md`](../../docs/design/APP-WEBSOCKET-PROTOCOL.md) for the current app API.
 
 ## Goal
 

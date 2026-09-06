@@ -1,5 +1,13 @@
 # Edge Console — UNS reconciliation & Phase-1 build plan
 
+**Historical implementation/evidence record.** The July 2026 results below describe their recorded
+revisions and infrastructure, not a fresh validation of current main. Later work adds the Rust
+gateway, optional-instance scope, protobuf bus encoding and descriptor panels. Use the
+[current messaging reference](../reference/messaging-interface.md) for the contract and the
+[Dallas harness](https://github.com/edgecommons/bottling-company-test) for current full-system
+validation. Later work does not erase the original acceptance requirements or imply every
+Greengrass/system gate in this record has been rerun.
+
 **Status: reconciliation pass 2026-07-03; Phase-1 build (C0–C7 + the G-S1 library slice) COMPLETE as of 2026-07-05 — the full-system gate ran and passed (HOST → kind), GREENGRASS leg pending the uns-bridge IPC variant.**
 
 > Reconciles `DESIGN.md` v0.3 (2026-07-02) against what has **actually shipped** since:

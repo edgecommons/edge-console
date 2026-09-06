@@ -2,8 +2,10 @@
 
 The Edge Console is your window onto a site. It watches every EdgeCommons component over the
 Unified Namespace, shows health, live data, events and configuration, and lets you send commands —
-all from one browser tab, with no per-component setup. This guide walks each screen, captured live
-from the Dallas bottling-plant test site (3 devices, 12 components).
+all from one browser tab, with no per-component setup. This guide walks each screen using retained
+captures from the Dallas bottling-plant test site. Their 3-device/12-component counts describe that
+capture session, not a fresh validation of the current fixture. The current shell has six navigation
+views; Configuration and Metrics are tabs within component detail.
 
 ## Getting started & the app shell
 
@@ -13,7 +15,7 @@ and port. There is nothing to install; it streams everything live over one WebSo
 on its own if the link drops.
 
 **The frame.** Every screen shares the same shell: the **left rail** is the primary navigation (the
-seven screens below). The **top bar** holds a global **search** (jump to any component, device, or
+six navigation views below). The **top bar** holds a global **search** (jump to any component, device, or
 signal), a **theme toggle** (light/dark), a **notifications bell** that shows the active-alarm count,
 and your **account & role** (here, *operator*). Your role decides which commands you may send — see
 [Settings](#settings).
@@ -43,7 +45,7 @@ tiles over a fleet table grouped by device.
 <figcaption style="text-align:center;font-size:.85em;color:var(--sl-color-gray-3);margin-top:.5rem;font-style:italic">Overview, live against the Dallas plant — 12/12 components healthy across 3 devices.</figcaption>
 </figure>
 
-1. **Navigation rail** — the seven screens; the current one is highlighted.
+1. **Navigation rail** — the six navigation views; the current one is highlighted.
 2. **Site summary + link state** — device/component counts, plus **WS Live** and **Bus connected** confirming the stream.
 3. **Site health** — the ring shows healthy vs total; green means every component is reporting on time.
 4. **Active alerts** — count of open alarms (`0` here). Click through to Events & Alarms.

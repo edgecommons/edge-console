@@ -11,11 +11,11 @@ see [data-types.md](data-types.md); for the model, see [explanation.md](../expla
   absent ⇒ component-scoped. Component-level messages (`state`/`cfg`/`metric` and the `cmd` inbox) omit it,
   so their topics are `ecv1/{device}/{component}/{class}`.
 
-## What the console consumes: six class wildcards
+## What the console consumes: six classes at two scopes
 
 The console has **one** connection — the site broker — and subscribes the **six consumer classes**. Because
 the instance token is optional (D-U28), each class is subscribed at **both scopes** — component
-`ecv1/+/+/{class}` and instance `ecv1/+/+/+/{class}` — built via `uns().filter_scoped(cls, UnsScope.all(),
+`ecv1/+/+/{class}` and instance `ecv1/+/+/+/{class}` — built via `uns().filter_scoped(cls, &UnsScope::all(),
 include_instance)` for `include_instance` of both `false` and `true`. This is its entire read surface; it
 needs no per-component topic templates.
 
@@ -28,7 +28,8 @@ needs no per-component topic templates.
 | `data` | `ecv1/+/+/data/#` · `ecv1/+/+/+/data/#` | The data plane → the Signals screen (latest value + quality + trend). |
 | `log` | `ecv1/+/+/log/#` · `ecv1/+/+/+/log/#` | Component log tails. The gateway normalizes `edgecommons.log.v1` records into the Components-page Logs tab. |
 
-`cmd` is **published, never subscribed**, and `app` is not consumed.
+The fleet ingress does not subscribe to `cmd` or `app`. The console's own library runtime still
+owns its component command inbox, request/reply subscriptions and reserved-class publishers.
 
 The Logs tab requires components to publish the core log bus (`logging.publish.enabled: true`). If a
 component only writes local stdout/files and never emits `log/{level}` records, the console has no log
@@ -36,14 +37,16 @@ records to display for it.
 
 ## Envelope & identity
 
-Normal messages use the EdgeCommons protobuf envelope whose diagnostic JSON shape is
+Normal bus messages use protobuf bytes. The human-readable JSON projection of the envelope is
 `{header, identity, tags, body}`. The console attributes **every** message by its top-level
 **`identity`** element — never the topic:
+
+The following is an identity excerpt from that diagnostic projection, not a JSON bus payload:
 
 ```jsonc
 "identity": {
   "hier": [ { "level": "site", "value": "dallas" }, { "level": "device", "value": "gw-01" } ],
-  "path": "dallas/gw-01", "component": "ModbusAdapter", "instance": "plc1"
+  "path": "dallas/gw-01", "component": "modbus-adapter", "instance": "plc1"
 }
 ```
 
@@ -66,8 +69,8 @@ The `uns-bridge` Last Will is published by the **broker** when the bridge connec
 is still a normal EdgeCommons protobuf `state` envelope from the bridge identity:
 
 ```text
-topic:   ecv1/{device}/uns-bridge/{instance}/state
-body:    {"status":"UNREACHABLE"}
+topic:   ecv1/{device}/uns-bridge/state
+decoded body: {"status":"UNREACHABLE"}
 ```
 
 For this bridge `state` envelope, `status === "UNREACHABLE"` marks the **whole device** UNREACHABLE with
@@ -79,7 +82,8 @@ folds it into the model.
 ### As a component (library-owned)
 
 The console is itself `com.mbreissi.edgecommons.EdgeConsole`, so the library publishes its **own** `state`
-keepalive, `metric` health, and `cfg` on `main` — visible to *another* console. These are the standard
+keepalive, `metric` health, and `cfg` at component scope, without an instance token — visible to
+*another* console. These are the standard
 reserved classes; the console never hand-addresses them.
 
 ### The per-device republish broadcast (late-join rehydration)
@@ -164,34 +168,37 @@ plus `UNAVAILABLE` when no command seam is wired). See
 
 ### Built-in verbs
 
-Every edgecommons component answers three universal built-ins, which the console offers on all components:
+The console provides generic controls and requests the component's descriptor through core commands:
 
 | Verb | Result (typical) |
 |------|------------------|
 | `ping` | `{ status, uptimeSecs }` |
 | `get-configuration` | the component's effective configuration |
 | `reload-config` | `{ reloaded: true }` (or a `RELOAD_FAILED`/`NO_CONFIG` error) |
+| `describe` | the component's descriptor, including advertised commands and panels |
 
-A component's **custom** verbs cannot be enumerated (the console does not consume a `describe` manifest),
-so the UI offers the built-ins plus a generic *verb + args* form.
+The gateway normalizes the `describe` manifest and the UI renders advertised command capabilities,
+argument forms and panels. A missing, denied or malformed descriptor produces an unavailable result;
+generic component views remain usable. Instance arguments follow each verb's declared scope.
 
 ## Reserved classes
 
 `state`/`cfg`/`metric`/`log` are library-owned **reserved** classes — a normal component publish to them
-is rejected. The console only ever *reads* them, and only ever *mints* the `_bcast … /cmd/republish-*`
-broadcasts and the per-component `…/cmd/{verb}` command requests, always through the library's
+is rejected. The console consumes them and lets its library publish its own reserved-class records.
+Its application writes are `_bcast … /cmd/republish-*` broadcasts, per-component
+`…/cmd/{verb}` command requests and the clock-fault event described above, through the library's
 `uns()`/`messaging()` facades — never a hand-assembled topic string.
 
 ## Subscription mechanics
 
 | Property | Value |
 |----------|-------|
-| Filters | the six `uns().filter(cls, UnsScope.all())` wildcards |
+| Filters | 12 `uns().filter_scoped(cls, &UnsScope::all(), include_instance)` filters: six classes × two scopes; a configured root is included by the builder |
 | Dispatch | serial per class (`concurrency = 1`) — ordered folds into the model |
 | Per-subscription queue bound | 256 messages |
-| Shutdown | every filter is unsubscribed (idempotent) — the bus is always left clean |
+| Shutdown | the component's core runtime owns messaging-provider teardown |
 
-`subscribedFilters()` exposes the active filters for diagnostics; the startup log prints them
+`start_ingress` returns the installed filters; the startup log prints them
 (`edge-console ingress subscribed: …`).
 
 ## Security posture

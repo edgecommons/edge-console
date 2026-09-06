@@ -9,8 +9,8 @@ this component's own detail.
 
 The site's **sole browser↔bus bridge**: browsers speak HTTP + WebSocket to the console; only the
 console speaks MQTT/the Unified Namespace (UNS). It attaches to **one** connection — the site
-broker — subscribes the six consumer-class wildcards
-(`ecv1/+/+/+/{state,cfg,evt,metric,data,log}[/...]`), and needs zero per-component knowledge to
+broker — subscribes six consumer classes at both component and instance scope (12 filters,
+with a configured root when present), and needs zero per-component knowledge to
 render the whole fleet: edge health, config review, events/alarms, metrics, per-component logs,
 signals, and an RBAC-gated command write path.
 
@@ -56,13 +56,12 @@ items apply — no `sb/*` command surface, `southbound_health` metric, panel *re
 device seam (the console is the *consumer* of the adapter panel trio, not a producer of one; that
 compatibility is already met per the issue).
 
-**Landed now** (docs/governance only, `feat/baseline-adoption`): this file, `CLAUDE.md`,
+**On main:** this file, `CLAUDE.md`,
 `.github/workflows/deploy-docs.yml`, and `docs/reference/metrics.md`.
 
-**Deliberately deferred**, pending the user's active `feat/gemba` branch landing on `main` (its
-single commit mixes a breaking UNS topic adoption with unfinished work that cannot be cherry-picked
-apart; touching `gateway/Cargo.toml`, CI, or `.gitignore` now would collide with it at rebase
-time) — to be run as this repo's own baseline leg on a clean `main` once gemba merges:
+**Remaining code work**, checked against main `9cd8760` on 2026-09-06. Hosted apps and the
+optional-instance UNS adoption are already on main; the former `feat/gemba` dependency is no
+longer a blocker. These items are not completed by the documentation health review:
 
 - Gateway core dependency: git `rev=` pin + gitignored `.cargo/config.toml` `[patch]` sibling
   override, replacing the floating path dependency (issue P0-1).
@@ -79,9 +78,12 @@ time) — to be run as this repo's own baseline leg on a clean `main` once gemba
   describe-manifest rendering (P2-9).
 - License metadata reconciliation to BUSL-1.1 across every manifest (tracked separately as issue
   #3; `Cargo.toml`/`package.json` are left untouched by the docs-only slice).
-- `ui/package.json`'s stale slice-history `description` → present-tense rewrite (P2-11) — left
-  alone now because `package.json` is a likely `feat/gemba` collision point, not because it's out
-  of scope.
+- `ui/package.json`'s stale slice-history `description` → present-tense rewrite (P2-11).
+
+Production authentication, TLS termination and command auditing also remain deployment/product
+work. The default role resolver assigns one configured role to every connection; it does not
+authenticate a user. The hosted-app WS API is implemented but remains experimental; use
+`docs/design/APP-WEBSOCKET-PROTOCOL.md` for its separate contract and limits.
 
 ## Org conventions this repo follows
 
@@ -92,6 +94,10 @@ time) — to be run as this repo's own baseline leg on a clean `main` once gemba
   hand-assembled topic string, on either the consume or the publish side.
 - The console never publishes to the reserved `state`/`cfg`/`metric`/`log` classes itself except
   through the library's own heartbeat/config machinery (it is a component too); its own writes are
-  the `_bcast` republish broadcasts and per-component `cmd` requests.
+  the `_bcast` republish broadcasts, per-component `cmd` requests, and application events emitted
+  through the library facades.
 - Runtime artifacts (vaults, parameter caches, generated streams, TLS certs, logs, build output,
   local broker state) stay out of Git.
+
+Use direct current-file reads and Git history for grounding. CodeGraph and Graphify are disabled
+for this workspace; retained indexes are not current evidence.
