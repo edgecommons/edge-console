@@ -3,6 +3,13 @@
 Status: implementation design
 Date: 2026-07-08
 
+**Current implementation note (2026-09-06):** main includes the `describe` request/normalization
+path and descriptor-driven command and panel rendering (`gateway/src/command.rs`,
+`ui/src/components/`). This document remains the design contract; it is not evidence that every
+component advertises every widget or verb. Use the [messaging reference](../reference/messaging-interface.md)
+and [browser data types](../reference/data-types.md) for the current interfaces. Historical test
+counts below have not been rerun by this documentation review.
+
 ## Goal
 
 Components must be able to advertise their own component-detail panel views over the EdgeCommons

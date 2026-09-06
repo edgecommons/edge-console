@@ -2,8 +2,9 @@
 
 The **EdgeCommons Edge Console**: an edge-deployed, real-time web UI to **monitor and
 command** every [edgecommons](https://github.com/edgecommons/edgecommons) component on a site —
-and the site's **sole browser↔bus bridge** (browsers speak HTTPS+WS to the console; only the
-console speaks MQTT/UNS). It attaches to the **site broker** (the aggregation point every
+and the site's **sole browser↔bus bridge** (browsers speak HTTP+WebSocket to the console, with
+HTTPS/WSS supplied by front-end TLS termination; only the console speaks MQTT/UNS). It attaches
+to the **site broker** (the aggregation point every
 device's [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into), consumes the
 Unified Namespace (`ecv1/{device}/{component}[/{instance}]/{class}[/channel]`, the instance token
 optional), and needs **zero per-component knowledge**: the six consumer classes, each subscribed at
@@ -14,14 +15,29 @@ and **config review** (every component's effective, redacted config from its `cf
 announcements), alongside events, metrics, per-component logs, signals, and an RBAC-gated
 command surface.
 
-The console runs as one Rust binary, `edge-console-gateway`: a bus ingress over six UNS
-wildcards, a unified in-memory fleet model with console-side miss-detection, an HTTP + WebSocket
-gateway that fans a snapshot-then-deltas stream to browsers, and a Carbon/React UI. It serves an
+The console runs as one Rust binary, `edge-console-gateway`: a bus ingress over 12 UNS
+filters for six classes at two scopes, a unified in-memory fleet model with console-side
+miss-detection, an HTTP + WebSocket gateway that fans a snapshot-then-deltas stream to browsers,
+and a Carbon/React UI. It serves an
 edge-health Overview, config review, an events feed, a metrics table, per-component logs, and an
 RBAC-gated command write path — all fed live over one WebSocket. The command write path is
 RBAC-enforced; connections are assigned the configured default role through a pluggable resolver
 at the WS upgrade, and the read path (fleet snapshot + live stream) is unauthenticated (see
 "The WS gateway").
+
+## Current status
+
+The main implementation reviewed on 2026-09-06 (`9cd8760`) includes the Rust gateway, six
+navigation views (Overview, Components, Site Topology, Events & Alarms, Signals and Settings),
+component detail tabs for configuration, metrics, logs and descriptor-driven commands, and the
+experimental hosted-app API. Browser WS v7 and hosted-app WS v1 use native JSON frames; bus
+envelopes use protobuf bytes. JSON envelope examples are diagnostic projections of that wire data.
+
+Authentication beyond the configured default role, command auditing, and production hosted-app
+authentication/TLS lifecycle remain open. CI builds and tests the gateway/protocol/UI, but does
+not enforce the UI coverage command or matching Rust/protocol coverage gates. See
+[AGENTS.md](AGENTS.md#baseline-adoption-status-issue-4) for the remaining dependency, CI and
+packaging work. Historical test results in design/experiment records were not rerun by this review.
 
 ## Workspace layout
 
@@ -39,17 +55,22 @@ at the WS upgrade, and the read path (fleet snapshot + live stream) is unauthent
 in-cluster broker) or, on a **single edge device with no site broker**, the device-local
 Greengrass IPC bus (built with the gateway's `greengrass` feature and shipped as a Greengrass
 component via the repo-root `recipe.yaml` — see [docs/how-to-guides.md](docs/how-to-guides.md#deploy-on-a-single-device-over-greengrass-ipc)).
-Through it, the **ingress** subscribes the six consumer-class wildcards, built via the library
-(`gg.uns().filter(cls, UnsScope.all())`, never by hand):
+Through it, the **ingress** subscribes six classes at both scopes, built via the Rust library's
+`filter_scoped` with `UnsScope::all()` and each scope flag:
 
 ```text
+ecv1/+/+/state      ecv1/+/+/cfg        ecv1/+/+/evt/#
+ecv1/+/+/metric/#   ecv1/+/+/data/#     ecv1/+/+/log/#
 ecv1/+/+/+/state    ecv1/+/+/+/cfg      ecv1/+/+/+/evt/#
 ecv1/+/+/+/metric/# ecv1/+/+/+/data/#   ecv1/+/+/+/log/#
 ```
 
+A configured UNS root is inserted after `ecv1`. The optional `app` class is not part of this
+console ingress subscription set.
+
 Identity always comes from the envelope's top-level `identity` element. The bridge's Last
 Will is a broker-published protobuf `state` envelope from `uns-bridge` with
-`status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/{instance}/state`; the model treats
+`status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/state`; the model treats
 that envelope as whole-device UNREACHABLE containment. Raw payloads are not normal UNS data
 and are dropped; `tags._relay` (the bridge hop tag) is cached but never used for business
 logic.
@@ -192,7 +213,8 @@ events, metrics, and logs families:
   `$secret` refs are vault pointers) and registers per-connection interest, so every
   later `cfg` arrival for that key is pushed unprompted. `refresh-config{device}`
   fires the per-device `_bcast` `republish-cfg` broadcast (fire-and-forget; absence
-  is silent until the device-side edgecommons S1 listener lands). The view
+  is silent when the device cannot answer). The library listener is implemented in all four
+  languages. The view
   (`ui/src/configreview/`) is the hi-fi's 340 px picker + Structured/Raw-JSON detail,
   with redaction rendered *as* redaction — closes priority #2.
 - **Events** — subscribe/stream (events are notifications, not

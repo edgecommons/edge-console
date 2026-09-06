@@ -4,7 +4,7 @@
 [edgecommons](https://github.com/edgecommons/edgecommons) site. It **monitors and commands** every
 component on the site — and it is the site's **sole browser↔bus bridge**: browsers speak HTTP + WebSocket
 to the console, and only the console speaks MQTT / the Unified Namespace (UNS). It attaches to **one**
-bus, subscribes six UNS class wildcards, and needs **zero per-component knowledge** to render the whole
+bus, subscribes six UNS classes at component and instance scope (12 filters), and needs **zero per-component knowledge** to render the whole
 fleet. That one bus is either the *site broker* — the aggregation point every device's
 [`uns-bridge`](https://github.com/edgecommons/uns-bridge) relays into — or, on a **single edge device with
 no site broker**, the device-local Greengrass IPC bus (see
@@ -15,7 +15,7 @@ same way as everything else — HOST, Greengrass, or Kubernetes — and the libr
 messaging, logging, metrics, state keepalive and graceful shutdown. The console adds the fleet model,
 the WebSocket gateway, the command gateway, and an IBM **Carbon / React** UI on top.
 
-Beyond its own operator UI, the console can **host additional applications** — purpose-built line
+Beyond its own operator UI, the console's experimental app API can **host additional applications** — purpose-built line
 dashboards, television wall boards, native TV clients — each served at `/apps/{id}/`, fed from the same
 fleet model over a rate-limited application WebSocket, and scoped by its own origins, roles, and data
 capabilities. See [Explanation → Hosting additional applications](explanation.md#hosting-additional-applications),
@@ -29,7 +29,7 @@ capabilities. See [Explanation → Hosting additional applications](explanation.
 | **[Sample configurations](sample-configurations.md)** | copy a complete, runnable config for HOST / self-contained / Kubernetes / tuned deployments |
 | **[Reference — Configuration](reference/configuration.md)** | look up every `component.global.console` option and its default |
 | **[Reference — Data types](reference/data-types.md)** | look up the browser↔console **WebSocket protocol** — every frame, the snapshot/delta shapes, the liveness enum |
-| **[Reference — Messaging interface](reference/messaging-interface.md)** | look up the console↔bus **UNS interface** — the six wildcards it consumes, the LWT path, and the command write path |
+| **[Reference — Messaging interface](reference/messaging-interface.md)** | look up the console↔bus **UNS interface** — the 12 filters it consumes, the LWT path, and the command write path |
 | **[Reference — Metrics](reference/metrics.md)** | look up what the console emits about itself, what it consumes from the fleet, and its own self-vitals |
 | **[Explanation](explanation.md)** | understand how it works and why — the single bridge, the retain substitute, console-side miss-detection, the two planes |
 
@@ -54,9 +54,9 @@ screens, all fed live from one WebSocket connection:
 | **Overview** (Edge health) | fleet-health rollup, active-alarm rollup, the console's own bus throughput + self vitals, and a fleet table dynamically grouped by each component's identity hierarchy |
 | **Components** (+ Detail) | a navigable identity tree and per-component detail (Health / Metrics / Instances / Configuration / Events / Logs tabs) |
 | **Site Topology** | a derived connectivity graph — cloud/northbound → site bus → components → field/southbound |
-| **Configuration** | a component picker beside its effective, source-redacted running config (Structured / Raw JSON), live, with a Refresh |
+| **Component detail → Configuration** | the selected component's effective, source-redacted running config (Structured / Raw JSON), live, with a Refresh |
 | **Events & Alarms** | the merged, newest-first alarm + event feed with a real Active/Ack/Contained alarm lifecycle |
-| **Metrics** | the generic UNS `metric` stream as latest values and trend sparklines |
+| **Component detail → Metrics** | the generic UNS `metric` stream as latest values and trend sparklines |
 | **Signals** | a data-plane browser over the UNS `data` class, grouped by signal path — name-led rows with latest value, quality, trend sparkline, receipt freshness + publish lag; quality / device / component filters and a per-row detail expansion |
 | **Settings** | the console's own effective policy (RBAC, connection, staleness ladder, command deadlines, retention caps), read-only |
 
@@ -76,7 +76,12 @@ The console surfaces each of these in the product as well as here:
   publish a descriptor still shows only the generic tabs. Custom verbs and per-signal engineering
   units/limits remain descriptor/component responsibilities.
 - **Logs require bus-published records.** The Logs tab reads the reserved UNS `log` class; a component
-  must enable `logging.publish` (or otherwise publish `edgecommons.log.v1`) for records to appear.
+  must enable the library's `logging.publish` path for records to appear. Normal component publishes
+  cannot write to that reserved class.
+- **Hosted-app access is experimental.** Origin, role and capability checks are implemented; these
+  checks do not authenticate a user, and client-side device filtering is not an authorization boundary.
+- **Command auditing is not implemented.** RBAC decisions and command replies do not form a durable
+  operator audit trail.
 
 ## Audience
 

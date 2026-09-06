@@ -15,7 +15,7 @@ npm install
 npm run build        # protocol -> ui -> Rust edge-console-gateway
 cargo test -p edge-console-gateway  # gateway unit suite (injected clock, fake bus — no live IO)
 npm test             # protocol + ui unit suites (fake socket, injected clock — no live IO)
-npm run coverage     # vitest v8 coverage over protocol + ui (the ecosystem gate)
+npm run coverage     # UI coverage only; Rust/protocol and CI coverage enforcement remain open
 npm run lint         # eslint (flat config) over the whole workspace
 ```
 
@@ -70,7 +70,7 @@ static files on the **same** origin as the WebSocket — one process, no sidecar
 
 ```jsonc
 "component": { "global": { "console": {
-  "ws": { "port": 8443, "bindAddress": "0.0.0.0", "webRoot": "../ui/dist" }
+  "ws": { "port": 8443, "bindAddress": "0.0.0.0", "webRoot": "ui/dist" }
 } } }
 ```
 
@@ -128,8 +128,9 @@ to a whole family and picks out the device it cares about). The application wire
 still evolving; coordinate the current frame contract with the console team rather than treating it as a
 frozen public interface.
 
-- **Each app is isolated by origin.** The application WebSocket requires an **exact** `Origin` match (no
-  same-origin shortcut, no header-less clients) so one hosted app's page cannot open another's socket.
+- **Each app has an origin allowlist.** The application WebSocket requires an **exact** `Origin` match
+  (no same-origin shortcut, no header-less clients). Apps sharing an allowed origin are not isolated
+  from each other by their path; native clients can supply the header themselves.
 - **Roles gate the socket too.** `allowedRoles` filters the connection's resolved role (which is
   `rbac.defaultRole` today, since the console resolves no principal). A read-only board should sit under a
   `viewer`-style role.
@@ -312,9 +313,9 @@ lagged clients resynchronize when they fall behind it.
 | Browse the site as a tree and drill into one component | **Components** → a leaf |
 | See a component's Health / Metrics / Instances / effective Config / Events / Logs | **Components** detail tabs |
 | See the connectivity graph (who talks to what) | **Site Topology** |
-| Read a component's effective, redacted running config | **Configuration** (pick + Structured/Raw JSON + Refresh) |
+| Read a component's effective, redacted running config | **Components** → select a component → **Configuration** (Structured/Raw JSON + Refresh) |
 | Triage alarms with a real Ack lifecycle | **Events & Alarms** (Ack an active alarm) |
-| Browse schema-free component metrics | **Metrics** |
+| Browse schema-free component metrics | **Components** → select a component → **Metrics** |
 | Browse live telemetry values + trends | **Signals** (grouped by signal path; filter by quality / device / component) |
 | See the console's own policy | **Settings** (read-only) |
 
@@ -326,10 +327,10 @@ indicator** shows the connection's resolved RBAC role.
 
 ## Command a component from the UI
 
-Open **Overview** (or **Component Detail**) and expand a component's controls. The three universal
-built-in verbs — **ping**, **get-configuration**, **reload-config** — are offered on every component; a
-generic *verb + args* form covers anything else the component answers (the console does not discover a
-component's custom verbs). The result (or a coded error / timeout / `FORBIDDEN`) surfaces in a
+Open **Overview** (or **Component Detail**) and expand a component's controls. Generic controls offer
+**ping**, **get-configuration** and **reload-config**. Component Detail also requests **describe** and
+renders the component's advertised command capabilities and argument forms; custom actions depend on
+that manifest and the connection's role. The result (or a coded error / timeout / `FORBIDDEN`) surfaces in a
 toast. Under the hood the gateway issues one `messaging.request()` to the component's `cmd` inbox and the
 `uns-bridge` rewrites `reply_to` so the site→device round-trip is transparent — see
 [reference — messaging interface](reference/messaging-interface.md#the-command-write-path).
@@ -339,7 +340,7 @@ toast. Under the hood the gateway issues one `messaging.request()` to the compon
 ## Trigger a config re-announce (late join)
 
 A component that started **before** the console cannot be asked for its current `cfg`/`state` through
-retain (the platform uses no broker retain). On **Configuration**, **Refresh** fires a per-device
+retain (the platform uses no broker retain). On a component's **Configuration** tab, **Refresh** fires a per-device
 `republish-cfg` broadcast on the bus asking every component on that device to re-push. It is
 fire-and-forget: a component re-pushes only if its device-side edgecommons runtime handles the `_bcast`
 broadcast. The periodic `state` keepalive reconverges liveness within one interval regardless; the `cfg`

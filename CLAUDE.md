@@ -22,8 +22,9 @@ shared with every agent tool. It is imported here in full:
 - **TS side needs no sibling build.** Neither `ui/` nor `protocol/` depends on
   `@edgecommons/edgecommons` directly (that dependency lives only in the Rust gateway now), so a
   plain `npm install` at the repo root is enough.
-- **Rust build on Windows** uses the installed MSVC Build Tools 2026 toolchain (native `cargo
-  build`, no WSL needed for this repo — it has no Greengrass-IPC-only feature).
+- **Rust build on Windows** uses the installed MSVC Build Tools 2026 toolchain for ordinary HOST
+  builds. The optional `greengrass` feature uses the Linux-only Greengrass SDK; build and validate
+  that feature on WSL/Linux and use the lab for deployed IPC regression.
 - `cargo test` (gateway) and `npm test` (protocol + ui) are the two local suites; `npm run
   coverage` (ui only, today) exercises the vitest coverage thresholds already configured in
   `ui/vitest.config.ts`.

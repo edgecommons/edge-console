@@ -19,7 +19,7 @@ flowchart LR
   subgraph Console["edge-console (one Rust process, one site)"]
     WS[WS session loop<br/>HTTP + WebSocket]
     FM[Model<br/>unified in-memory state]
-    BI[Ingress<br/>6 UNS wildcards]
+    BI[Ingress<br/>12 filters: 6 classes, 2 scopes]
     CG[CommandGateway<br/>RBAC -> request/reply]
   end
   subgraph Bus["Site UNS broker"]
@@ -53,9 +53,11 @@ Every edgecommons topic is `ecv1/{device}/{component}[/{instance}]/{class}[/chan
 is optional, so a topic is component-scoped when it is absent and instance-scoped when it is present. The
 console consumes the **six consumer classes**, each at **both scopes** (component `ecv1/+/+/{class}` and
 instance `ecv1/+/+/+/{class}`) — the entire subscription surface, built through the
-library's `uns().filter()` (never a hand-assembled string):
+library's `uns().filter_scoped()` (never a hand-assembled string):
 
 ```text
+ecv1/+/+/state      ecv1/+/+/cfg        ecv1/+/+/evt/#
+ecv1/+/+/metric/#   ecv1/+/+/data/#     ecv1/+/+/log/#
 ecv1/+/+/+/state    ecv1/+/+/+/cfg      ecv1/+/+/+/evt/#
 ecv1/+/+/+/metric/# ecv1/+/+/+/data/#   ecv1/+/+/+/log/#
 ```
@@ -63,7 +65,7 @@ ecv1/+/+/+/metric/# ecv1/+/+/+/data/#   ecv1/+/+/+/log/#
 **Identity always comes from the envelope's top-level `identity` element**, never the topic — the device
 is the last hierarchy level, and grouping/routing never parse the body or the topic string. The
 `uns-bridge` Last Will is broker-published, but its payload is still a protobuf `state` envelope from
-the bridge identity with `status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/{instance}/state`. That
+the bridge identity with `status:"UNREACHABLE"` on `ecv1/{device}/uns-bridge/state`. That
 envelope marks the whole device UNREACHABLE. Raw messages are not normal UNS data and are dropped.
 
 ## The retain substitute: a timestamped last-known-value cache
@@ -163,9 +165,10 @@ The console's write surface is `invoke-command`. The flow is deliberately narrow
    verbatim, or a console-synthesized code (`TIMEOUT`/`REQUEST_FAILED`/`INVALID_TARGET`/`MALFORMED_REPLY`).
 
 Every per-verb deadline is clamped to the `uns-bridge` reply-map TTL (the paired-knob rule — a deadline
-that outlived the reply path would leak). The three universal built-ins — `ping`, `reload-config`,
-`get-configuration` — are offered on every component; the console does not discover a component's *custom*
-verbs.
+that outlived the reply path would leak). Generic controls offer `ping`, `reload-config` and
+`get-configuration`. The gateway also requests `describe`, normalizes the component's manifest and
+exposes its declared commands and panels. A component without a usable manifest retains the generic
+views; custom verbs, instance scope and argument forms depend on the advertised descriptor.
 
 ## The UI: dynamic and hierarchy-driven
 
@@ -201,7 +204,7 @@ adds is a way to run several such apps side by side without letting one become a
   gateway origin, the application WebSocket is gated on an **exact-origin allowlist** per app — stricter
   than the operator `/ws`, which permits same-origin and header-less clients. An app declared with the
   origin `https://line-1-tv.example.internal` can be opened only by a client presenting exactly that
-  `Origin`; one app's page cannot select another app's socket. A **native** client (which is not a
+  `Origin`. Apps sharing that origin are not isolated from each other by a URL path. A **native** client (which is not a
   browser and so supplies its own `Origin`) is admitted the same way: it sends the registered origin
   string and is otherwise indistinguishable from a browser app to the gateway.
 - **Observe, never command.** A hosted app subscribes to the data families it was granted — any of
@@ -212,8 +215,11 @@ adds is a way to run several such apps side by side without letting one become a
   WebSocket has no write path, so a wall display or a shared kiosk can render the fleet without being able
   to act on it.
 
-The same fleet model that drives the operator UI thus drives every hosted board, at a cadence a passive
-television can sustain, with each app's reach bounded by config rather than by trust in the network.
+The same fleet model drives the operator UI and hosted boards. This app API remains experimental:
+capabilities bound data families, while device filtering happens in the client and grants no narrower
+authorization. Origin checks do not authenticate native clients or distinguish browser apps sharing
+an allowed origin. See the [application protocol](https://github.com/edgecommons/edge-console/blob/main/docs/design/APP-WEBSOCKET-PROTOCOL.md) for its native
+JSON frames, bounded queues and drop reporting.
 
 ## A note on security
 

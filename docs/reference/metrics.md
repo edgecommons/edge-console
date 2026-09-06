@@ -16,7 +16,7 @@ every edgecommons component, its library-owned heartbeat publishes the system-me
 (`sys`) on the reserved `metric` class each `heartbeat.intervalSecs` tick:
 
 ```text
-ecv1/{own-device}/edge-console/main/metric/sys
+ecv1/{own-device}/edge-console/metric/sys
 ```
 
 | Measure | Unit | Purpose |
@@ -38,12 +38,13 @@ view, which is a separate, browser-only path.
 
 ## What the console consumes
 
-Per [messaging-interface.md](messaging-interface.md#what-the-console-consumes-six-class-wildcards),
-the console subscribes the fleet-wide `metric` wildcard (`ecv1/+/+/+/metric/#`) and keeps a bounded
+Per [messaging-interface.md](messaging-interface.md#what-the-console-consumes-six-classes-at-two-scopes),
+the console subscribes both fleet-wide `metric` filters (`ecv1/+/+/metric/#` and
+`ecv1/+/+/+/metric/#`) and keeps a bounded
 series per `(component, instance, metric, measure)`, capped by
 [`component.global.console.metrics`](configuration.md#componentglobalconsolemetrics--the-metric-surface-bounds)
 (`maxSeriesPoints` per series, `maxSeries` overall; overflow is dropped and counted, never evicts
-existing series). This is the raw feed behind the **Metrics** screen and the WebSocket
+existing series). This is the raw feed behind the component detail **Metrics** tab and the WebSocket
 `metrics`/`metric` frames ([data-types.md](data-types.md#metrics--metricseriessnapshot--metricseriesupdate)) —
 any component's any named metric, not just `sys`.
 
